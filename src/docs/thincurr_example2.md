@@ -51,7 +51,7 @@ ToDo: Describe current potential "holes"
 \endverbatim
 
 **XML global settings** (`oft_in.xml`)
-\verbatim
+```xml
 <oft>
   <thincurr>
     <eta>1.257E-5</eta>
@@ -63,7 +63,7 @@ ToDo: Describe current potential "holes"
     </icoils>
   </thincurr>
 </oft>
-\endverbatim
+```
 
 **Coil current waveform file** (`curr.drive`)
 \verbatim
@@ -82,4 +82,4 @@ Once complete you can now generate VisIt files to visualize the solution as abov
 
 Next use VisIt to open the `surf_out_XXXX.xmf` database, which will contain a series timepoints with the vector field `J`. If you are running this example remotely and using VisIt locally you will need to copy the `mesh.*.h5`, `scalar_dump.*.h5`, `vector_dump.*.h5`, and `*.xmf` files to your local computer for visualization. The solution `J` at the first time point should look like the figure below.
 
-![](images/thincurr_ex2-result.png)
+\image html thincurr_ex2-result.png "Resulting current distribution for the example time-dependent run at t=20 us"

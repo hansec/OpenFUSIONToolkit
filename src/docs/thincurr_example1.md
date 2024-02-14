@@ -38,7 +38,7 @@ During the run you will see it report a bunch of general information and then it
 \endverbatim
 
 **XML global settings** (`oft_in.xml`)
-\verbatim
+```xml
 <oft>
   <thincurr>
     <eta>1.257E-5</eta>
@@ -47,7 +47,7 @@ During the run you will see it report a bunch of general information and then it
     </coil_set>
   </thincurr>
 </oft>
-\endverbatim
+```
 
 # Post processing
 
@@ -57,4 +57,4 @@ Once complete you can now generate XDMF files suitable for visualization of resu
 
 Next use VisIt to open the `surf_static.xmf` file, which will contain a series of vector fields named as `J_XX` that correspond to the current distributions of the various eigenstates. If you are running this example remotely and using VisIt locally you will need to copy the `mesh.*.h5`, `scalar_dump.*.h5`, `vector_dump.*.h5`, and `*.xmf` files to your local computer for visualization. The first eigenmode `J_01` should look like the figure below.
 
-![](images/thincurr_ex1-result.png)
+\image html thincurr_ex1-result.png "Resulting current distribution for the first eigenmode"

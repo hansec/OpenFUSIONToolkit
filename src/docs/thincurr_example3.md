@@ -13,8 +13,8 @@ With the two input files defined we can use `thincurr_fr` to run a frequency-res
 
 Contents of the input files are provided below and in the examples directory under `ThinCurr/torus`, along with the necessary mesh file `thincurr_ex-torus.h5`.
 
-## Special topology information (holes and singularities)
-ToDo: Describe current potential "holes" and "singularities"
+## Special topology information (holes and closures)
+ToDo: Describe current potential "holes" and "closures"
 
 ## Input files
 
@@ -40,7 +40,7 @@ ToDo: Describe current potential "holes" and "singularities"
 \endverbatim
 
 **XML global settings** (`oft_in.xml`)
-\verbatim
+```xml
 <oft>
   <thincurr>
     <eta>1.257E-5</eta>
@@ -52,7 +52,7 @@ ToDo: Describe current potential "holes" and "singularities"
     </icoils>
   </thincurr>
 </oft>
-\endverbatim
+```
 
 # Post processing
 
@@ -62,4 +62,4 @@ Once complete you can now generate XDMF files suitable for visualization of resu
 
 Next use VisIt to open the `surf_static.xmf` file, which will contain two vector fields `JRe` and `JIm` that correspond to the current distributions for the real and imaginary components of the solution in the frequency-domain. If you are running this example remotely and using VisIt locally you will need to copy the `mesh.*.h5`, `scalar_dump.*.h5`, `vector_dump.*.h5`, and `*.xmf` files to your local computer for visualization. The real component `JRe` should look like the figure below.
 
-![](images/thincurr_ex3-result.png)
+\image html thincurr_ex3-result.png "Resulting current distribution for the real part of the frequency response at f = 5 kHz"
