@@ -362,6 +362,7 @@ oft_in_template = """&runtime_options
 {MESH_DEF}
 """
 mu0 = numpy.pi*4.E-7
+kB_m3_eV = 1.60217663e-19
 
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
@@ -1120,6 +1121,199 @@ class TokaMaker():
                     break
             return self.x_points[:i,:], self.diverted
     
+    def compute_Hmode_solution(self,psi_norm,n_psi,ne,Te,ni,Ti,inductive_jtor,Zeff,R0,nis=None,Zis=[1.],max_iterations=6,initialize_eq=True):
+        '''! Self-consistently compute bootstrap contribution from H-mode profiles,
+        and iterate solution until all functions of Psi converge. 
+
+        @param psi_norm Sample locations in normalized Psi
+        @param n_psi Number of normalized Psi samples
+        @param ne Electron density profile, sampled over psi_norm
+        @param Te Electron temperature profile [eV], sampled over psi_norm
+        @param ni Ion density profile, sampled over psi_norm
+        @param Ti Ion temperature profile [eV], sampled over psi_norm
+        @param inductive_jtor Inductive toroidal current, sampled over psi_norm
+        @param Zeff Effective Z profile, sampled over psi_norm
+        @param R0 Major radius
+        @param nis List of impurity density profiles; NOT USED
+        @param Zis List of impurity profile atomic numbers; NOT USED. NOTE: if 
+        using nis and Zis, dnis_dpsi must be specified in sauter_bootstrap() as 
+        a list of impurity gradients over Psi. See 
+        https://omfit.io/_modules/omfit_classes/utils_fusion.html for more 
+        detailed documentation 
+        @param max_iterations Maximum number of H-mode mygs.solve() iterations
+        @param initialize_eq Initialize equilibrium solve with flattened pedestal. If True, 
+        cubic polynomials will be fit to the core of all kinetic profiles in order to 
+        flatten the pedestal. This will initialize the G-S solution at an estimated L-mode 
+        pressure profile and using the L-mode bootstrap contribution. Initializing the solver 
+        in L-mode before raising the pedestal height increases the likelihood that the solver 
+        will converge in H-mode.
+        '''
+        try:
+            from omfit_classes.utils_fusion import sauter_bootstrap
+        except:
+            raise ImportError('omfit_classes.utils_fusion not installed')
+        
+        def ffprime_from_jtor_pprime(jtor, pprime, R_avg, one_over_R_avg):
+            r'''! Convert from J_toroidal to FF' using Grad-Shafranov equation
+
+            @param jtor Toroidal current profile
+            @param R_avg Flux averaged R, calculated by TokaMaker
+            @param one_over_R_avg Flux averaged 1/R, calculated by TokaMaker
+            @param pprime dP/dPsi profile
+            '''
+            ffprime = (jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg) ####### FACTOR OF 2?
+            return ffprime
+
+        pressure = (kB_m3_eV * ne * Te) + (kB_m3_eV * ni * Ti) # 1.602e-19 * [m^-3] * [eV] = [Pa]
+
+        ### Set new pax target
+        self.set_targets(pax=pressure[0])
+
+        def profile_iteration(self, pressure, ne, ni, Te, Ti, psi_norm, n_psi, Zeff, inductive_jtor, R0, nis, Zis):
+
+            ### Calculate flux derivatives for Sauter
+            pprime = numpy.gradient(pressure) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+            dn_e_dpsi = numpy.gradient(ne) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+            dT_e_dpsi = numpy.gradient(Te) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+            dn_i_dpsi = numpy.gradient(ni) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+            dT_i_dpsi = numpy.gradient(Ti) / (numpy.gradient(psi_norm) * (self.psi_bounds[1]-self.psi_bounds[0]))
+
+            ### Get final remaining quantities for Sauter from TokaMaker
+            psi,f,fp,p,pp = self.get_profiles(npsi=n_psi)
+            psi_st,fc,r_avgs,modb_avgs = self.sauter_fc(npsi=n_psi)
+            ft = 1 - fc # Trapped particle fraction on each flux surface
+            eps = r_avgs[2] / r_avgs[0] # Inverse aspect ratio
+            psi_q,qvals,ravgs,dl,rbounds,zbounds = self.get_q(npsi=n_psi)
+            R_avg = ravgs[0]
+            one_over_R_avg = ravgs[1]
+
+            ### Solve for bootstrap current profile. See https://omfit.io/_modules/omfit_classes/utils_fusion.html for more detailed documentation 
+            j_BS = sauter_bootstrap(
+                                    psi_N=psi_norm,
+                                    Te=Te,
+                                    Ti=Ti,
+                                    ne=ne,
+                                    p=pressure,
+                                    dp_dpsi=pprime,
+                                    nis=nis,
+                                    Zis=Zis,
+                                    Zeff=Zeff,
+                                    gEQDSKs=[None],
+                                    R0=R0,
+                                    device=None,
+                                    psi_N_efit=None,
+                                    psiraw=psi*(self.psi_bounds[1]-self.psi_bounds[0]) + self.psi_bounds[0],
+                                    R=R_avg,
+                                    eps=eps, 
+                                    q=qvals,
+                                    fT=ft,
+                                    I_psi=f,
+                                    nt=1,
+                                    version='osborne',
+                                    debug_plots=False,
+                                    return_units=True,
+                                    return_package=False,
+                                    charge_number_to_use_in_ion_collisionality='Koh',
+                                    charge_number_to_use_in_ion_lnLambda='Zavg',
+                                    dT_e_dpsi=dT_e_dpsi,
+                                    dT_i_dpsi=dT_i_dpsi,
+                                    dn_e_dpsi=dn_e_dpsi,
+                                    dnis_dpsi=dn_i_dpsi,
+                                    )[0]
+            
+            j_BS[-1] = 0. ### FORCING j_BS TO BE ZERO AT THE EDGE
+            jtor_total = inductive_jtor + j_BS
+            
+            ffprime = ffprime_from_jtor_pprime(jtor_total, pprime, ravgs[0], ravgs[1])
+
+            ffp_prof = {
+                'type': 'linterp',
+                'x': psi_norm,
+                'y': ffprime / ffprime[0]
+            }
+
+            pp_prof = {
+                'type': 'linterp',
+                'x': psi_norm,
+                'y': pprime / pprime[0]
+            }
+
+            return pp_prof, ffp_prof
+
+        if initialize_eq:
+            x_trimmed = psi_norm.tolist().copy()
+            ne_trimmed = ne.tolist().copy()
+            Te_trimmed = Te.tolist().copy()
+            ni_trimmed = ni.tolist().copy()
+            Ti_trimmed = Ti.tolist().copy()
+
+            ### Remove profile values from psi_norm ~0.5 to ~0.99, leaving single value at the edge
+            mid_index = int(len(x_trimmed)/2)
+            end_index = len(x_trimmed)-1
+            del x_trimmed[mid_index:end_index]
+            del ne_trimmed[mid_index:end_index]
+            del Te_trimmed[mid_index:end_index]
+            del ni_trimmed[mid_index:end_index]
+            del Ti_trimmed[mid_index:end_index]
+
+            ### Fit cubic polynomials through all core and one edge value
+            ne_model = numpy.poly1d(numpy.polyfit(x_trimmed, ne_trimmed, 3))
+            Te_model = numpy.poly1d(numpy.polyfit(x_trimmed, Te_trimmed, 3))
+            ni_model = numpy.poly1d(numpy.polyfit(x_trimmed, ni_trimmed, 3))
+            Ti_model = numpy.poly1d(numpy.polyfit(x_trimmed, Ti_trimmed, 3))
+
+            Lmode_ne = ne_model(psi_norm)
+            Lmode_Te = Te_model(psi_norm)
+            Lmode_ni = ni_model(psi_norm)
+            Lmode_Ti = Ti_model(psi_norm)
+
+            Lmode_pressure = (kB_m3_eV * Lmode_ne * Lmode_Te) + (kB_m3_eV * Lmode_ni * Lmode_Ti)
+
+            ### Iterate on L-mode bootstrap contribution until reasonably converged
+            print('>>> Initializing equilibrium with pedestal removed:')
+            n = 0
+            flag = -1
+            while n < max_iterations:
+                print('> Iteration '+str(n)+':')
+                Lmode_pp_prof, Lmode_ffp_prof = profile_iteration(self, Lmode_pressure, Lmode_ne, Lmode_ni, Lmode_Te, Lmode_Ti, psi_norm, n_psi, Zeff, inductive_jtor, R0, nis, Zis)
+
+                Lmode_pp_prof['y'] -= Lmode_pp_prof['y'][-1] # Enforce 0.0 at edge
+                Lmode_ffp_prof['y'] -= Lmode_ffp_prof['y'][-1] # Enforce 0.0 at edge
+
+                self.set_profiles(ffp_prof=Lmode_ffp_prof,pp_prof=Lmode_pp_prof)
+
+                flag = self.solve()
+
+                n += 1
+                if (n > 2) and (flag >= 0):
+                    break
+                elif n >= max_iterations:
+                    raise TypeError('L-mode initialization did not converge')
+
+        ### Specify original H-mode profiles, iterate on bootstrap contribution until reasonably converged
+        n = 0
+        flag = -1
+        print('>>> Iterating on H-mode equilibrium solution:')
+        while n < max_iterations:
+            print('> Iteration '+str(n)+':')
+            pp_prof, ffp_prof = profile_iteration(self, pressure, ne, ni, Te, Ti, psi_norm, n_psi, Zeff, inductive_jtor, R0, nis, Zis)
+
+            pp_prof['y'][-1] = 0. # Enforce 0.0 at edge
+            ffp_prof['y'][-1] = 0. # Enforce 0.0 at edge
+        
+            self.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
+
+            flag = self.solve()
+            print('Solve flag: ', flag)
+
+            n += 1
+            if (n > 2) and (flag >= 0):
+                break
+            elif n >= max_iterations:
+                raise TypeError('H-mode equilibrium solve did not converge')
+            
+        return flag
+        
     def set_coil_currents(self, currents):
         '''! Set coil currents
 
