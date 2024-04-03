@@ -21,7 +21,8 @@
 PROGRAM thincurr_eig
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file
+USE oft_io, ONLY: hdf5_create_timestep, oft_bin_file, hdf5_create_file, hdf5_write, &
+  hdf5_create_group, hdf5_add_string_attribute
 USE oft_mesh_type, ONLY: smesh
 USE oft_mesh_native, ONLY: native_read_nodesets, native_read_sidesets
 #ifdef HAVE_NCDF
@@ -67,7 +68,9 @@ LOGICAL :: save_L = .FALSE.
 LOGICAL :: save_Mcoil = .FALSE.
 LOGICAL :: save_Msen = .FALSE.
 LOGICAL :: compute_B = .FALSE.
-NAMELIST/thincurr_eig_options/direct,plot_run,save_L,save_Mcoil,save_Msen,compute_B,neigs,jumper_start
+LOGICAL :: reduce_model = .FALSE.
+NAMELIST/thincurr_eig_options/direct,plot_run,save_L,save_Mcoil,save_Msen, &
+  compute_B,neigs,jumper_start,reduce_model
 !---
 CALL oft_init
 !---Read in options
@@ -127,10 +130,14 @@ IF(plot_run)THEN
   CALL tw_compute_mutuals(tw_sim,sensors%nfloops,sensors%floops)
   CALL plot_eig(tw_sim,sensors%nfloops,sensors%floops)
 ELSE
-  tw_sim%n_icoils=0
-  sensors%nfloops=0
-  ALLOCATE(sensors%floops(sensors%nfloops))
-  IF(tw_sim%n_vcoils>0)THEN
+  IF(reduce_model)THEN
+    CALL tw_load_sensors(tw_sim,sensors,jumper_nsets)
+  ELSE
+    tw_sim%n_icoils=0
+    sensors%nfloops=0
+    ALLOCATE(sensors%floops(sensors%nfloops))
+  END IF
+  IF((tw_sim%n_vcoils>0).OR.(tw_sim%n_icoils>0))THEN
     IF(save_Mcoil)THEN
       CALL tw_compute_Ael2dr(tw_sim,'Mcoil.save')
     ELSE
@@ -167,7 +174,11 @@ ELSE
   END DO
   CLOSE(io_unit)
   CALL uio%delete()
-  DEALLOCATE(uio,eig_rval,eig_ival,eig_vec)
+  DEALLOCATE(uio)
+  !
+  IF(reduce_model)CALL model_reduction_eig(tw_sim,neigs,eig_vec)
+  !
+  DEALLOCATE(eig_rval,eig_ival,eig_vec)
 END IF
 !---
 CALL oft_finalize
@@ -436,4 +447,106 @@ DEALLOCATE(uio,vals)
 IF(ALLOCATED(cc_vals))DEALLOCATE(cc_vals)
 DEBUG_STACK_POP
 END SUBROUTINE plot_eig
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+SUBROUTINE model_reduction_eig(self,neigs,eig_vec)
+TYPE(tw_type), INTENT(in) :: self
+INTEGER(4), INTENT(in) :: neigs
+REAL(8), INTENT(out) :: eig_vec(:,:)
+!---
+INTEGER(4) :: i,j
+REAL(8), POINTER :: vals(:)
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mattmp,Mat_red
+CHARACTER(LEN=4) :: sub_coil_id
+CLASS(oft_vector), POINTER :: atmp,btmp
+character(LEN=80), dimension(1) :: description
+CALL hdf5_create_file('tCurr_reduced.h5')
+ALLOCATE(Mat_red(neigs,neigs),Mattmp(self%nelems,neigs))
+!---Reduce L matrix
+CALL dgemm('N','N',self%nelems,neigs,self%nelems,1.d0, &
+  self%Lmat,self%nelems,eig_vec,self%nelems,0.d0,Mattmp,self%nelems)
+CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0,eig_vec, &
+  self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
+CALL hdf5_write(Mat_red,'tCurr_reduced.h5','L')
+description=["Self-inductance matrix for reduced model"]
+CALL hdf5_add_string_attribute('tCurr_reduced.h5','L','description',description)
+!---Reduce R matrix
+NULLIFY(vals)
+CALL self%Uloc%new(atmp)
+CALL self%Uloc%new(btmp)
+CALL atmp%get_local(vals)
+DO i=1,neigs
+  vals=eig_vec(:,i)
+  CALL atmp%restore_local(vals)
+  CALL btmp%set(0.d0)
+  CALL self%Rmat%apply(atmp,btmp)
+  CALL btmp%get_local(vals)
+  Mattmp(:,i) = vals
+END DO
+CALL dgemm('T','N',neigs,neigs,self%nelems,1.d0, &
+  eig_vec,self%nelems,Mattmp,self%nelems,0.d0,Mat_red,neigs)
+CALL hdf5_write(Mat_red,'tCurr_reduced.h5','R')
+description=["Resistance matrix for reduced model"]
+CALL hdf5_add_string_attribute('tCurr_reduced.h5','R','description',description)
+DEALLOCATE(Mat_red,Mattmp)
+!---Reduce sensor coupling matrix
+IF(sensors%nfloops>0)THEN
+  ! Save sensor names and indexes
+  CALL hdf5_create_group('tCurr_reduced.h5','SENSORS')
+  DO i=1,sensors%nfloops
+    CALL hdf5_create_group('tCurr_reduced.h5', &
+      'SENSORS/'//TRIM(sensors%floops(i)%name))
+    CALL hdf5_write(i,'tCurr_reduced.h5', &
+      'SENSORS/'//TRIM(sensors%floops(i)%name)//'/index')
+    CALL hdf5_write(sensors%floops(i)%scale_fac,'tCurr_reduced.h5', &
+      'SENSORS/'//TRIM(sensors%floops(i)%name)//'/scale')
+    CALL hdf5_write(sensors%floops(i)%r,'tCurr_reduced.h5', &
+      'SENSORS/'//TRIM(sensors%floops(i)%name)//'/pts')
+  END DO
+  ! Save mutual coupling matrix
+  ALLOCATE(Mat_red(sensors%nfloops,neigs))
+  CALL dgemm('N','N',sensors%nfloops,neigs,self%nelems,1.d0, &
+    self%Ael2sen,sensors%nfloops,eig_vec,self%nelems,0.d0,Mat_red,sensors%nfloops)
+  CALL hdf5_write(Mat_red,'tCurr_reduced.h5','Ms')
+  description=["Model to sensor mutual inductance matrix"]
+  CALL hdf5_add_string_attribute('tCurr_reduced.h5','Ms','description',description)
+  DEALLOCATE(Mat_red)
+END IF
+!---Reduce coil coupling matrix
+IF(self%n_icoils>0)THEN
+  ! Save coil names and indexes
+  CALL hdf5_create_group('tCurr_reduced.h5','COILS')
+  DO i=1,self%n_icoils
+    CALL hdf5_create_group('tCurr_reduced.h5', &
+      'COILS/'//TRIM(self%icoils(i)%name))
+    CALL hdf5_write(i,'tCurr_reduced.h5', &
+      'COILS/'//TRIM(self%icoils(i)%name)//'/index')
+    CALL hdf5_create_group('tCurr_reduced.h5', &
+      'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS')
+    DO j=1,self%icoils(i)%ncoils
+      WRITE(sub_coil_id,'(I4.4)')j
+      CALL hdf5_create_group('tCurr_reduced.h5', &
+        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id)
+      CALL hdf5_write(self%icoils(i)%scales(j),'tCurr_reduced.h5', &
+        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/scale')
+      CALL hdf5_write(self%icoils(i)%coils(j)%pts,'tCurr_reduced.h5', &
+        'COILS/'//TRIM(self%icoils(i)%name)//'/SUB_COILS/'//sub_coil_id//'/pts')
+    END DO
+  END DO
+  ! Save mutual coupling matrix
+  ALLOCATE(Mat_red(neigs,self%n_icoils))
+  CALL dgemm('T','N',neigs,self%n_icoils,self%nelems,1.d0, &
+    eig_vec,self%nelems,self%Ael2dr,self%nelems,0.d0,Mat_red,neigs)
+  CALL hdf5_write(Mat_red,'tCurr_reduced.h5','Mc')
+  description=["Model to coil mutual inductance matrix"]
+  CALL hdf5_add_string_attribute('tCurr_reduced.h5','Mc','description',description)
+  DEALLOCATE(Mat_red)
+  IF(sensors%nfloops>0)THEN
+    CALL hdf5_write(self%Adr2sen,'tCurr_reduced.h5','Msc')
+    description=["Coil to sensor mutual inductance matrix"]
+    CALL hdf5_add_string_attribute('tCurr_reduced.h5','Msc','description',description)
+  END IF
+END IF
+END SUBROUTINE model_reduction_eig
 END PROGRAM thincurr_eig
