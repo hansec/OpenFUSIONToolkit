@@ -93,7 +93,8 @@ USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
 USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
-  tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
+  tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec, &
+  fem_map_flag
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lagrange_level, &
   oft_lagrange_nlevels, oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
   oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem
@@ -185,6 +186,7 @@ type :: xmhd_ops
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: n_bc => NULL() !< Density BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: t_bc => NULL() !< Temperature BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: solid_node => NULL() !< Solid region flag
+  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: v_bc_type => NULL() !< Velocity BC flag
   CLASS(oft_matrix), POINTER :: J => NULL() !< Jacobian matrix
   CLASS(oft_matrix), POINTER :: interp => NULL() !< Interpolation matrix
   TYPE(oft_xmhd_errmatrix) :: A !< NL metric matrix
@@ -2300,10 +2302,10 @@ do ii=1,mesh%tloc_c(ip)%n
   CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%t_bc(j_lag),7)
   IF(xmhd_two_temp)CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%t_bc(j_lag),te_ind)
   !---Velocity BC
-  IF(xmhd_vbcdir)THEN
+  IF(ANY((oft_xmhd_ops%v_bc_type(j_lag)>0).AND.(oft_xmhd_ops%v_bc_type(j_lag)<3)))THEN
     DO jr=1,oft_lagrange%nce
       IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
-        CALL lag_vbc_tensor(j_lag(jr),vbc_type,umat)
+        CALL lag_vbc_tensor(j_lag(jr),oft_xmhd_ops%v_bc_type(j_lag(jr)),umat)
         DO m=1,xmhd_rep%nfields
           IF(ASSOCIATED(mtmp(3,m)%m))THEN
             DO jc=1,SIZE(mtmp(3,m)%m,2)
@@ -2322,11 +2324,10 @@ do ii=1,mesh%tloc_c(ip)%n
         END DO
       END IF
     END DO
-  ELSE
-    CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%v_bc(j_lag),3)
-    CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%v_bc(j_lag),4)
-    CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%v_bc(j_lag),5)
   END IF
+  CALL xmhd_rep%mat_zero_local_rows(mtmp,(oft_xmhd_ops%v_bc_type(j_lag)==3),3)
+  CALL xmhd_rep%mat_zero_local_rows(mtmp,(oft_xmhd_ops%v_bc_type(j_lag)==3),4)
+  CALL xmhd_rep%mat_zero_local_rows(mtmp,(oft_xmhd_ops%v_bc_type(j_lag)==3),5)
 !---------------------------------------------------------------------------
 ! Add local contribution to full matrix
 !---------------------------------------------------------------------------
@@ -2363,20 +2364,20 @@ IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
     j=oft_lagrange%lbe(i)
+    IF((oft_xmhd_ops%v_bc_type(j)==0).OR.(oft_xmhd_ops%v_bc_type(j)==3))CYCLE
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
     jtmp=j
-    CALL lag_vbc_diag(j,vbc_type,umat)
+    CALL lag_vbc_diag(j,oft_xmhd_ops%v_bc_type(j),umat)
     DO jr=1,3
       DO jc=1,3
         CALL Jac%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr+2,jc+2)
       END DO
     END DO
   END DO
-ELSE
-  CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%v_bc,3)
-  CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%v_bc,4)
-  CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%v_bc,5)
 END IF
+CALL fem_dirichlet_diag(oft_lagrange,Jac,(oft_xmhd_ops%v_bc_type==3),3)
+CALL fem_dirichlet_diag(oft_lagrange,Jac,(oft_xmhd_ops%v_bc_type==3),4)
+CALL fem_dirichlet_diag(oft_lagrange,Jac,(oft_xmhd_ops%v_bc_type==3),5)
 !---------------------------------------------------------------------------
 ! Final assembly
 !---------------------------------------------------------------------------
@@ -2655,8 +2656,19 @@ end subroutine xmhd_setup_regions
 !> Set BC flags
 !---------------------------------------------------------------------------
 subroutine xmhd_set_bc
-integer(i4) :: i,j
+integer(i4) :: i,j,k
+#ifdef HAVE_XML
+integer(4) :: nnodes,nread,ierr,nbfs
+integer(4), allocatable, dimension(:) :: bc_flag
+logical, allocatable, dimension(:) :: vert_flag,edge_flag,face_flag,bc_tmp
+TYPE(fox_node), POINTER :: bc_node
+TYPE(fox_nodelist), POINTER :: bc_nodes
+#endif
 DEBUG_STACK_PUSH
+nbfs=MAXVAL(mesh%bfs)
+#ifdef HAVE_MPI
+call MPI_ALLREDUCE(MPI_IN_PLACE,nbfs,1,OFT_MPI_I4,MPI_MAX,oft_env%COMM,ierr)
+#endif
 !---------------------------------------------------------------------------
 ! Set boundary condition for B
 !---------------------------------------------------------------------------
@@ -2691,15 +2703,64 @@ END IF
 !---------------------------------------------------------------------------
 ! Apply boundary condition to V
 !---------------------------------------------------------------------------
-ALLOCATE(oft_xmhd_ops%v_bc(oft_lagrange%ne))
-oft_xmhd_ops%v_bc=.FALSE.
-IF(vbc(1:4)=='none'.OR.vbc(1:4)=='norm')THEN
+ALLOCATE(oft_xmhd_ops%v_bc_type(oft_lagrange%ne))
+oft_xmhd_ops%v_bc_type=0
+IF(vbc(1:4)=='none')THEN
   !---Do nothing
+ELSE IF(vbc(1:4)=='norm')THEN
+  DO i=1,oft_lagrange%ne
+    IF(oft_lagrange%global%gbe(i).OR.oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=1
+  END DO
+ELSE IF(vbc(1:4)=='tang')THEN
+  DO i=1,oft_lagrange%ne
+    IF(oft_lagrange%global%gbe(i).OR.oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=2
+  END DO
 ELSE IF(vbc(1:3)=='all')THEN
-  oft_xmhd_ops%v_bc=(oft_lagrange%global%gbe.OR.oft_xmhd_ops%solid_node)
+  DO i=1,oft_lagrange%ne
+    IF(oft_lagrange%global%gbe(i).OR.oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=3
+  END DO
+  ! oft_xmhd_ops%v_dirichlet_bc=(oft_lagrange%global%gbe.OR.oft_xmhd_ops%solid_node)
+ELSE IF(vbc(1:3)=='xml')THEN
+#ifdef HAVE_XML
+  IF(.NOT.ASSOCIATED(xmhd_root_node))CALL oft_abort('No xMHD node in XML file', 'xmhd_bc', __FILE__)
+  ALLOCATE(bc_flag(nbfs))
+  bc_nodes=>fox_getElementsByTagName(xmhd_root_node, "velocity_bc")
+  nnodes=fox_getLength(bc_nodes)
+  IF(nnodes/=1)CALL oft_abort("Error locating velocity BC node in XML", "xmhd_bc", __FILE__)
+  CALL fox_extractDataContent(fox_item(bc_nodes,0), bc_flag, num=nread, iostat=ierr)
+  WRITE(*,*)bc_flag
+  IF((nread<nbfs).OR.(ierr>0))CALL oft_abort("Error reading velocity BCs", "xmhd_bc", &
+    __FILE__)
+  ALLOCATE(vert_flag(mesh%np),edge_flag(mesh%ne),face_flag(mesh%nf),bc_tmp(oft_lagrange%ne))
+  ! Loop over BC types (1->'norm', 2->'tang', 3->'all')
+  DO k=1,3
+    vert_flag=.FALSE.
+    edge_flag=.FALSE.
+    face_flag=.FALSE.
+    bc_tmp=.FALSE.
+    DO i=1,mesh%nbf
+      j = mesh%lbf(i)
+      IF(mesh%bfs(i)<0)CYCLE
+      IF(bc_flag(mesh%bfs(i))==k)THEN
+        vert_flag(mesh%lf(:,j))=.TRUE.
+        edge_flag(ABS(mesh%lfe(:,j)))=.TRUE.
+        face_flag(j)=.TRUE.
+      END IF
+    END DO
+    CALL fem_map_flag(oft_lagrange, vert_flag, edge_flag, face_flag, bc_tmp)
+    bc_tmp = (oft_lagrange%global%gbe.AND.bc_tmp)
+    DO i=1,oft_lagrange%ne
+      IF(bc_tmp(i))oft_xmhd_ops%v_bc_type(i)=k
+    END DO
+  END DO
+  DEALLOCATE(vert_flag,edge_flag,face_flag,bc_flag)
+#else
+  CALL oft_abort('XML BC specification requires FoX', 'xmhd_bc', __FILE__)
+#endif
 ELSE
   CALL oft_abort('Invalid V Boundary Condition.','xmhd_bc',__FILE__)
 END IF
+xmhd_vbcdir=ANY(oft_xmhd_ops%v_bc_type==2).OR.ANY(oft_xmhd_ops%v_bc_type==3)
 !---------------------------------------------------------------------------
 ! Apply boundary condition to n
 !---------------------------------------------------------------------------
@@ -2710,6 +2771,35 @@ IF(xmhd_adv_den)THEN
     !---Do nothing
   ELSE IF(nbc=='d')THEN
     oft_xmhd_ops%n_bc=(oft_lagrange%global%gbe.OR.oft_xmhd_ops%solid_node)
+  ELSE IF(nbc=='x')THEN
+#ifdef HAVE_XML
+    IF(.NOT.ASSOCIATED(xmhd_root_node))CALL oft_abort('No xMHD node in XML file', 'xmhd_bc', __FILE__)
+    ALLOCATE(bc_flag(nbfs))
+    bc_nodes=>fox_getElementsByTagName(xmhd_root_node, "den_bc")
+    nnodes=fox_getLength(bc_nodes)
+    IF(nnodes/=1)CALL oft_abort("Error locating density BC node in XML", "xmhd_bc", __FILE__)
+    CALL fox_extractDataContent(fox_item(bc_nodes,0), bc_flag, num=nread, iostat=ierr)
+    IF((nread<nbfs).OR.(ierr>0))CALL oft_abort("Error reading density BCs", "xmhd_bc", &
+      __FILE__)
+    ALLOCATE(vert_flag(mesh%np),edge_flag(mesh%ne),face_flag(mesh%nf))
+    vert_flag=.FALSE.
+    edge_flag=.FALSE.
+    face_flag=.FALSE.
+    DO i=1,mesh%nbf
+      j = mesh%lbf(i)
+      IF(mesh%bfs(i)<0)CYCLE
+      IF(bc_flag(mesh%bfs(i))==1)THEN ! Dirichlet on all components
+        vert_flag(mesh%lf(:,j))=.TRUE.
+        edge_flag(ABS(mesh%lfe(:,j)))=.TRUE.
+        face_flag(j)=.TRUE.
+      END IF
+    END DO
+    CALL fem_map_flag(oft_lagrange,vert_flag,edge_flag,face_flag,oft_xmhd_ops%n_bc)
+    DEALLOCATE(vert_flag,edge_flag,face_flag,bc_flag)
+    oft_xmhd_ops%n_bc = (oft_lagrange%global%gbe.AND.oft_xmhd_ops%n_bc)
+#else
+    CALL oft_abort('XML BC specification requires FoX', 'xmhd_bc', __FILE__)
+#endif
   ELSE
     CALL oft_abort('Invalid N Boundary Condition.','xmhd_bc',__FILE__)
   END IF
@@ -2726,6 +2816,35 @@ IF(xmhd_adv_temp)THEN
     !---Do nothing
   ELSE IF(tbc=='d')THEN
     oft_xmhd_ops%t_bc=(oft_lagrange%global%gbe.OR.oft_xmhd_ops%solid_node)
+  ELSE IF(nbc=='x')THEN
+#ifdef HAVE_XML
+    IF(.NOT.ASSOCIATED(xmhd_root_node))CALL oft_abort('No xMHD node in XML file', 'xmhd_bc', __FILE__)
+    ALLOCATE(bc_flag(nbfs))
+    bc_nodes=>fox_getElementsByTagName(xmhd_root_node, "temp_bc")
+    nnodes=fox_getLength(bc_nodes)
+    IF(nnodes/=1)CALL oft_abort("Error locating temperature BC node in XML", "xmhd_bc", __FILE__)
+    CALL fox_extractDataContent(fox_item(bc_nodes,0), bc_flag, num=nread, iostat=ierr)
+    IF((nread<nbfs).OR.(ierr>0))CALL oft_abort("Error reading temperature BCs", "xmhd_bc", &
+      __FILE__)
+    ALLOCATE(vert_flag(mesh%np),edge_flag(mesh%ne),face_flag(mesh%nf))
+    vert_flag=.FALSE.
+    edge_flag=.FALSE.
+    face_flag=.FALSE.
+    DO i=1,mesh%nbf
+      j = mesh%lbf(i)
+      IF(mesh%bfs(i)<0)CYCLE
+      IF(bc_flag(mesh%bfs(i))==1)THEN ! Dirichlet on all components
+        vert_flag(mesh%lf(:,j))=.TRUE.
+        edge_flag(ABS(mesh%lfe(:,j)))=.TRUE.
+        face_flag(j)=.TRUE.
+      END IF
+    END DO
+    CALL fem_map_flag(oft_lagrange,vert_flag,edge_flag,face_flag,oft_xmhd_ops%t_bc)
+    DEALLOCATE(vert_flag,edge_flag,face_flag,bc_flag)
+    oft_xmhd_ops%t_bc = (oft_lagrange%global%gbe.AND.oft_xmhd_ops%t_bc)
+#else
+    CALL oft_abort('XML BC specification requires FoX', 'xmhd_bc', __FILE__)
+#endif
   ELSE
     CALL oft_abort('Invalid T Boundary Condition.','xmhd_bc',__FILE__)
   END IF
@@ -3297,18 +3416,18 @@ IF(xmhd_vbcdir)THEN
   !$omp parallel do private(j,mloc)
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
+    IF((oft_xmhd_ops%v_bc_type(j)==0).OR.(oft_xmhd_ops%v_bc_type(j)==3))CYCLE
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(j,oft_xmhd_ops%v_bc_type(j),mloc)
     vout(j,:)=MATMUL(mloc,vout(j,:))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(j,oft_xmhd_ops%v_bc_type(j),mloc)
     vout(j,:)=vout(j,:)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
-ELSE
-  CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,1),vout(:,1),oft_xmhd_ops%v_bc)
-  CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,2),vout(:,2),oft_xmhd_ops%v_bc)
-  CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),oft_xmhd_ops%v_bc)
 END IF
+CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,1),vout(:,1),(oft_xmhd_ops%v_bc_type==3))
+CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,2),vout(:,2),(oft_xmhd_ops%v_bc_type==3))
+CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),(oft_xmhd_ops%v_bc_type==3))
 !---------------------------------------------------------------------------
 ! Set result from local field values, summing contributions across seams
 !---------------------------------------------------------------------------
@@ -3558,18 +3677,18 @@ IF(xmhd_vbcdir)THEN
   !$omp parallel do private(j,mloc)
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
+    IF((oft_xmhd_ops%v_bc_type(j)==0).OR.(oft_xmhd_ops%v_bc_type(j)==3))CYCLE
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    CALL lag_vbc_tensor(j,oft_xmhd_ops%v_bc_type(j),mloc)
     vout(j,:)=MATMUL(mloc,vout(j,:))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(j,vbc_type,mloc)
+    CALL lag_vbc_diag(j,oft_xmhd_ops%v_bc_type(j),mloc)
     vout(j,:)=vout(j,:)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
-ELSE
-  CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,1),vout(:,1),oft_xmhd_ops%v_bc)
-  CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,2),vout(:,2),oft_xmhd_ops%v_bc)
-  CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),oft_xmhd_ops%v_bc)
 END IF
+CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,1),vout(:,1),(oft_xmhd_ops%v_bc_type==3))
+CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,2),vout(:,2),(oft_xmhd_ops%v_bc_type==3))
+CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),(oft_xmhd_ops%v_bc_type==3))
 !---------------------------------------------------------------------------
 ! Set result from local field values, summing contributions across seams
 !---------------------------------------------------------------------------
@@ -4470,7 +4589,7 @@ DEALLOCATE(vtmp)
 !
 DO i=1,3
   CALL acors%get_local(vtmp,iblock=2+i)
-  WHERE(oft_xmhd_ops%v_bc)
+  WHERE((oft_xmhd_ops%v_bc_type==3))
     vtmp = 0.d0
   END WHERE
   CALL acors%restore_local(vtmp,iblock=2+i,wait=.TRUE.)

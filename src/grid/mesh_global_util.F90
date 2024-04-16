@@ -294,6 +294,10 @@ subroutine mesh_global_set_curved(self,flag)
 CLASS(oft_amesh), INTENT(inout) :: self
 INTEGER(i4), INTENT(in) :: flag
 INTEGER(i4) :: i,k
+SELECT TYPE(this=>self)
+CLASS IS(oft_bmesh)
+  IF(this%skip)RETURN
+END SELECT
 SELECT CASE(flag)
 CASE(1)
   self%ho_info%is_curved=.TRUE.

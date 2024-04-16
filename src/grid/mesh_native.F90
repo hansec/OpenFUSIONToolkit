@@ -185,6 +185,28 @@ IF(oft_env%rank/=0)DEALLOCATE(mesh%r,mesh%lc,mesh%reg)
 DEBUG_STACK_POP
 end subroutine native_load_vmesh
 !------------------------------------------------------------------------------
+!> Setup surface IDs
+!------------------------------------------------------------------------------
+subroutine native_cadlink
+integer(i4) :: i,j
+integer(i4), allocatable :: bfmap(:)
+TYPE(oft_1d_int), POINTER :: ssets(:)
+!---Read sidesets if present
+NULLIFY(ssets)
+CALL native_read_sidesets(ssets,TRIM(filename))
+IF(ASSOCIATED(ssets))THEN
+    ALLOCATE(bfmap(mesh%nf))
+    CALL get_inverse_map(mesh%lbf,mesh%nbf,bfmap,mesh%nf)
+    DO i=1,SIZE(ssets)
+        DO j=1,ssets(i)%n
+            IF(bfmap(ssets(i)%v(j))/=0)mesh%bfs(bfmap(ssets(i)%v(j)))=i
+        END DO
+        DEALLOCATE(ssets(i)%v)
+    END DO
+    DEALLOCATE(bfmap,ssets)
+END IF
+end subroutine native_cadlink
+!------------------------------------------------------------------------------
 !> Read in t3d mesh file from file "filename"
 !! - Read in T3D options from input file
 !! - Read in mesh points and cells

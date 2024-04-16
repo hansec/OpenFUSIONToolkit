@@ -26,7 +26,7 @@ use multigrid, only: mg_mesh, multigrid_refine, multigrid_hybrid_base, &
   multigrid_level, trimesh_mg_globals, quadmesh_mg_globals, multigrid_reffix_ho, &
   multigrid_reffix_ho_surf
 use oft_mesh_native, only: native_load_vmesh, native_load_smesh, mesh_native_id, &
-  native_hobase, native_set_periodic
+  native_hobase, native_set_periodic, native_cadlink
 use oft_mesh_t3d, only: mesh_t3d_load, mesh_t3d_cadsync, mesh_t3d_cadlink, &
   mesh_t3d_add_quad, mesh_t3d_reffix, mesh_t3d_add_quad, &
   mesh_t3d_set_periodic, smesh_t3d_load, mesh_t3d_id
@@ -67,6 +67,7 @@ select case(cad_type)
   case(mesh_native_id) ! Native Mesh
     CALL native_load_vmesh
     CALL mesh_global_init(mesh)
+    CALL native_cadlink
     CALL native_hobase(mesh)
     CALL native_set_periodic
   case(mesh_t3d_id) ! T3D Mesh

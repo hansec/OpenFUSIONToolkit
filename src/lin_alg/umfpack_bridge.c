@@ -50,12 +50,16 @@ oft_umfpack_dgssv_c(int *iopt, int *n, int *nnz, int *nrhs,
         *f_factors = LUfactors;
       } else {
         LUfactors = *f_factors;
+        if ( *iopt == 1 ) {
+           umfpack_di_free_symbolic( &LUfactors->Symbolic);
+        }
+        umfpack_di_free_numeric( &LUfactors->Numeric);
       }
 
       // Perform factorization
       if ( *iopt == 1 ) {
         status = umfpack_di_symbolic( *n, *n, rowptr, colind, values, &LUfactors->Symbolic, LUfactors->Control, Info);
-        if ( status != 0 ){
+        if ( status != 0 ) {
           *info = status;
           return;
         }
