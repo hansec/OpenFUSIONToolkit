@@ -10,11 +10,13 @@
  nbase=1
  grid_order=2
  fix_boundary=T
+ part_meth=4
 /
 
 &native_mesh_options
  filename='cyl_accretion.h5'
  reflect=T
+ ref_periodic=T
 /
 
 &accretion_options
@@ -36,7 +38,7 @@
  vbc='all'         ! Zero-flow BC for velocity
  nbc='n'           ! Neumann BC for density
  tbc='n'           ! Neumann BC for temperature
- dt=8.e-7          ! Maximum time step
+ dt=2.e-6          ! Maximum time step
  eta=742.6         ! Constant resistivity
 ! eta_hyper=50.0   ! Hyper-resistivity
 ! me_factor=73.446  ! M_e/M_i = 25.0 (as per GEM challenge paper)
@@ -47,7 +49,7 @@
  kappa_perp=2943.4 ! Perpendicular thermal conduction (fixed)
  nsteps=1200       ! Number of time steps to take
  rst_ind=0         ! Index of file to restart from (0 -> use subroutine arguments)
- rst_freq=10       ! Restart file frequency
+ rst_freq=10        ! Restart file frequency
  xmhd_mfnk=T       ! Use matrix-free method
  lin_tol=1.E-8     ! Linear solver tolerance
  nl_tol=1.E-6      ! Non-linear solver tolerance
@@ -58,7 +60,7 @@
 
 &xmhd_plot_options
  t0=1.E-8
- dt=8.E-6
+ dt=-8.E-6
  rst_start=0
  rst_end=1200
 /

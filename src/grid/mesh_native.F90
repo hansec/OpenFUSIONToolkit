@@ -707,7 +707,7 @@ end subroutine native_reflect
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine native_set_periodic
-integer(i4) :: i,j,pt_e(2),ind,k,kk,np_per
+integer(i4) :: i,j,pt_e(2),ind,k,kk,np_per,ne_per,nf_per
 integer(i4), ALLOCATABLE :: pt_f(:)
 IF(.NOT.ALLOCATED(per_nodes))RETURN
 DEBUG_STACK_PUSH
@@ -740,7 +740,9 @@ ALLOCATE(mesh%periodic%lf(mesh%nf))
 mesh%periodic%le=-1
 mesh%periodic%lf=-1
 !---Flag periodic edges
-!$omp parallel private(j,pt_e,pt_f,ind)
+ne_per=0
+nf_per=0
+!$omp parallel private(j,pt_e,pt_f,ind) reduction(+:ne_per) reduction(+:nf_per)
 allocate(pt_f(mesh%face_np))
 !$omp do
 DO i=1,mesh%nbe
@@ -750,6 +752,7 @@ DO i=1,mesh%nbe
     ind=ABS(mesh_local_findedge(mesh,pt_e))
     IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad edge',i,ind
     mesh%periodic%le(j)=ind
+    ne_per=ne_per+1
     END IF
 END DO
 !---Flag periodic faces
@@ -761,10 +764,15 @@ DO i=1,mesh%nbf
     ind=ABS(mesh_local_findface(mesh,pt_f))
     IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad face',i,ind
     mesh%periodic%lf(j)=ind
+    nf_per=nf_per+1
     END IF
 END DO
 deallocate(pt_f)
 !$omp end parallel
+IF(oft_debug_print(1))THEN
+    WRITE(*,'(2A,I8)')oft_indent,'  ne_per = ',ne_per
+    WRITE(*,'(2A,I8)')oft_indent,'  nf_per = ',nf_per
+END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine native_set_periodic
