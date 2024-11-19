@@ -470,6 +470,11 @@ class TokaMaker():
             raise IndexError('Incorrect shape of "coil_gains", should be [ncoils]')
         coil_gains = numpy.ascontiguousarray(coil_gains, dtype=numpy.float64)
         tokamaker_set_coil_vsc(coil_gains)
+    
+    def set_cond_modes(self,neigs,cond_eigs):
+        if (cond_eigs.shape[1] != self.np) or (cond_eigs.shape[0] != numpy.sum(neigs)):
+            raise IndexError('Incorrect size of "cond_eigs", should be [sum(neigs),np]')
+        tokamaker_set_cond_eigs(neigs,cond_eigs)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0):
         r'''! Initialize \f$\psi\f$ using uniform current distributions

@@ -27,7 +27,7 @@ USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
   gs_fixed_vflux, gs_load_regions, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
-  gs_plasma_mutual, gs_source
+  gs_plasma_mutual, gs_source, gs_get_cond_weights, gs_set_cond_weights
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_comp_globals, gs_save_eqdsk, &
   gs_profile_load, sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
@@ -920,6 +920,59 @@ INTEGER(4) :: i
 CALL c_f_pointer(coil_gains, vals_tmp, [gs_global%ncoils])
 gs_global%coil_vcont=vals_tmp
 END SUBROUTINE tokamaker_set_coil_vsc
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_cond_eigs(neigs,cond_eigs) BIND(C,NAME="tokamaker_set_cond_eigs")
+TYPE(c_ptr), VALUE, INTENT(in) :: neigs !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: cond_eigs !< Needs docs
+INTEGER(4), POINTER, DIMENSION(:) :: neigs_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: eigs_tmp
+INTEGER(4) :: i,j,k
+!
+IF(ASSOCIATED(gs_global%cond_weights))DEALLOCATE(gs_global%cond_weights)
+WRITE(*,*)gs_global%ncond_regs,gs_global%ncond_eigs
+!
+CALL c_f_pointer(neigs, neigs_tmp, [gs_global%ncond_regs])
+gs_global%ncond_eigs=SUM(neigs_tmp)
+CALL c_f_pointer(cond_eigs, eigs_tmp, [gs_global%psi%n,gs_global%ncond_eigs])
+gs_global%ncond_eigs=0
+DO i=1,gs_global%ncond_regs
+  IF(ASSOCIATED(gs_global%cond_regions(i)%weights))DEALLOCATE(gs_global%cond_regions(i)%weights)
+  IF(ASSOCIATED(gs_global%cond_regions(i)%fixed))DEALLOCATE(gs_global%cond_regions(i)%fixed)
+  IF(ASSOCIATED(gs_global%cond_regions(i)%mind))DEALLOCATE(gs_global%cond_regions(i)%mind)
+  IF(ASSOCIATED(gs_global%cond_regions(i)%mtype))DEALLOCATE(gs_global%cond_regions(i)%mtype)
+  IF(ASSOCIATED(gs_global%cond_regions(i)%psi_eig))THEN
+    DO j=1,gs_global%cond_regions(i)%neigs
+      CALL gs_global%cond_regions(i)%psi_eig(j)%f%delete
+    END DO
+    DEALLOCATE(gs_global%cond_regions(i)%psi_eig)
+  END IF
+  !---TODO: Need to deallocated conductor currents if specified
+  !
+  gs_global%cond_regions(i)%neigs=neigs_tmp(i)
+  IF(gs_global%cond_regions(i)%neigs>0)THEN
+    ALLOCATE(gs_global%cond_regions(i)%weights(gs_global%cond_regions(i)%neigs))
+    ALLOCATE(gs_global%cond_regions(i)%fixed(gs_global%cond_regions(i)%neigs))
+    ALLOCATE(gs_global%cond_regions(i)%mind(gs_global%cond_regions(i)%neigs))
+    ALLOCATE(gs_global%cond_regions(i)%mtype(gs_global%cond_regions(i)%neigs))
+    ALLOCATE(gs_global%cond_regions(i)%psi_eig(gs_global%cond_regions(i)%neigs))
+    gs_global%cond_regions(i)%weights=0.d0
+    gs_global%cond_regions(i)%fixed=.FALSE.
+    gs_global%cond_regions(i)%mind=1
+    gs_global%cond_regions(i)%mtype=[(j,j=1,gs_global%cond_regions(i)%neigs)]
+    DO j=1,gs_global%cond_regions(i)%neigs
+      gs_global%ncond_eigs=gs_global%ncond_eigs+1
+      CALL gs_global%psi%new(gs_global%cond_regions(i)%psi_eig(j)%f)
+      CALL gs_global%cond_regions(i)%psi_eig(j)%f%restore_local(eigs_tmp(:,gs_global%ncond_eigs))
+    END DO
+  END IF
+END DO
+WRITE(*,*)gs_global%ncond_regs,gs_global%ncond_eigs
+ALLOCATE(gs_global%cond_weights(gs_global%ncond_eigs))
+CALL gs_get_cond_weights(gs_global,gs_global%cond_weights,.FALSE.)
+CALL gs_set_cond_weights(gs_global,gs_global%cond_weights,.FALSE.)
+END SUBROUTINE tokamaker_set_cond_eigs
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

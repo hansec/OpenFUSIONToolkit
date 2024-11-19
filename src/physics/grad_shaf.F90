@@ -2048,7 +2048,7 @@ class(oft_vector), target, intent(inout) :: psi_full
 integer(4), intent(out) :: ierr
 type(oft_lag_brinterp) :: psi_eval
 type(oft_lag_bginterp) :: psi_geval,psi_geval2
-integer(4) :: i,j,k,mind,nCon,io_unit,coffset,roffset
+integer(4) :: i,j,k,kk,mind,nCon,nDofs,io_unit,coffset,roffset
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta,gpsi(3),wt_max,wt_min
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:),wt_tmp(:)
@@ -2063,9 +2063,10 @@ logical :: pm_save
 !   CLOSE(io_unit)
 ! END IF
 !
-nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize
-ALLOCATE(err_mat(nCon,self%ncoils+1),err_inv(self%ncoils+1,self%ncoils+1))
-ALLOCATE(rhs(nCon),currs(self%ncoils+1))
+nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize+self%ncond_eigs
+nDofs = (self%ncoils+1)+self%ncond_eigs
+ALLOCATE(err_mat(nCon,nDofs),err_inv(nDofs,nDofs))
+ALLOCATE(rhs(nCon),currs(nDofs))
 ALLOCATE(cells(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets))
 err_mat=0.d0
 rhs=0.d0
@@ -2111,7 +2112,7 @@ DO j=1,self%saddle_ntargets
   rhs(roffset+2*(j-1)+1)=gpsi(1)*self%saddle_targets(3,j)
   rhs(roffset+2*(j-1)+2)=gpsi(2)*self%saddle_targets(3,j)
 END DO
-!---Build L-S Matrix
+!---Build L-S Matrix (coils)
 DO i=1,self%ncoils
   psi_eval%u=>self%psi_coil(i)%f
   CALL psi_eval%setup()
@@ -2145,6 +2146,40 @@ DO i=1,self%ncoils
   err_mat(:,self%ncoils+1)=err_mat(:,self%ncoils+1) &
     + self%coil_vcont(i)*err_mat(:,i)
 END DO
+!---Build L-S Matrix (free conductors)
+kk=self%ncoils+1
+DO i=1,self%ncond_regs
+DO k=1,self%cond_regions(i)%neigs
+  kk=kk+1
+  psi_eval%u=>self%cond_regions(i)%psi_eig(k)%f
+  CALL psi_eval%setup()
+  psi_geval%u=>self%cond_regions(i)%psi_eig(k)%f
+  CALL psi_geval%setup()
+  DO j=1,self%isoflux_ntargets
+    CALL bmesh_findcell(smesh,cells(j),self%isoflux_targets(1:2,j),f)
+    ! CALL smesh%jacobian(cells(j),f,goptmp,v)
+    CALL psi_eval%interp(cells(j),f,goptmp,pol_val)
+    err_mat(j,kk)=pol_val(1)!*self%isoflux_targets(3,j)
+  END DO
+  roffset=self%isoflux_ntargets
+  coffset=self%isoflux_ntargets
+  DO j=1,self%flux_ntargets
+    CALL bmesh_findcell(smesh,cells(coffset+j),self%flux_targets(1:2,j),f)
+    ! CALL smesh%jacobian(cells(j),f,goptmp,v)
+    CALL psi_eval%interp(cells(coffset+j),f,goptmp,pol_val)
+    err_mat(roffset+j,kk)=pol_val(1)
+  END DO
+  roffset=roffset+self%flux_ntargets
+  coffset=coffset+self%flux_ntargets
+  DO j=1,self%saddle_ntargets
+    CALL bmesh_findcell(smesh,cells(coffset+j),self%saddle_targets(1:2,j),f)
+    CALL smesh%jacobian(cells(coffset+j),f,goptmp,v)
+    CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
+    err_mat(roffset+2*(j-1)+1,kk)=gpsi(1)*self%saddle_targets(3,j)
+    err_mat(roffset+2*(j-1)+2,kk)=gpsi(2)*self%saddle_targets(3,j)
+  END DO
+END DO
+END DO
 !---Enforce difference of fluxes
 wt_max=MAXVAL(wt_tmp)
 wt_min=self%isoflux_grad_wt_lim*wt_max
@@ -2168,6 +2203,15 @@ DO i=1,self%nregularize
   err_mat(roffset+i,self%ncoils+1)=self%coil_reg_mat(i,self%ncoils+1)
   rhs(roffset+i)=-self%coil_reg_targets(i)
 END DO
+roffset=self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize
+kk=0
+DO i=1,self%ncond_regs
+DO k=1,self%cond_regions(i)%neigs
+  kk=kk+1
+  err_mat(roffset+kk,self%ncoils+1+kk)=1.d-1
+  rhs(roffset+kk)=0.d0
+END DO
+END DO
 !---Solve L-S system
 IF(ASSOCIATED(self%coil_bounds))THEN
 BLOCK
@@ -2175,22 +2219,32 @@ INTEGER(4) :: nsetp
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: index
 REAL(8) :: rnorm
 REAL(8), ALLOCATABLE, DIMENSION(:) :: w
-ALLOCATE(w(self%ncoils+1),index(self%ncoils+1))
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: bounds_tmp
+  ALLOCATE(w(self%ncoils+1),index(self%ncoils+1),bounds_tmp(2,nDofs))
+  bounds_tmp(1,:)=-1.d99
+  bounds_tmp(2,:)=1.d99
+  bounds_tmp(1,1:self%ncoils+1)=self%coil_bounds(1,:)
+  bounds_tmp(2,1:self%ncoils+1)=self%coil_bounds(2,:)
   CALL bvls(ncon-1,self%ncoils+1,err_mat(2:nCon,:),rhs(2:nCon), &
-    self%coil_bounds,currs,rnorm,nsetp,w,index,ierr)
+    bounds_tmp,currs,rnorm,nsetp,w,index,ierr)
   ! WRITE(*,*)ierr,currs
-DEALLOCATE(w,index)
+  DEALLOCATE(w,index,bounds_tmp)
 END BLOCK
 ELSE
   err_inv=MATMUL(TRANSPOSE(err_mat(2:nCon,:)),err_mat(2:nCon,:))
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
-  CALL lapack_matinv(self%ncoils+1,err_inv,ierr)
+  CALL lapack_matinv(nDofs,err_inv,ierr)
+  IF(ierr/=0)WRITE(*,*)'LS factorization failed',ierr
   oft_env%pm=pm_save
   currs=MATMUL(err_inv,MATMUL(TRANSPOSE(err_mat(2:nCon,:)),rhs(2:nCon)))
 END IF
 !---Add coil/conductor fields to IC
 self%vcontrol_val=-currs(self%ncoils+1)
 self%coil_currs=-currs(1:self%ncoils)
+IF(self%ncond_eigs>0)THEN
+  self%cond_weights=-currs(self%ncoils+2:nDofs)
+  CALL gs_set_cond_weights(self,self%cond_weights,.FALSE.)
+END IF
 DEALLOCATE(err_mat,err_inv,rhs,currs,cells)
 CALL psi_eval%delete
 CALL psi_geval%delete
