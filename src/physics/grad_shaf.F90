@@ -2227,7 +2227,7 @@ REAL(8), ALLOCATABLE, DIMENSION(:,:) :: bounds_tmp
   bounds_tmp(2,1:self%ncoils+1)=self%coil_bounds(2,:)
   CALL bvls(ncon-1,self%ncoils+1,err_mat(2:nCon,:),rhs(2:nCon), &
     bounds_tmp,currs,rnorm,nsetp,w,index,ierr)
-  ! WRITE(*,*)ierr,currs
+  ! IF(ierr/=0)WRITE(*,*)'Constrained LS failed',ierr
   DEALLOCATE(w,index,bounds_tmp)
 END BLOCK
 ELSE

@@ -563,7 +563,7 @@ real(8), intent(out) :: err(m),jac_mat(ldjac_mat,n)
 integer(4), intent(in) :: iflag
 logical :: plot_save
 integer(4) :: i,j,js,je,offset,ierr
-real(8) :: rel_err(m),abs_err(m),dx,dxi
+real(8) :: rel_err(m),abs_err(m),dx,dxi,dcurr(2)
 real(8), allocatable :: cof_tmp(:),err_tmp(:)
 real(8), save :: alam_in,pnorm_in,bounds_in(2,2),vcont_in,ip_target_in,estore_target_in
 real(8), allocatable, save :: cofs_in(:)
@@ -786,11 +786,12 @@ IF(iflag==1)THEN
     END IF
     IF(fit_coils)THEN
       js = offset; je = offset+gs_active%ncoils
-      WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'Coil currents [%]  ='
+      dcurr=[1.d99,-1.d99]
       DO i=js+1,je
-        WRITE(*,'(100ES11.3)',ADVANCE="NO")cofs(i)/curr_in(i-js)
+        IF(cofs(i)/curr_in(i-js)<dcurr(1))dcurr(1)=cofs(i)/curr_in(i-js)
+        IF(cofs(i)/curr_in(i-js)>dcurr(2))dcurr(2)=cofs(i)/curr_in(i-js)
       END DO
-      WRITE(*,*)
+      WRITE(*,'(2A,2F8.3)')oft_indent,'Min/max coil current change [%]  =',dcurr*100.d0
       offset = je
     END IF
     IF(fit_F0)THEN
@@ -1086,7 +1087,6 @@ IF(PRESENT(coil_wt))THEN
     coil_con%coil=i
     coil_con%val=gs_active%coil_currs(i)/mu0
     coil_con%wt=coil_wt(i)
-    ! coil_con%wt=ABS(1.d0/(.05d0*coil_con%val))
     cons(j)%con=>coil_con
     j=j+1
   END DO

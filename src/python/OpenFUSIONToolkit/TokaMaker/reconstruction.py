@@ -28,7 +28,6 @@ class tokamaker_recon_settings_struct(c_struct):
                 ("fitAlam", c_bool),
                 ("fitR0", c_bool),
                 ("fitV0", c_bool),
-                # ("fitCoils", c_bool),
                 ("fitF0", c_bool),
                 ("fixedCentering", c_bool),
                 ("pm", c_bool)]
@@ -46,7 +45,6 @@ def tokamaker_recon_default_settings():
     settings.fitAlam = True
     settings.fitR0 = False
     settings.fitV0 = False
-    # settings.fitCoils = False
     settings.fitF0 = False
     settings.fixedCentering = False
     settings.pm = False
@@ -224,21 +222,21 @@ class reconstruction():
         self._gs_obj = gs_obj
         ## Reconstruction specific settings object
         self.settings = tokamaker_recon_default_settings()
-        ##
+        ## Plasma current constraint
         self._Ip_con = None
-        ##
+        ## Diamagnetic flux constraint
         self._Dflux_con = None
-        ##
+        ## Flux loop constraints
         self._flux_loops = []
-        ##
+        ## Mirnov constraints
         self._mirnovs = []
-        ##
+        ## Saddle loop constraints
         self._saddles = []
-        ##
+        ## Pressure constraints
         self._pressure_cons = []
-        ##
+        ## Coil current targets
         self._coil_targets = None
-        ##
+        ## Coil current error weights
         self._coil_wts = None
         #
         if filename is not None:
@@ -255,11 +253,21 @@ class reconstruction():
         self._pressure_cons = []
     
     def set_Ip(self,Ip,err):
+        '''! Add a constraint on the toroidal plasma current
+
+        @param val Current constraint [A]
+        @param err Uncertainty in constraint [A]
+        '''
         if Ip < 0.0:
             raise ValueError('Toroidal current must be >= 0')
         self._Ip_con = Ip_con(val=Ip, err=err)
 
     def set_DFlux(self,DFlux,err):
+        '''! Add a constraint on the diamagnetic flux
+
+        @param val Flux constraint [Wb]
+        @param err Uncertainty in constraint [Wb]
+        '''
         self._Dflux_con = dFlux_con(val=DFlux, err=err)
     
     def set_coil_currents(self, coil_currents, err=None):
@@ -276,26 +284,59 @@ class reconstruction():
             self._coil_wts = 1.0/abs(err)
 
     def add_flux_loop(self,loc,val,err):
+        '''! Add a constraint for the flux measured by a full poloidal flux loop
+
+        @param loc (R,Z) position of constraint [m]
+        @param val Flux constraint [Wb]
+        @param err Uncertainty in constraint [Wb]
+        '''
         self._flux_loops.append(fluxLoop_con(pt=loc, val=val, err=err))
 
     def add_Mirnov(self,loc,norm,val,err):
+        r'''! Add a constraint for the magnetic field at a point
+
+        @param loc (R,Z) position of constraint [m]
+        @param norm (R,\f$ \phi \f$,Z) direction of magnetic field
+        @param val Field constraint [T]
+        @param err Uncertainty in constraint [T]
+        '''
         self._mirnovs.append(Mirnov_con(pt=loc, norm=norm, val=val, err=err))
     
     def add_saddle(self,p1,p2,width,val,err):
+        '''! Add a constraint for the flux measured by a saddle loop
+
+        @param p1 (R,Z) position of first toroidal leg of saddle [m]
+        @param p2 (R,Z) position of second toroidal leg of saddle [m]
+        @param val Flux constraint [Wb]
+        @param err Uncertainty in constraint [Wb]
+        '''
         self._saddles.append(saddle_con(p1=p1, p2=p2, width=width, val=val, err=err))
     
     def add_pressure(self,loc,val,err):
+        '''! Add a constraint on total pressure
+
+        @param loc (R,Z) position of constraint [m]
+        @param val Pressure constraint [Pa]
+        @param err Uncertainty in constraint [Pa]
+        '''
         self._pressure_cons.append(Press_con(pt=loc,val=val,err=err))
     
     def reset_constraints(self):
+        '''! Reset and remove all constraints'''
         self._Ip_con = None
         self._Dflux_con = None
         self._flux_loops = []
         self._mirnovs = []
         self._saddles = []
         self._pressure_cons = []
+        self._coil_targets = None
+        self._coil_wts = None
     
     def write_fit_in(self,filename='fit.in'):
+        '''! Save constraints to a TokaMaker constraint file
+
+        @param filename Path to constraint file
+        '''
         constraints = self._flux_loops + self._mirnovs + self._pressure_cons
         if self._Ip_con is not None:
             constraints.append(self._Ip_con)
@@ -308,6 +349,10 @@ class reconstruction():
                 con.write(fid)
     
     def read_fit_in(self,filename='fit.in'):
+        '''! Read in constraints from a TokaMaker constraint file
+
+        @param filename Path to constraint file
+        '''
         self.reset_constraints()
         with open(filename, 'r') as fid:
             ncons = int(fid.readline())
@@ -333,7 +378,10 @@ class reconstruction():
                     raise ValueError("Unknown constraint type")
 
     def reconstruct(self, vacuum=False):
-        '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.'''
+        '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.
+        
+        @param vacuum Peform a vacuum reconstruction (no plasma current, pressure, etc.)
+        '''
         self.write_fit_in()
         error_flag = c_int()
         if self._coil_targets is not None:

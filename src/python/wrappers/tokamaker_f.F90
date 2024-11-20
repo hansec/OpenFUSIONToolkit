@@ -938,7 +938,6 @@ REAL(8), POINTER, DIMENSION(:,:) :: eigs_tmp
 INTEGER(4) :: i,j,k
 !
 IF(ASSOCIATED(gs_global%cond_weights))DEALLOCATE(gs_global%cond_weights)
-WRITE(*,*)gs_global%ncond_regs,gs_global%ncond_eigs
 !
 CALL c_f_pointer(neigs, neigs_tmp, [gs_global%ncond_regs])
 gs_global%ncond_eigs=SUM(neigs_tmp)
@@ -981,7 +980,6 @@ DO i=1,gs_global%ncond_regs
     END DO
   END IF
 END DO
-WRITE(*,*)gs_global%ncond_regs,gs_global%ncond_eigs
 ALLOCATE(gs_global%cond_weights(gs_global%ncond_eigs))
 CALL gs_get_cond_weights(gs_global,gs_global%cond_weights,.FALSE.)
 CALL gs_set_cond_weights(gs_global,gs_global%cond_weights,.FALSE.)
