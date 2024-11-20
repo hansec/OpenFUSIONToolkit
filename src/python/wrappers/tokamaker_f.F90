@@ -9,7 +9,7 @@
 !---------------------------------------------------------------------------
 MODULE tokamaker_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
-  c_f_pointer, c_bool, c_null_ptr
+  c_f_pointer, c_bool, c_null_ptr, c_associated
 USE oft_base
 USE oft_mesh_type, ONLY: smesh, bmesh_findcell
 ! USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
@@ -61,7 +61,6 @@ TYPE, BIND(C) :: tokamaker_recon_settings_type
   LOGICAL(KIND=c_bool) :: fitAlam = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitR0 = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitV0 = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitCoils = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitF0 = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fixedCentering = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: pm = .FALSE. !< Needs docs
@@ -313,11 +312,13 @@ END SUBROUTINE tokamaker_analyze
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_recon_run(vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_run")
+SUBROUTINE tokamaker_recon_run(vacuum,settings,coil_wt,error_flag) BIND(C,NAME="tokamaker_recon_run")
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
 TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: coil_wt !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
-LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitF0,fixedCentering
+REAL(r8), POINTER, DIMENSION(:) :: coil_wt_tmp
 IF(vacuum)gs_global%has_plasma=.FALSE.
 fitI=settings%fitI
 fitP=settings%fitP
@@ -325,13 +326,19 @@ fitPnorm=settings%fitPnorm
 fitAlam=settings%fitAlam
 fitR0=settings%fitR0
 fitV0=settings%fitV0
-fitCoils=settings%fitCoils
 fitF0=settings%fitF0
 fixedCentering=settings%fixedCentering
 fit_pm=settings%pm
-CALL fit_gs(gs_global,fitI,fitP,fitPnorm,&
-            fitAlam,fitR0,fitV0,fitCoils,fitF0, &
-            fixedCentering)
+IF(c_associated(coil_wt))THEN
+  CALL c_f_pointer(coil_wt, coil_wt_tmp, [gs_global%ncoils])
+  CALL fit_gs(gs_global,fitI=fitI,fitP=fitP,fitPnorm=fitPnorm,&
+              fitAlam=fitAlam,fitR0=fitR0,fitV0=fitV0,coil_wt=coil_wt_tmp, &
+              fitF0=fitF0,fixedCentering=fixedCentering)
+ELSE
+  CALL fit_gs(gs_global,fitI=fitI,fitP=fitP,fitPnorm=fitPnorm,&
+              fitAlam=fitAlam,fitR0=fitR0,fitV0=fitV0, &
+              fitF0=fitF0,fixedCentering=fixedCentering)
+END IF
 gs_global%has_plasma=.TRUE.
 END SUBROUTINE tokamaker_recon_run
 !------------------------------------------------------------------------------

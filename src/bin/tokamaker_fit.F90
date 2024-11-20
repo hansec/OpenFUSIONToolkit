@@ -27,7 +27,7 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 LOGICAL :: file_exists
-REAL(8), ALLOCATABLE :: pts(:,:)
+REAL(8), ALLOCATABLE :: pts(:,:),coil_wt(:)
 TYPE(gs_eq) :: mygs
 CLASS(oft_vector), POINTER :: xv
 !---GS input options
@@ -214,9 +214,21 @@ mygs%plot_final=.TRUE.
 INQUIRE(EXIST=file_exists,FILE='tokamaker_fit_in.rst')
 IF(file_exists)CALL gs_load(mygs,'tokamaker_fit_in.rst')
 !---Solve
-CALL fit_gs(mygs, fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
-            fitR0=adjust_R0, fitV0=adjust_V0, fitCoils=adjust_coils, fitF0=adjust_F0, &
-            fixedCentering=fixed_center)
+IF(adjust_coils)THEN
+  ALLOCATE(coil_wt(mygs%ncoils))
+  DO i=1,mygs%ncoils
+    coil_wt=ABS(1.d0/(0.05d0*mygs%coil_currs(i)/mu0)) ! Assume 5% error in coils
+  END DO
+  CALL fit_gs(mygs, fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
+    fitR0=adjust_R0, fitV0=adjust_V0, coil_wt=coil_wt, fitF0=adjust_F0, &
+    fixedCentering=fixed_center)
+  DEALLOCATE(coil_wt)
+ELSE
+  !---Solve
+  CALL fit_gs(mygs, fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
+    fitR0=adjust_R0, fitV0=adjust_V0, fitF0=adjust_F0, &
+    fixedCentering=fixed_center)
+END IF
 !---------------------------------------------------------------------------
 ! Post-solution analysis
 !---------------------------------------------------------------------------

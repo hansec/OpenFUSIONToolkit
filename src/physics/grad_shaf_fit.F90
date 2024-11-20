@@ -216,7 +216,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE fit_gs(gs,fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering)
+SUBROUTINE fit_gs(gs,fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,coil_wt,fitF0,fixedCentering)
 TYPE(gs_eq), TARGET, INTENT(inout) :: gs
 LOGICAL, OPTIONAL, INTENT(in) :: fitI
 LOGICAL, OPTIONAL, INTENT(in) :: fitP
@@ -224,7 +224,7 @@ LOGICAL, OPTIONAL, INTENT(in) :: fitPnorm
 LOGICAL, OPTIONAL, INTENT(in) :: fitAlam
 LOGICAL, OPTIONAL, INTENT(in) :: fitR0
 LOGICAL, OPTIONAL, INTENT(in) :: fitV0
-LOGICAL, OPTIONAL, INTENT(in) :: fitCoils
+REAL(r8), OPTIONAL, INTENT(in) :: coil_wt(:)
 LOGICAL, OPTIONAL, INTENT(in) :: fitF0
 LOGICAL, OPTIONAL, INTENT(in) :: fixedCentering
 !---
@@ -242,7 +242,7 @@ IF(PRESENT(fitPnorm))fit_Pnorm=fitPnorm
 IF(PRESENT(fitAlam))fit_alam=fitAlam
 IF(PRESENT(fitR0))fit_R0=fitR0
 IF(PRESENT(fitV0))fit_V0=fitV0
-IF(PRESENT(fitCoils))fit_coils=fitCoils
+IF(PRESENT(coil_wt))fit_coils=.TRUE.
 IF(PRESENT(fitF0))fit_F0=fitF0
 IF(PRESENT(fixedCentering))fixed_centering=fixedCentering
 IF(fitPnorm.AND.fitR0)CALL oft_abort('R0 or Pnorm fitting cannot be used together', &
@@ -252,7 +252,7 @@ IF(fitPnorm)gs%R0_target=-1.d0
 gs_active=>gs
 WRITE(*,*)
 WRITE(*,'(A)')'*** Loading fit constraints ***'
-CALL fit_load('fit.in',conlist)
+CALL fit_load('fit.in',conlist,coil_wt)
 !---Count coefficients
 ncofs=0
 IF(gs%free)THEN
@@ -1048,9 +1048,10 @@ END SUBROUTINE run_err
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE fit_load(filename,cons)
+SUBROUTINE fit_load(filename,cons,coil_wt)
 CHARACTER(LEN=*), INTENT(in) :: filename
 TYPE(fit_constraint_ptr), POINTER, INTENT(out) :: cons(:)
+REAL(r8), OPTIONAL, INTENT(in) :: coil_wt(:)
 !---
 TYPE(coil_constraint), POINTER :: coil_con
 TYPE(field_constraint), POINTER :: field_con
@@ -1074,17 +1075,18 @@ OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)n
 !---
 ncons=n
-IF(fit_coils)ncons=n+gs_active%ncoils
+IF(PRESENT(coil_wt))ncons=n+gs_active%ncoils
 ! IF(gs_active%V0_target>-1.d98)ncons=ncons+1
 ALLOCATE(cons(ncons))
 j=1
 !---
-IF(fit_coils)THEN
+IF(PRESENT(coil_wt))THEN
   DO i=1,gs_active%ncoils
     ALLOCATE(coil_con)
     coil_con%coil=i
     coil_con%val=gs_active%coil_currs(i)/mu0
-    coil_con%wt=ABS(1.d0/(.05d0*coil_con%val))
+    coil_con%wt=coil_wt(i)
+    ! coil_con%wt=ABS(1.d0/(.05d0*coil_con%val))
     cons(j)%con=>coil_con
     j=j+1
   END DO

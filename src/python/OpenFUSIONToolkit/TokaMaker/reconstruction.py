@@ -28,7 +28,7 @@ class tokamaker_recon_settings_struct(c_struct):
                 ("fitAlam", c_bool),
                 ("fitR0", c_bool),
                 ("fitV0", c_bool),
-                ("fitCoils", c_bool),
+                # ("fitCoils", c_bool),
                 ("fitF0", c_bool),
                 ("fixedCentering", c_bool),
                 ("pm", c_bool)]
@@ -46,7 +46,7 @@ def tokamaker_recon_default_settings():
     settings.fitAlam = True
     settings.fitR0 = False
     settings.fitV0 = False
-    settings.fitCoils = False
+    # settings.fitCoils = False
     settings.fitF0 = False
     settings.fixedCentering = False
     settings.pm = False
@@ -54,7 +54,7 @@ def tokamaker_recon_default_settings():
 
 ## @cond
 tokamaker_recon_run = ctypes_subroutine(oftpy_lib.tokamaker_recon_run,
-    [c_bool, ctypes.POINTER(tokamaker_recon_settings_struct), c_int_ptr])
+    [c_bool, ctypes.POINTER(tokamaker_recon_settings_struct), c_void_p, c_int_ptr])
 ## @endcond
 
 Mirnov_con_id = 1
@@ -236,6 +236,10 @@ class reconstruction():
         self._saddles = []
         ##
         self._pressure_cons = []
+        ##
+        self._coil_targets = None
+        ##
+        self._coil_wts = None
         #
         if filename is not None:
             self.read_fit_in(filename)
@@ -251,10 +255,25 @@ class reconstruction():
         self._pressure_cons = []
     
     def set_Ip(self,Ip,err):
+        if Ip < 0.0:
+            raise ValueError('Toroidal current must be >= 0')
         self._Ip_con = Ip_con(val=Ip, err=err)
 
     def set_DFlux(self,DFlux,err):
         self._Dflux_con = dFlux_con(val=DFlux, err=err)
+    
+    def set_coil_currents(self, coil_currents, err=None):
+        if coil_currents is None:
+            self._coil_targets = None
+        else:
+            if coil_currents.shape[0] != self._gs_obj.ncoils:
+                raise ValueError('Incorrect size for "coil_currents", must be [ncoils,]')
+        if err is None:
+            self._coil_wts = None
+        else:
+            if err.shape[0] != self._gs_obj.ncoils:
+                raise ValueError('Incorrect size for "err", must be [ncoils,]')
+            self._coil_wts = 1.0/abs(err)
 
     def add_flux_loop(self,loc,val,err):
         self._flux_loops.append(fluxLoop_con(pt=loc, val=val, err=err))
@@ -317,5 +336,11 @@ class reconstruction():
         '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.'''
         self.write_fit_in()
         error_flag = c_int()
-        tokamaker_recon_run(c_bool(vacuum),self.settings,ctypes.byref(error_flag))
+        if self._coil_targets is not None:
+            self._gs_obj.set_coil_currents(self._coil_targets)
+        if self._coil_wts is None:
+            tokamaker_recon_run(c_bool(vacuum),self.settings,c_void_p(),ctypes.byref(error_flag))
+        else:
+            coil_wts_ptr = self._coil_wts.ctypes.data_as(c_void_p)
+            tokamaker_recon_run(c_bool(vacuum),self.settings,coil_wts_ptr,ctypes.byref(error_flag))
         return error_flag.value
