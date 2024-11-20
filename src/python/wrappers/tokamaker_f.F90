@@ -942,6 +942,8 @@ DO i=1,gs_global%ncond_regs
   IF(ASSOCIATED(gs_global%cond_regions(i)%fixed))DEALLOCATE(gs_global%cond_regions(i)%fixed)
   IF(ASSOCIATED(gs_global%cond_regions(i)%mind))DEALLOCATE(gs_global%cond_regions(i)%mind)
   IF(ASSOCIATED(gs_global%cond_regions(i)%mtype))DEALLOCATE(gs_global%cond_regions(i)%mtype)
+  IF(ASSOCIATED(gs_global%cond_regions(i)%eig_map))DEALLOCATE(gs_global%cond_regions(i)%eig_map)
+  IF(ASSOCIATED(gs_global%cond_regions(i)%fit_scales))DEALLOCATE(gs_global%cond_regions(i)%fit_scales)
   IF(ASSOCIATED(gs_global%cond_regions(i)%psi_eig))THEN
     DO j=1,gs_global%cond_regions(i)%neigs
       CALL gs_global%cond_regions(i)%psi_eig(j)%f%delete
@@ -957,10 +959,14 @@ DO i=1,gs_global%ncond_regs
     ALLOCATE(gs_global%cond_regions(i)%mind(gs_global%cond_regions(i)%neigs))
     ALLOCATE(gs_global%cond_regions(i)%mtype(gs_global%cond_regions(i)%neigs))
     ALLOCATE(gs_global%cond_regions(i)%psi_eig(gs_global%cond_regions(i)%neigs))
+    ALLOCATE(gs_global%cond_regions(i)%eig_map(gs_global%cond_regions(i)%neigs))
+    ALLOCATE(gs_global%cond_regions(i)%fit_scales(gs_global%cond_regions(i)%neigs))
     gs_global%cond_regions(i)%weights=0.d0
     gs_global%cond_regions(i)%fixed=.FALSE.
     gs_global%cond_regions(i)%mind=1
     gs_global%cond_regions(i)%mtype=[(j,j=1,gs_global%cond_regions(i)%neigs)]
+    gs_global%cond_regions(i)%eig_map=[(j,j=1,gs_global%cond_regions(i)%neigs)]+gs_global%ncond_eigs
+    gs_global%cond_regions(i)%fit_scales=1.d0
     DO j=1,gs_global%cond_regions(i)%neigs
       gs_global%ncond_eigs=gs_global%ncond_eigs+1
       CALL gs_global%psi%new(gs_global%cond_regions(i)%psi_eig(j)%f)

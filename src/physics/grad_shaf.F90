@@ -2208,7 +2208,7 @@ kk=0
 DO i=1,self%ncond_regs
 DO k=1,self%cond_regions(i)%neigs
   kk=kk+1
-  err_mat(roffset+kk,self%ncoils+1+kk)=1.d-1
+  err_mat(roffset+kk,self%ncoils+1+kk)=1.d-3
   rhs(roffset+kk)=0.d0
 END DO
 END DO
@@ -2604,14 +2604,14 @@ DO i=1,self%maxits
 
   ! Fit coils if operating in isoflux mode
   IF(self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets>0)THEN
-    CALL self%psi%add(1.d0,1.d0,psi_eddy)
+    IF(self%ncond_eigs<=0)CALL self%psi%add(1.d0,1.d0,psi_eddy)
     CALL self%psi%add(1.d0,1.d0,psi_bc)
     CALL gs_fit_isoflux(self,psip,ierr_loc)
     IF(ierr_loc/=0)THEN
       error_flag=-7
       EXIT
     END IF
-    CALL self%psi%add(1.d0,-1.d0,psi_eddy)
+    IF(self%ncond_eigs<=0)CALL self%psi%add(1.d0,-1.d0,psi_eddy)
     CALL self%psi%add(1.d0,-1.d0,psi_bc)
     !---Update vacuum field part
     CALL psi_vac%set(0.d0)
