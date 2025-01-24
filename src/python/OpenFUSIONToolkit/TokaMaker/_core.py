@@ -25,6 +25,7 @@ def tokamaker_default_settings():
     settings.free_boundary = True
     settings.has_plasma = True
     settings.limited_only = False
+    settings.dipole_mode = False
     settings.maxits = 40
     settings.mode = 1
     settings.urf = 0.2
@@ -223,6 +224,7 @@ class TokaMaker():
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, must call "reset" before loading new mesh')
+        self.update_settings()
         nregs = c_int()
         if mesh_file is not None:
             ndim = c_int(-1)
@@ -271,6 +273,8 @@ class TokaMaker():
                 if cond_dict[key].get('noncontinuous',False):
                     contig_flag[cond_dict[key]['reg_id']-1] = 0
             xpoint_mask[cond_dict[key]['reg_id']-1] = int(cond_dict[key].get('allow_xpoints',False))
+            if cond_dict[key].get('inner_limiter',False):
+                contig_flag[cond_dict[key]['reg_id']-1] = -1
         # Remove vacuum regions
         for key in self._vac_dict:
             del cond_dict[key]

@@ -26,6 +26,7 @@ class tokamaker_settings_struct(c_struct):
                 ("free_boundary", c_bool),
                 ("has_plasma", c_bool),
                 ("limited_only", c_bool),
+                ("dipole_mode", c_bool),
                 ("maxits", c_int),
                 ("mode", c_int),
                 ("urf", c_double),

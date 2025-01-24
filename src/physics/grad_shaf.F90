@@ -105,8 +105,8 @@ TYPE :: cond_region
   INTEGER(i4) :: neigs = 0
   INTEGER(i4) :: id = 0
   INTEGER(i4) :: pair = -1
-  ! LOGICAL :: limiter = .TRUE.
   LOGICAL :: continuous = .TRUE.
+  LOGICAL :: inner_limiter = .FALSE.
   REAL(r8) :: coverage = 1.d0
   REAL(r8) :: extent(2) = 0.d0
   REAL(r8) :: eta = -1.d0
@@ -156,6 +156,7 @@ TYPE :: gs_eq
   INTEGER(i4) :: nregularize = 0
   INTEGER(i4) :: nlimiter_pts = 0
   INTEGER(i4) :: nlimiter_nds = 0
+  INTEGER(i4) :: ninner_limiter_nds = 0
   INTEGER(i4) :: ncond_regs = 0
   INTEGER(i4) :: ncond_eigs = 0
   INTEGER(i4) :: bc_nrhs = 0
@@ -236,16 +237,14 @@ TYPE :: gs_eq
   LOGICAL :: use_lu = .FALSE.
 #endif
   LOGICAL :: assym = .FALSE.
-  ! LOGICAL :: active_x = .FALSE.
   LOGICAL :: limited_only = .FALSE.
+  LOGICAL :: dipole_mode = .FALSE.
   LOGICAL :: save_visit = .TRUE.
   LOGICAL :: isoflux_grad_weight = .TRUE.
   CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none'
   CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none'
   TYPE(oft_lusolver) :: lu_solver
   TYPE(oft_lusolver) :: lu_solver_dt
-  ! CLASS(oft_solver), POINTER :: solver => NULL()
-  ! CLASS(oft_solver), POINTER :: mop_solver => NULL()
   TYPE(axi_coil_set), POINTER, DIMENSION(:) :: coils_ext => NULL()
   TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL()
   TYPE(cond_region), POINTER, DIMENSION(:) :: cond_regions => NULL()
@@ -737,8 +736,8 @@ end subroutine gs_load_limiters
 subroutine gs_setup_walls(self,skip_load,make_plot)
 class(gs_eq), intent(inout) :: self
 logical, optional, intent(in) :: skip_load,make_plot
-INTEGER(4) :: i,j,k,l,m,nphi_3d,cell
-INTEGER(4), ALLOCATABLE :: eflag(:),j_lag(:),emark(:,:),pmark(:)
+INTEGER(4) :: i,j,k,l,m,nphi_3d,cell,nlim_tmp
+INTEGER(4), ALLOCATABLE :: eflag(:),j_lag(:),emark(:,:),pmark(:),regmark(:)
 REAL(8) :: f(3),rcenter(2),vol,gop(3,3),pt(3)
 REAL(8), ALLOCATABLE :: eigs(:)
 LOGICAL :: file_exists,do_load,do_plot
@@ -925,6 +924,13 @@ ALLOCATE(self%cond_weights(self%ncond_eigs))
 CALL gs_get_cond_weights(self,self%cond_weights,.FALSE.)
 CALL gs_set_cond_weights(self,self%cond_weights,.FALSE.)
 !---Setup limiters
+ALLOCATE(regmark(smesh%nreg))
+regmark=1
+IF(self%dipole_mode)THEN
+  DO i=1,self%ncond_regs
+    IF(self%cond_regions(i)%inner_limiter)regmark(self%cond_regions(i)%id)=-1
+  END DO
+END IF
 ALLOCATE(eflag(oft_blagrange%ne),j_lag(oft_blagrange%nce))
 eflag=0
 ! DO j=1,self%ncond_regs
@@ -949,25 +955,30 @@ DO i=1,smesh%nc
   IF(smesh%reg(i)==1)THEN
     emark(1,j_lag)=1
   ELSE
-    emark(2,j_lag)=1
+    emark(2,j_lag)=regmark(smesh%reg(i))
   END IF
 END DO
 DO i=1,oft_blagrange%ne
-  IF(emark(1,i)==1.AND.emark(2,i)==1)eflag(i)=1
+  IF(emark(1,i)==1.AND.ABS(emark(2,i))==1)eflag(i)=emark(2,i)
   IF(emark(1,i)==1.AND.oft_blagrange%be(i))eflag(i)=1
 END DO
 !---
-self%nlimiter_nds=SUM(eflag)
+self%nlimiter_nds=SUM(ABS(eflag))
+nlim_tmp=self%nlimiter_nds
 ALLOCATE(self%limiter_nds(self%nlimiter_nds),self%rlimiter_nds(2,self%nlimiter_nds))
 self%nlimiter_nds=0
+self%ninner_limiter_nds=0
 DO i=1,oft_blagrange%ne
   IF(eflag(i)==1)THEN
     self%nlimiter_nds=self%nlimiter_nds+1
     self%limiter_nds(self%nlimiter_nds)=i
+  ELSE IF(eflag(i)==-1)THEN
+    self%ninner_limiter_nds=self%ninner_limiter_nds+1
+    self%limiter_nds(nlim_tmp+1-self%ninner_limiter_nds)=i
   END IF
 END DO
 !
-DO i=1,self%nlimiter_nds
+DO i=1,self%nlimiter_nds+self%ninner_limiter_nds
   ! Get position
   cell=oft_blagrange%lec(oft_blagrange%kec(self%limiter_nds(i)))
   CALL oft_blagrange%ncdofs(cell,j_lag)
@@ -982,6 +993,7 @@ END DO
 DEALLOCATE(eflag,j_lag)
 IF(oft_debug_print(2))THEN!.AND.((self%ncoil_regs>0).OR.(self%ncond_regs>0)))THEN
   WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%nlimiter_nds,' material limiter nodes'
+  IF(self%dipole_mode)WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%ninner_limiter_nds,' inner limiter nodes'
   WRITE(*,*)
 END IF
 !---Mark non-continuous regions
@@ -3589,7 +3601,7 @@ logical, optional, intent(in) :: track_opoint
 type(oft_lag_brinterp) :: psi_interp
 integer(4) :: i,j,cell,ierr,ind_sort(max_xpoints),trace_err,itmp
 REAL(8) :: old_bounds(2),f(3),goptmp(3,3),v,psitmp(1),alt_max
-REAL(8) :: alt_r,alt_z,zmin,zmax,pttmp(2),vtmp
+REAL(8) :: alt_r,alt_z,zmin,zmax,pttmp(2),vtmp,ilim_tmp,ilim_psi
 REAL(8) :: x_point(2,max_xpoints),t1,t2,x_psi(max_xpoints),x_psi_sort(max_xpoints),x_tmp
 REAL(8) :: x_point_old(2,max_xpoints),x_vec_old(2,max_xpoints)
 REAL(8), POINTER :: psi_vals(:)
@@ -3610,7 +3622,23 @@ IF(PRESENT(track_opoint))THEN
 ELSE
   self%o_point(1)=-1.d0
 END IF
+IF(self%dipole_mode)THEN
+  !---Check limiters
+  ilim_psi=0.d0
+  DO i=self%nlimiter_nds+1,self%nlimiter_nds+self%ninner_limiter_nds
+    j=self%limiter_nds(i)
+    IF(psi_vals(j)>ilim_psi)THEN
+      ilim_psi=psi_vals(j)
+      self%o_point=self%rlimiter_nds(:,i)
+    END IF
+  END DO
+  self%plasma_bounds(2)=ilim_psi
+  pttmp=self%o_point
+ELSE
+  self%plasma_bounds(2)=-1.d99
+END IF
 CALL gs_analyze_saddles(self, self%o_point, self%plasma_bounds(2), x_point, x_psi)
+IF(self%dipole_mode)self%o_point=pttmp ! TODO: Handle this better!
 ! t2=omp_get_wtime()
 ! WRITE(*,*)'Analyze',t2-t1
 ! alt_r=-1.d0
@@ -3790,7 +3818,8 @@ end subroutine gs_update_bounds
 subroutine gs_analyze_saddles(self, o_point, o_psi, x_point, x_psi)
 class(gs_eq), intent(inout) :: self
 real(8), intent(inout) :: o_point(2)
-real(8), intent(out) :: o_psi,x_point(2,max_xpoints),x_psi(max_xpoints)
+real(8), intent(inout) :: o_psi
+real(8), intent(out) :: x_point(2,max_xpoints),x_psi(max_xpoints)
 integer(4), PARAMETER :: npts = 10, max_unique = 20
 integer(4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
 integer(4), allocatable :: ncuts(:)
@@ -3835,12 +3864,12 @@ END DO
 !
 psi_scale_len = ABS(self%plasma_bounds(2)-self%plasma_bounds(1))*5.d0/(SQRT(self%lim_area))
 unique_saddles=-1.d99
-o_psi=-1.d99
+! o_psi=-1.d99
 n_unique=0
 !
 DO i=1,smesh%np
   IF((ncuts(i)==0).OR.(ncuts(i)>3))THEN
-    IF((ncuts(i)==0).AND.(o_point(1)>0.d0))THEN
+    IF((ncuts(i)==0).AND.(o_point(1)>0.d0).AND.(.NOT.self%dipole_mode))THEN
       saddle_loc=o_point
     ELSE
       saddle_loc=smesh%r(1:2,i)

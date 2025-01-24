@@ -45,6 +45,7 @@ TYPE, BIND(C) :: tokamaker_settings_type
   LOGICAL(KIND=c_bool) :: free_boundary = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: has_plasma = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: limited_only = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: dipole_mode = .FALSE. !< Needs docs
   INTEGER(KIND=c_int) :: maxits = 40 !< Needs docs
   INTEGER(KIND=c_int) :: mode = 1 !< Needs docs
   REAL(KIND=c_double) :: urf = 0.3d0 !< Needs docs
@@ -157,6 +158,7 @@ IF(TRIM(gs_global%coil_file)=='none')THEN
       END IF
       gs_global%cond_regions(gs_global%ncond_regs)%id=i
       gs_global%cond_regions(gs_global%ncond_regs)%continuous=(contig_tmp(i)==1)
+      IF(gs_global%dipole_mode)gs_global%cond_regions(gs_global%ncond_regs)%inner_limiter=(contig_tmp(i)==-1)
     ELSE
       gs_global%ncoil_regs=gs_global%ncoil_regs+1
       gs_global%coil_regions(gs_global%ncoil_regs)%id=i
@@ -834,6 +836,7 @@ gs_global%urf=settings%urf
 gs_global%maxits=settings%maxits
 gs_global%nl_tol=settings%nl_tol
 gs_global%limited_only=settings%limited_only
+gs_global%dipole_mode=settings%dipole_mode
 CALL copy_string_rev(settings%limiter_file,gs_global%limiter_file)
 END SUBROUTINE tokamaker_set_settings
 !------------------------------------------------------------------------------

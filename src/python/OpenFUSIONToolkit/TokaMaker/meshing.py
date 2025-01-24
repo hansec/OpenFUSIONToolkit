@@ -128,7 +128,7 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None,allow_xpoints=False):
+    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None,allow_xpoints=False,inner_limiter=False):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -137,6 +137,7 @@ class gs_Domain:
         @param eta Resistivity for "conductor" regions (raises error if region is other type)
         @param nTurns Number of turns for "coil" regions (raises error if region is other type)
         @param allow_xpoints Allow X-points in this region (for non-plasma regions only)
+        @param inner_limiter This region forms the inner limiter (valid for non-plasma regions in Dipole mode only)
         '''
         if (dx is None) or (dx < 0.0):
             raise ValueError('"dx" must have a non-negative value')
@@ -165,6 +166,11 @@ class gs_Domain:
             'type': reg_type,
             'allow_xpoints': allow_xpoints
         }
+        if inner_limiter:
+            if reg_type == 'plasma':
+                raise ValueError('The plasma region cannot be used as the inner limiter')
+            else:
+                self.region_info[name]['inner_limiter'] = inner_limiter
         if eta is not None:
             if reg_type != 'conductor':
                 raise ValueError('Resistivity specification only valid for "conductor" regions')
@@ -371,6 +377,8 @@ class gs_Domain:
                     'noncontinuous': self.region_info[key].get('noncontinuous',False),
                     'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
+                if 'inner_limiter' in self.region_info[key]:
+                    cond_list[key]['inner_limiter'] = self.region_info[key]['inner_limiter']
                 cond_id += 1
             elif self.region_info[key]['type'] in ('vacuum','boundary'):
                 cond_list[key] = {
@@ -378,6 +386,8 @@ class gs_Domain:
                     'vac_id': vac_id,
                     'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
+                if 'inner_limiter' in self.region_info[key]:
+                    cond_list[key]['inner_limiter'] = self.region_info[key]['inner_limiter']
                 vac_id += 1
         return cond_list
     
@@ -393,7 +403,7 @@ class gs_Domain:
             raise ValueError('No plasma region specified')
         else:
             # Make sure a boundary exists if we have regions other than plasma
-            if ((self.reg_type_counts['vacuum'] > 0) or (self.reg_type_counts['coil'] > 0) or (self.reg_type_counts['conductor'] > 0)) and require_boundary:
+            if ((self.reg_type_counts['vacuum'] > 0) or (self.reg_type_counts['coil'] > 0) or (self.reg_type_counts['conductor'] > 0)) and (self.reg_type_counts['boundary'] == 0) and require_boundary:
                 if self.boundary_reg is None:
                     raise ValueError('No boundary region specified')
                 # Check or set extents
@@ -665,7 +675,7 @@ class Mesh:
             local_seg_map = []
             reg_pt_map = [i+len(self._unique_points) for i in range(region._points.shape[0])]
             ilocal = len(self._unique_points)-1
-            for tmp_pts in region._segments:
+            for reg_seg, tmp_pts in enumerate(region._segments):
                 tmp_pt_map = [reg_pt_map[i] for i in tmp_pts]
                 for ipt, reg_id in enumerate(tmp_pts):
                     reg_pt = region._points[reg_id,:]
@@ -684,10 +694,15 @@ class Mesh:
                             self._unique_points.append(reg_pt)
                 for iseg, segment in enumerate(self._segments):
                     nOverlap = 0
-                    for test_pt in segment[0]:
-                        if test_pt in tmp_pt_map:
-                            nOverlap += 1
-                    if (nOverlap > 1) and (len(tmp_pts) == len(segment[0])): # Full overlap
+                    for i in range(len(segment[0])):
+                        test_pt = segment[0][i-1]
+                        matches = [j for j,x in enumerate(tmp_pt_map) if x==test_pt]
+                        if len(matches) > 0:
+                            test_pt2 = segment[0][i]
+                            for match in [j for j,x in enumerate(tmp_pt_map) if x==test_pt2]:
+                                if (match-1 in matches) or (match+1 in matches):
+                                    nOverlap += 1
+                    if (nOverlap == len(tmp_pts)-1) and (len(tmp_pts) == len(segment[0])): # Full overlap
                         # Look forward
                         for i,test_pt in enumerate(segment[0]):
                             if tmp_pt_map[i] != test_pt:
@@ -710,9 +725,10 @@ class Mesh:
                             segment[2] = min(segment[2],region._small_thresh)
                             local_seg_map.append(-iseg)
                             break
-                    elif  (nOverlap > 1): # Partial match
+                    elif (nOverlap > 1): # Partial match
                         if debug:
-                            print('  Merging partially overlapping curve segments:',ireg,iseg)
+                            print('  Merging partially overlapping curve segments:',nOverlap,ireg,reg_seg,iseg)
+                            print(tmp_pts)
                         if len(tmp_pts) < len(segment[0]):
                             overlap_start = len(segment[0])
                             overlap_end = -1
