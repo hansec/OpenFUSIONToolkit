@@ -1,7 +1,7 @@
 !---------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
-!> @file thermal_diffusion.F90
+!> @file thermal_diffusion_3d.F90
 !
 !> Example module for modeling thermal diffusion of two species, with equilibration, in 2D
 !!
@@ -15,12 +15,12 @@
 !! @date January 2025
 !! @ingroup doxy_oft_physics
 !---------------------------------------------------------------------------
-MODULE thermal_diffusion
+MODULE thermal_diffusion_3d
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
   hdf5_create_timestep, hdf5_field_exist, oft_bin_file
 USE oft_quadrature
-USE oft_mesh_type, ONLY: smesh, cell_is_curved
+USE oft_mesh_type, ONLY: mesh, cell_is_curved
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_local_mat, oft_vector_ptr, &
   vector_extrapolate
@@ -31,7 +31,7 @@ USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
 !
 USE fem_composite, ONLY: oft_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_blagrange, oft_blag_eval, oft_blag_geval
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, oft_lag_eval, oft_lag_geval
 IMPLICIT NONE
 #include "local.h"
 #if !defined(TDIFF_RST_LEN)
@@ -138,9 +138,9 @@ CALL self%rst_save(u, self%t, self%dt, 'tDiff_'//rst_char//'.rst', 'U')
 NULLIFY(plot_vals)
 CALL hdf5_create_timestep(self%t)
 CALL self%u%get_local(plot_vals,1)
-CALL smesh%save_vertex_scalar(plot_vals,'Ti')
+CALL mesh%save_vertex_scalar(plot_vals,'Ti')
 CALL self%u%get_local(plot_vals,2)
-CALL smesh%save_vertex_scalar(plot_vals,'Te')
+CALL mesh%save_vertex_scalar(plot_vals,'Te')
 
 !
 ALLOCATE(self%nlfun)
@@ -266,9 +266,9 @@ DO i=1,self%nsteps
     !---
     CALL hdf5_create_timestep(self%t)
     CALL self%u%get_local(plot_vals,1)
-    CALL smesh%save_vertex_scalar(plot_vals,'Ti')
+    CALL mesh%save_vertex_scalar(plot_vals,'Ti')
     CALL self%u%get_local(plot_vals,2)
-    CALL smesh%save_vertex_scalar(plot_vals,'Te')
+    CALL mesh%save_vertex_scalar(plot_vals,'Te')
   END IF
 END DO
 CALL hist_file%close()
@@ -297,7 +297,7 @@ REAL(r8) :: T_i,T_e,dT_i(3),dT_e(3),jac_mat(3,4),jac_det
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,Ti_weights_loc,Te_weights_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads,res_loc
 REAL(r8), POINTER, DIMENSION(:) :: Ti_weights,Te_weights,Ti_res,Te_res
-quad=>oft_blagrange%quad
+quad=>oft_lagrange%quad
 NULLIFY(Ti_weights,Te_weights,Ti_res,Te_res)
 !---Get weights from solution vector
 CALL a%get_local(Ti_weights,1)
@@ -317,13 +317,13 @@ CALL b%get_local(Te_res,2)
 diag_vals=0.d0
 !$omp parallel private(m,jr,curved,cell_dofs,basis_vals,basis_grads,Ti_weights_loc, &
 !$omp Te_weights_loc,res_loc,jac_mat,jac_det,T_i,T_e,dT_i,dT_e) reduction(+:diag_vals)
-ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
-ALLOCATE(Ti_weights_loc(oft_blagrange%nce),Te_weights_loc(oft_blagrange%nce))
-ALLOCATE(cell_dofs(oft_blagrange%nce),res_loc(oft_blagrange%nce,2))
+ALLOCATE(basis_vals(oft_lagrange%nce),basis_grads(3,oft_lagrange%nce))
+ALLOCATE(Ti_weights_loc(oft_lagrange%nce),Te_weights_loc(oft_lagrange%nce))
+ALLOCATE(cell_dofs(oft_lagrange%nce),res_loc(oft_lagrange%nce,2))
 !$omp do schedule(static)
-DO i=1,smesh%nc
-  curved=cell_is_curved(smesh,i) ! Straight cell test
-  call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i) ! Straight cell test
+  call oft_lagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
   res_loc = 0.d0 ! Zero local (cell) contribution to function
   Ti_weights_loc = Ti_weights(cell_dofs)
   Te_weights_loc = Te_weights(cell_dofs)
@@ -331,15 +331,15 @@ DO i=1,smesh%nc
 ! Quadrature Loop
 !---------------------------------------------------------------------------
   DO m=1,quad%np
-    if(curved.OR.(m==1))call smesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
+    if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
     !---Evaluate value and gradients of basis functions at current point
-    DO jr=1,oft_blagrange%nce ! Loop over degrees of freedom
-      CALL oft_blag_eval(oft_blagrange,i,jr,quad%pts(:,m),basis_vals(jr))
-      CALL oft_blag_geval(oft_blagrange,i,jr,quad%pts(:,m),basis_grads(:,jr),jac_mat)
+    DO jr=1,oft_lagrange%nce ! Loop over degrees of freedom
+      CALL oft_lag_eval(oft_lagrange,i,jr,quad%pts(:,m),basis_vals(jr))
+      CALL oft_lag_geval(oft_lagrange,i,jr,quad%pts(:,m),basis_grads(:,jr),jac_mat)
     END DO
     !---Reconstruct values of solution fields
     T_i = 0.d0; dT_i = 0.d0; T_e = 0.d0; dT_e = 0.d0
-    DO jr=1,oft_blagrange%nce
+    DO jr=1,oft_lagrange%nce
       T_i = T_i + Ti_weights_loc(jr)*basis_vals(jr)
       T_e = T_e + Te_weights_loc(jr)*basis_vals(jr)
       dT_i = dT_i + Ti_weights_loc(jr)*basis_grads(:,jr)
@@ -347,7 +347,7 @@ DO i=1,smesh%nc
     END DO
     diag_vals = diag_vals + [T_i,T_e]*jac_det*quad%wts(m)
     !---Compute local function contributions
-    DO jr=1,oft_blagrange%nce
+    DO jr=1,oft_lagrange%nce
       res_loc(jr,1) = res_loc(jr,1) &
         + basis_vals(jr)*T_i*jac_det*quad%wts(m) &
         + self%dt*kappa_i*(T_i**2.5d0)*DOT_PRODUCT(basis_grads(:,jr),dT_i)*jac_det*quad%wts(m) &
@@ -359,7 +359,7 @@ DO i=1,smesh%nc
     END DO
   END DO
   !---Add local values to full vector
-  DO jr=1,oft_blagrange%nce
+  DO jr=1,oft_lagrange%nce
     !$omp atomic
     Ti_res(cell_dofs(jr)) = Ti_res(cell_dofs(jr)) + res_loc(jr,1)
     !$omp atomic
@@ -370,8 +370,8 @@ END DO
 DEALLOCATE(basis_vals,basis_grads,Ti_weights_loc,Te_weights_loc,cell_dofs,res_loc)
 !$omp end parallel
 IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
-CALL fem_dirichlet_vec(oft_blagrange,Ti_weights,Ti_res,self%Ti_bc)
-CALL fem_dirichlet_vec(oft_blagrange,Te_weights,Te_res,self%Te_bc)
+CALL fem_dirichlet_vec(oft_lagrange,Ti_weights,Ti_res,self%Ti_bc)
+CALL fem_dirichlet_vec(oft_lagrange,Te_weights,Te_res,self%Te_bc)
 !---Put results into full vector
 CALL b%restore_local(Ti_res,1,add=.TRUE.,wait=.TRUE.)
 CALL b%restore_local(Te_res,2,add=.TRUE.)
@@ -398,7 +398,7 @@ class(oft_vector), pointer :: tmp
 type(oft_local_mat), allocatable, dimension(:,:) :: jac_loc
 integer(KIND=omp_lock_kind), allocatable, dimension(:) :: tlocks
 type(oft_quad_type), pointer :: quad
-quad=>oft_blagrange%quad
+quad=>oft_lagrange%quad
 CALL self%jacobian%zero
 NULLIFY(Ti_weights,Te_weights)
 !---Get weights from solution vector
@@ -419,18 +419,18 @@ DO i=1,self%fe_rep%nfields
 END DO
 !$omp parallel private(m,jr,jc,curved,cell_dofs,basis_vals,basis_grads,Ti_weights_loc, &
 !$omp Te_weights_loc,jac_loc,jac_mat,jac_det,T_i,T_e,dT_i,dT_e,iloc)
-ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
-ALLOCATE(Ti_weights_loc(oft_blagrange%nce),Te_weights_loc(oft_blagrange%nce))
-ALLOCATE(cell_dofs(oft_blagrange%nce))
+ALLOCATE(basis_vals(oft_lagrange%nce),basis_grads(3,oft_lagrange%nce))
+ALLOCATE(Ti_weights_loc(oft_lagrange%nce),Te_weights_loc(oft_lagrange%nce))
+ALLOCATE(cell_dofs(oft_lagrange%nce))
 allocate(jac_loc(self%fe_rep%nfields,self%fe_rep%nfields))
 allocate(iloc(self%fe_rep%nfields))
 iloc(1)%v=>cell_dofs
 iloc(2)%v=>cell_dofs
 CALL self%fe_rep%mat_setup_local(jac_loc, self%jacobian_block_mask)
 !$omp do schedule(static)
-DO i=1,smesh%nc
-  curved=cell_is_curved(smesh,i) ! Straight cell test
-  call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i) ! Straight cell test
+  call oft_lagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
   CALL self%fe_rep%mat_zero_local(jac_loc) ! Zero local (cell) contribution to matrix
   Ti_weights_loc = Ti_weights(cell_dofs)
   Te_weights_loc = Te_weights(cell_dofs)
@@ -438,23 +438,23 @@ DO i=1,smesh%nc
 ! Quadrature Loop
 !---------------------------------------------------------------------------
   DO m=1,quad%np
-    if(curved.OR.(m==1))call smesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
+    if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
     !---Evaluate value and gradients of basis functions at current point
-    DO jr=1,oft_blagrange%nce ! Loop over degrees of freedom
-      CALL oft_blag_eval(oft_blagrange,i,jr,quad%pts(:,m),basis_vals(jr))
-      CALL oft_blag_geval(oft_blagrange,i,jr,quad%pts(:,m),basis_grads(:,jr),jac_mat)
+    DO jr=1,oft_lagrange%nce ! Loop over degrees of freedom
+      CALL oft_lag_eval(oft_lagrange,i,jr,quad%pts(:,m),basis_vals(jr))
+      CALL oft_lag_geval(oft_lagrange,i,jr,quad%pts(:,m),basis_grads(:,jr),jac_mat)
     END DO
     !---Reconstruct values of solution fields
     T_i = 0.d0; dT_i = 0.d0; T_e = 0.d0; dT_e = 0.d0
-    DO jr=1,oft_blagrange%nce
+    DO jr=1,oft_lagrange%nce
       T_i = T_i + Ti_weights_loc(jr)*basis_vals(jr)
       T_e = T_e + Te_weights_loc(jr)*basis_vals(jr)
       dT_i = dT_i + Ti_weights_loc(jr)*basis_grads(:,jr)
       dT_e = dT_e + Te_weights_loc(jr)*basis_grads(:,jr)
     END DO
     !---Compute local matrix contributions
-    DO jr=1,oft_blagrange%nce
-      DO jc=1,oft_blagrange%nce
+    DO jr=1,oft_lagrange%nce
+      DO jc=1,oft_lagrange%nce
         !---Ion rows
         jac_loc(1,1)%m(jr,jc) = jac_loc(1,1)%m(jr,jc) &
           + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
@@ -488,8 +488,8 @@ DO i=1,self%fe_rep%nfields
 END DO
 DEALLOCATE(tlocks)
 IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%Ti_bc,1)
-CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%Te_bc,2)
+CALL fem_dirichlet_diag(oft_lagrange,self%jacobian,self%Ti_bc,1)
+CALL fem_dirichlet_diag(oft_lagrange,self%jacobian,self%Te_bc,2)
 !
 call self%fe_rep%vec_create(tmp)
 call self%jacobian%assemble(tmp)
@@ -524,15 +524,9 @@ integer(i4) :: nnodes
 TYPE(fox_nodelist), POINTER :: current_nodes
 #endif
 IF(ASSOCIATED(self%fe_rep))CALL oft_abort("Setup can only be called once","setup",__FILE__)
-!---------------------------------------------------------------------------
-! Read-in Parameters
-!---------------------------------------------------------------------------
-! open(NEWUNIT=io_unit,FILE=oft_env%ifile)
-! read(io_unit,xmhd_options,IOSTAT=ierr)
-! close(io_unit)
-! if(ierr<0)call oft_abort('No tdiff options found in input file.','setup',__FILE__)
-! if(ierr>0)call oft_abort('Error parsing tdiff options in input file.','setup',__FILE__)
-!---Look for xMHD node
+IF(ASSOCIATED(oft_lagrange))CALL oft_abort("FE space already built","setup",__FILE__)
+
+!---Look for XML defintion elements
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   current_nodes=>fox_getElementsByTagName(oft_env%xml,"tdiff")
@@ -546,28 +540,31 @@ IF(ASSOCIATED(oft_env%xml))THEN
   END IF
 END IF
 #endif
-!---
-IF(.NOT.ASSOCIATED(oft_blagrange))THEN
-  IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
-  CALL oft_lag_setup(order, -1)
-END IF
-CALL smesh%setup_io(order)
-!
+
+!---Setup FE representation
+IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
+CALL oft_lag_setup(order, -1)
+CALL mesh%setup_io(order)
+
+!---Build composite FE definition for solution field
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating FE type'
 ALLOCATE(self%fe_rep)
 self%fe_rep%nfields=2
 ALLOCATE(self%fe_rep%fields(self%fe_rep%nfields))
 ALLOCATE(self%fe_rep%field_tags(self%fe_rep%nfields))
-self%fe_rep%fields(1)%fe=>oft_blagrange
+self%fe_rep%fields(1)%fe=>oft_lagrange
 self%fe_rep%field_tags(1)='Ti'
-self%fe_rep%fields(2)%fe=>oft_blagrange
+self%fe_rep%fields(2)%fe=>oft_lagrange
 self%fe_rep%field_tags(2)='Te'
-!---Create template vector
+
+!---Create solution vector
 CALL self%fe_rep%vec_create(self%u)
+
 !---Set boundary conditions (Dirichlet for now)
-self%Ti_bc=>oft_blagrange%be
-self%Te_bc=>oft_blagrange%be
-!---
+self%Ti_bc=>oft_lagrange%be
+self%Te_bc=>oft_lagrange%be
+
+!---Create Jacobian matrix
 ALLOCATE(self%jacobian_block_mask(self%fe_rep%nfields,self%fe_rep%nfields))
 self%jacobian_block_mask=1
 CALL self%fe_rep%mat_create(self%jacobian,self%jacobian_block_mask)
@@ -606,4 +603,4 @@ IF(PRESENT(t))CALL hdf5_read(t,filename,'t')
 IF(PRESENT(dt))CALL hdf5_read(dt,filename,'dt')
 DEBUG_STACK_POP
 end subroutine rst_load
-END MODULE thermal_diffusion
+END MODULE thermal_diffusion_3d

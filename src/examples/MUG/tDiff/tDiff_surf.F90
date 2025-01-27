@@ -8,7 +8,7 @@ USE oft_la_base, ONLY: oft_vector
 !
 USE oft_lag_basis, ONLY: oft_blagrange
 USE oft_blag_operators, ONLY: blag_zerob
-USE thermal_diffusion
+USE thermal_diffusion_2d
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 REAL(r8), POINTER :: vec_vals(:)

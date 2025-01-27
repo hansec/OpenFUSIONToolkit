@@ -1,18 +1,36 @@
 reset
-#
+undo off
+set node constraint on
+
+# Build Geometry
 create sphere radius 1
-#
+
+# Create Tet mesh
 volume 1 scheme Tetmesh
 set tetmesher interior points on
 set tetmesher optimize level 3  overconstrained  off sliver  off
 set tetmesher boundary recovery  off
 volume 1  tetmesh growth_factor 1.0
-#
 volume 1 size .4
 mesh volume 1
-#
-refine parallel fileroot 'sphere_test' overwrite no_execute
-#
+
+# Save linear and quadratic Tet meshes
 block 1 volume 1
+block 1 element type tetra4
+export Genesis  "sphere_tet4_test.in.e" dimension 3 block 1 overwrite
 block 1 element type tetra10
-refine parallel fileroot 'sphere_test2' overwrite no_execute
+export Genesis  "sphere_tet10_test.in.e" dimension 3 block 1 overwrite
+
+
+# Create Hex mesh
+delete mesh volume 1 propagate
+volume 1  scheme sphere max_smooth_iterations 10
+volume 1 size .05
+mesh volume 1
+
+# Save linear and quadratic Hex meshes
+block 1 volume 1
+block 1 element type hex8
+export Genesis  "sphere_hex8_test.in.e" dimension 3 block 1 overwrite
+block 1 element type hex27
+export Genesis  "sphere_hex27_test.in.e" dimension 3 block 1 overwrite

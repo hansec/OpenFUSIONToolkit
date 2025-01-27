@@ -19,7 +19,8 @@ set( OBJS
   thin_wall.F90
   thin_wall_solvers.F90
   thin_wall_hodlr.F90
-  thermal_diffusion.F90
+  thermal_diffusion_2d.F90
+  thermal_diffusion_3d.F90
 )
 
 add_library( oftphysics ${OBJS} )
