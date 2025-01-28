@@ -583,13 +583,13 @@ DO i=1,smesh%nc
     END DO
   END DO
   !---Add local values to full vector
+  !$omp critical
   !$omp simd
   DO jr=1,oft_blagrange%nce
-    !$omp atomic
     Ti_res(cell_dofs(jr)) = Ti_res(cell_dofs(jr)) + res_loc(jr,1)
-    !$omp atomic
     Te_res(cell_dofs(jr)) = Te_res(cell_dofs(jr)) + res_loc(jr,2)
   END DO
+  !$omp end critical
 END DO
 !---Cleanup thread-local storage
 DEALLOCATE(basis_vals,basis_grads,Ti_weights_loc,Te_weights_loc,cell_dofs,res_loc)

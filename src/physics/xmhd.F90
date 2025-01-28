@@ -160,6 +160,10 @@ end type oft_xmhd_probe
 type, public, extends(oft_noop_matrix) :: oft_xmhd_errmatrix
   real(r8) :: dt = 1.E-3_r8 !< Time step
   real(r8) :: diag_vals(7) = 0.d0 !< Diagnostic values
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:,:,:) :: lag_rops => NULL()
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:,:,:) :: hgrad_rops => NULL()
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:,:,:) :: hcurl_rops => NULL()
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: jac_vals => NULL()
   class(oft_vector), pointer :: up => NULL() !< Field at start of time step
 contains
   !> Apply the matrix
@@ -792,6 +796,8 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,*)
 END IF
+CALL nlfun_setup(oft_xmhd_ops%A)
+RETURN
 IF(PRESENT(profile_only))THEN
   IF(profile_only)CALL xmhd_profile(u)
 END IF
@@ -3358,6 +3364,60 @@ IF(xmhd_two_temp)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine xmhd_errmatrix_apply
+!---------------------------------------------------------------------------
+!> Compute the NL error function, where we are solving F(x) = 0
+!!
+!! b = F(a)
+!---------------------------------------------------------------------------
+subroutine nlfun_setup(self)
+class(oft_xmhd_errmatrix), intent(inout) :: self !< NL function object
+type(oft_quad_type), pointer :: quad
+LOGICAL :: curved
+INTEGER(i4) :: i,m,jr,k,jc
+! INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+REAL(r8) :: jac_mat(3,4),jac_det,req_mem
+! REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals
+! REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads
+! REAL(r8), ALLOCATABLE, DIMENSION(:,:,:) :: mass_template
+quad=>oft_hcurl%quad
+!
+ALLOCATE(self%lag_rops(oft_lagrange%nce,quad%np,mesh%nc,4))
+self%lag_rops=0.d0
+ALLOCATE(self%hgrad_rops(oft_hgrad%nce,quad%np,mesh%nc,3))
+self%hgrad_rops=0.d0
+ALLOCATE(self%hcurl_rops(oft_hcurl%nce,quad%np,mesh%nc,6))
+self%hcurl_rops=0.d0
+ALLOCATE(self%jac_vals(quad%np,mesh%nc))
+self%jac_vals=0.d0
+req_mem = SIZE(self%lag_rops)+SIZE(self%hgrad_rops)+SIZE(self%hcurl_rops)+SIZE(self%jac_vals)
+WRITE(*,'(A,ES12.3)')'Required memory (full) [MB]',req_mem*8.d0/1.E6
+! !!$omp parallel private(m,jr,k,jc,curved,cell_dofs,basis_vals,basis_grads, &
+! !!$omp jac_mat,jac_det,mass_template)
+! ! ALLOCATE(basis_vals(oft_lagrange%nce),basis_grads(3,oft_lagrange%nce))
+! ! ALLOCATE(cell_dofs(oft_lagrange%nce),mass_template(oft_lagrange%nce,oft_lagrange%nce,1))
+! !!$omp do schedule(static)
+! DO i=1,mesh%nc
+!   curved=cell_is_curved(mesh,i) ! Straight cell test
+!   ! call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+! !---------------------------------------------------------------------------
+! ! Quadrature Loop
+! !---------------------------------------------------------------------------
+!   ! mass_template=0.d0
+!   DO m=1,quad%np
+!     if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
+!     self%jac_vals(m,i)=jac_det
+!     ! self%jac_mat(m,i,:,:)=TRANSPOSE(jac_mat)
+!     !---Evaluate value and gradients of basis functions at current point
+!     DO jr=1,oft_lagrange%nce ! Loop over degrees of freedom
+!       CALL oft_lag_eval(oft_lagrange,i,jr,quad%pts(:,m),self%lag_rops(jr,m,i,1))
+!       CALL oft_lag_geval(oft_lagrange,i,jr,quad%pts(:,m),self%lag_rops(jr,m,i,2:4),jac_mat)
+!     END DO
+!   END DO
+! END DO
+! !---Cleanup thread-local storage
+! ! DEALLOCATE(basis_vals,basis_grads,cell_dofs,mass_template)
+! !!$omp end parallel
+end subroutine nlfun_setup
 !---------------------------------------------------------------------------
 !> Compute the mass matrix for solution field
 !!
