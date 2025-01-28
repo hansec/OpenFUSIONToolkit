@@ -351,11 +351,11 @@ DO i=1,mesh%nc
       res_loc(jr,1) = res_loc(jr,1) &
         + basis_vals(jr)*T_i*jac_det*quad%wts(m) &
         + self%dt*kappa_i*(T_i**2.5d0)*DOT_PRODUCT(basis_grads(:,jr),dT_i)*jac_det*quad%wts(m) &
-        - self%dt*tau_eq_inv*(T_e-T_i)*jac_det*quad%wts(m)
+        - self%dt*tau_eq_inv*basis_vals(jr)*(T_e-T_i)*jac_det*quad%wts(m)
       res_loc(jr,2) = res_loc(jr,2) &
         + basis_vals(jr)*T_e*jac_det*quad%wts(m) &
         + self%dt*kappa_e*(T_e**2.5d0)*DOT_PRODUCT(basis_grads(:,jr),dT_e)*jac_det*quad%wts(m) &
-        - self%dt*tau_eq_inv*(T_i-T_e)*jac_det*quad%wts(m)
+        - self%dt*tau_eq_inv*basis_vals(jr)*(T_i-T_e)*jac_det*quad%wts(m)
     END DO
   END DO
   !---Add local values to full vector
@@ -460,17 +460,17 @@ DO i=1,mesh%nc
           + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
           + self%dt*kappa_i*(T_i**2.5d0)*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m) &
           + self%dt*kappa_i*(T_i**1.5d0)*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr),dT_i)*jac_det*quad%wts(m) &
-          - self%dt*tau_eq_inv*(-basis_vals(jc))*jac_det*quad%wts(m)
+          - self%dt*tau_eq_inv*basis_vals(jr)*(-basis_vals(jc))*jac_det*quad%wts(m)
         jac_loc(1,2)%m(jr,jc) = jac_loc(1,2)%m(jr,jc) &
-          - self%dt*tau_eq_inv*(basis_vals(jc))*jac_det*quad%wts(m)
+          - self%dt*tau_eq_inv*basis_vals(jr)*(basis_vals(jc))*jac_det*quad%wts(m)
         !---Electron rows
         jac_loc(2,2)%m(jr,jc) = jac_loc(2,2)%m(jr,jc) &
           + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m) &
           + self%dt*kappa_e*(T_e**2.5d0)*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*jac_det*quad%wts(m) &
           + self%dt*kappa_e*(T_e**1.5d0)*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr),dT_e)*jac_det*quad%wts(m) &
-          - self%dt*tau_eq_inv*(-basis_vals(jc))*jac_det*quad%wts(m)
+          - self%dt*tau_eq_inv*basis_vals(jr)*(-basis_vals(jc))*jac_det*quad%wts(m)
         jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
-          - self%dt*tau_eq_inv*(basis_vals(jc))*jac_det*quad%wts(m)
+          - self%dt*tau_eq_inv*basis_vals(jr)*(basis_vals(jc))*jac_det*quad%wts(m)
       END DO
     END DO
   END DO
