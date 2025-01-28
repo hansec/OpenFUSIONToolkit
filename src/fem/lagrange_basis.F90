@@ -591,13 +591,17 @@ end subroutine oft_lag_setup_bmesh
 !! @param[in] f Position in cell in logical space
 !! @param[out] val Value of interpolation function (dof) at point (f)
 !---------------------------------------------------------------------------
-subroutine oft_lag_eval(self,cell,dof,f,val)
+subroutine oft_lag_eval(self,cell,dof,f,val,cell_orient)
 class(oft_scalar_fem), intent(in) :: self
 integer(i4), intent(in) :: cell,dof
 real(r8), intent(in) :: f(:)
 real(r8), intent(out) :: val
+logical, optional, intent(in) :: cell_orient
 integer(i4) :: ed,etmp(2),fc,ftmp(3),ind,finds(16)
+logical :: do_orient
 DEBUG_STACK_PUSH
+do_orient=.TRUE.
+IF(PRESENT(cell_orient))do_orient=cell_orient
 IF(hex_mesh)THEN
   select case(self%cmap(dof)%type)
     case(1)
@@ -623,11 +627,19 @@ ELSE
       val=lag_1d(self%order+1,f(self%cmap(dof)%el),self%xnodes, &
          self%order+1)
     case(2)
-      etmp=oriented_edges(:,self%cmap(dof)%el)
+      IF(do_orient)THEN
+        etmp=oriented_edges(:,self%cmap(dof)%el)
+      ELSE
+        etmp=(/self%mesh%cell_ed(1,self%cmap(dof)%el),self%mesh%cell_ed(2,self%cmap(dof)%el)/)
+      END IF
       val=lag_1d_bary(self%cmap(dof)%ind,f(etmp),self%xnodes, &
         self%order+1)
     case(3)
-      ftmp=oriented_faces(:,self%cmap(dof)%el)
+      IF(do_orient)THEN
+        ftmp=oriented_faces(:,self%cmap(dof)%el)
+      ELSE
+        ftmp=(/self%mesh%cell_fc(1,self%cmap(dof)%el),self%mesh%cell_fc(2,self%cmap(dof)%el),self%mesh%cell_fc(3,self%cmap(dof)%el)/)
+      END IF
       val=lag_2d_bary(self%inodesf(:,self%cmap(dof)%ind,1), &
         f(ftmp),self%xnodes,self%order+1)
     case(4)
@@ -650,13 +662,17 @@ end subroutine oft_lag_eval
 !! @param[in] f Position in cell in logical space
 !! @param[out] val Value of interpolation function (dof) at point (f)
 !---------------------------------------------------------------------------
-subroutine oft_blag_eval(self,face,dof,f,val)
+subroutine oft_blag_eval(self,face,dof,f,val,cell_orient)
 class(oft_scalar_bfem), intent(in) :: self
 integer(i4), intent(in) :: face,dof
 real(r8), intent(in) :: f(:)
 real(r8), intent(out) :: val
+logical, optional, intent(in) :: cell_orient
 integer(i4) :: ed,etmp(2),fc,ftmp(3),finds(16),ind
+logical :: do_orient
 DEBUG_STACK_PUSH
+do_orient=.TRUE.
+IF(PRESENT(cell_orient))do_orient=cell_orient
 IF(hex_mesh)THEN
   select case(self%cmap(dof)%type)
     case(1)
@@ -680,13 +696,13 @@ ELSE
     case(2)
       ed=self%mesh%lce(self%cmap(dof)%el,face)
       etmp=(/self%mesh%cell_ed(1,self%cmap(dof)%el),self%mesh%cell_ed(2,self%cmap(dof)%el)/)
-      call orient_list2(ed,etmp)
+      IF(do_orient)call orient_list2(ed,etmp)
       val=lag_1d_bary(self%cmap(dof)%ind,f(etmp),self%xnodes, &
         self%order+1)
     case(3)
       fc=self%mesh%lco(face)
       ftmp=(/1,2,3/)
-      call orient_listn(fc,ftmp,3_i4)
+      IF(do_orient)call orient_listn(fc,ftmp,3_i4)
       val=lag_2d_bary(self%inodesf(:,self%cmap(dof)%ind), &
         f(ftmp),self%xnodes,self%order+1)
   end select
@@ -932,15 +948,19 @@ end subroutine tet_eval_all4
 !! @param[out] val Gradient of lagrange element (dof) at point (f) [3]
 !! @param[in] gop Cell Jacobian matrix at point (f) [3,4]
 !---------------------------------------------------------------------------
-subroutine oft_lag_geval(self,cell,dof,f,val,gop)
+subroutine oft_lag_geval(self,cell,dof,f,val,gop,cell_orient)
 class(oft_scalar_fem), intent(in) :: self
 integer(i4), intent(in) :: cell,dof
 real(r8), intent(in) :: f(:)
 real(r8), intent(in) :: gop(:,:)
-real(r8), intent(out) :: val(3)
+real(r8), intent(out) :: val(:)
+logical, optional, intent(in) :: cell_orient
 real(r8) :: cofs(4),vtmp(3)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i,ind,finds(16)
+logical :: do_orient
 DEBUG_STACK_PUSH
+do_orient=.TRUE.
+IF(PRESENT(cell_orient))do_orient=cell_orient
 IF(hex_mesh)THEN
   val=0.d0
   select case(self%cmap(dof)%type)
@@ -980,11 +1000,19 @@ ELSE
       cofs(self%cmap(dof)%el)=dlag_1d(self%order+1,f(self%cmap(dof)%el), &
          self%xnodes,self%order+1)
     case(2)
-      etmp=oriented_edges(:,self%cmap(dof)%el)
+      IF(do_orient)THEN
+        etmp=oriented_edges(:,self%cmap(dof)%el)
+      ELSE
+        etmp=(/self%mesh%cell_ed(1,self%cmap(dof)%el),self%mesh%cell_ed(2,self%cmap(dof)%el)/)
+      END IF
       cofs(etmp)=dlag_1d_bary(self%cmap(dof)%ind,f(etmp),self%xnodes, &
         self%order+1)
     case(3)
-      ftmp=oriented_faces(:,self%cmap(dof)%el)
+      IF(do_orient)THEN
+        ftmp=oriented_faces(:,self%cmap(dof)%el)
+      ELSE
+        ftmp=(/self%mesh%cell_fc(1,self%cmap(dof)%el),self%mesh%cell_fc(2,self%cmap(dof)%el),self%mesh%cell_fc(3,self%cmap(dof)%el)/)
+      END IF
       cofs(ftmp)=dlag_2d_bary(self%inodesf(:,self%cmap(dof)%ind,1), &
         f(ftmp),self%xnodes,self%order+1)
     case(4)
@@ -996,6 +1024,7 @@ ELSE
   do i=1,4
     val=val+gop(:,i)*cofs(i)
   end do
+  IF(.NOT.do_orient)val=cofs
 END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_geval
@@ -1014,15 +1043,19 @@ end subroutine oft_lag_geval
 !! @param[out] val Gradient of lagrange element (dof) at point (f) [3]
 !! @param[in] gop Cell Jacobian matrix at point (f) [3,4]
 !---------------------------------------------------------------------------
-subroutine oft_blag_geval(self,face,dof,f,val,gop)
+subroutine oft_blag_geval(self,face,dof,f,val,gop,cell_orient)
 class(oft_scalar_bfem), intent(in) :: self
 integer(i4), intent(in) :: face,dof
 real(r8), intent(in) :: f(:)
 real(r8), optional, intent(in) :: gop(3,3)
 real(r8), intent(out) :: val(3)
+logical, optional, intent(in) :: cell_orient
 real(r8) :: grads(3,3),cofs(3)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i,finds(16),ind
+logical :: do_orient
 DEBUG_STACK_PUSH
+do_orient=.TRUE.
+IF(PRESENT(cell_orient))do_orient=cell_orient
 grads=1.d0
 if(present(gop))grads=gop
 IF(hex_mesh)THEN
@@ -1056,13 +1089,13 @@ ELSE
     case(2)
       ed=self%mesh%lce(self%cmap(dof)%el,face)
       etmp=(/self%mesh%cell_ed(1,self%cmap(dof)%el),self%mesh%cell_ed(2,self%cmap(dof)%el)/)
-      call orient_list2(ed,etmp)
+      IF(do_orient)call orient_list2(ed,etmp)
       cofs(etmp)=dlag_1d_bary(self%cmap(dof)%ind,f(etmp),self%xnodes, &
         self%order+1)
     case(3)
       fc=self%mesh%lco(face)
       ftmp=(/1,2,3/)
-      call orient_listn(fc,ftmp,3_i4)
+      IF(do_orient)call orient_listn(fc,ftmp,3_i4)
       cofs(ftmp)=dlag_2d_bary(self%inodesf(:,self%cmap(dof)%ind), &
         f(ftmp),self%xnodes,self%order+1)
   end select
@@ -1071,6 +1104,7 @@ ELSE
   do i=1,3
     val=val+grads(:,i)*cofs(i)
   end do
+  IF(.NOT.do_orient)val=cofs
 END IF
 DEBUG_STACK_POP
 end subroutine oft_blag_geval

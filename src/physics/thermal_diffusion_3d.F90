@@ -28,6 +28,7 @@ USE oft_solver_utils, ONLY: create_solver_xml, create_diag_pre
 USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
+USE oft_lu, ONLY: lapack_matinv
 !
 USE fem_composite, ONLY: oft_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
@@ -49,9 +50,18 @@ TYPE, extends(oft_noop_matrix) :: tdiff_nlfun
   REAL(r8) :: diag_vals(2) = 0.d0 !< Needs docs
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: Ti_bc => NULL() !< Ti BC flag
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: Te_bc => NULL() !< Te BC flag
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:,:,:) :: full_rops => NULL()
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: jac_vals => NULL()
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:,:,:) :: jac_mat => NULL()
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:,:) :: template_rops => NULL()
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:,:,:) :: cell_trans => NULL()
 CONTAINS
   !> Apply the matrix
-  PROCEDURE :: apply_real => nlfun_apply
+  ! PROCEDURE :: apply_real => nlfun_apply
+  PROCEDURE :: apply_real => nlfun_apply_full
+  ! PROCEDURE :: apply_real => nlfun_apply_red
+  !>
+  PROCEDURE :: setup => nlfun_setup
 END TYPE tdiff_nlfun
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -149,6 +159,17 @@ self%nlfun%kappa_i=self%kappa_i
 self%nlfun%tau_eq=self%tau_eq
 self%nlfun%Ti_bc=>self%Ti_bc
 self%nlfun%Te_bc=>self%Te_bc
+CALL self%nlfun%setup()
+
+WRITE(*,*)'# of DOF',oft_lagrange%ne
+IF(oft_env%head_proc)CALL mytimer%tick()
+DO i=1,100
+  CALL self%nlfun%apply(u,v)
+END DO
+IF(oft_env%head_proc)THEN
+  elapsed_time=mytimer%tock()
+  WRITE(*,'(2X,A,ES12.3)')'NL-function time = ',elapsed_time/100.d0
+END IF
 
 !---
 CALL build_approx_jacobian(self,u)
@@ -222,7 +243,7 @@ DO i=1,self%nsteps
   self%nlfun%dt=self%dt
   IF((.NOT.self%mfnk).OR.MOD(i,2)==0)THEN
     CALL update_jacobian(u)
-    CALL solver%pre%update(.TRUE.)
+    IF(MOD(i,4)==0)CALL solver%pre%update(.TRUE.)
   END IF
   !
   DO j=maxextrap,2,-1
@@ -379,6 +400,281 @@ self%diag_vals=oft_mpi_sum(diag_vals,2)
 !---Cleanup remaining storage
 DEALLOCATE(Ti_res,Te_res,Ti_weights,Te_weights)
 end subroutine nlfun_apply
+!---------------------------------------------------------------------------
+!> Compute the NL error function, where we are solving F(x) = 0
+!!
+!! b = F(a)
+!---------------------------------------------------------------------------
+subroutine nlfun_apply_full(self,a,b)
+class(tdiff_nlfun), intent(inout) :: self !< NL function object
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_vector), intent(inout) :: b !< Result of metric function
+type(oft_quad_type), pointer :: quad
+LOGICAL :: curved
+INTEGER(i4) :: i,m,jr
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+REAL(r8) :: kappa_e,kappa_i,tau_eq_inv,diag_vals(2)
+REAL(r8) :: T_i,T_e,dT_i(3),dT_e(3),jac_mat(3,4),jac_det
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,Ti_weights_loc,Te_weights_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads,res_loc
+REAL(r8), POINTER, DIMENSION(:) :: Ti_weights,Te_weights,Ti_res,Te_res
+quad=>oft_lagrange%quad
+NULLIFY(Ti_weights,Te_weights,Ti_res,Te_res)
+!---Get weights from solution vector
+CALL a%get_local(Ti_weights,1)
+CALL a%get_local(Te_weights,2)
+!---
+kappa_e=self%kappa_e
+kappa_i=self%kappa_i
+IF(self%tau_eq>0.d0)THEN
+  tau_eq_inv=1.d0/self%tau_eq
+ELSE
+  tau_eq_inv=1.d0
+END IF
+!---Zero result and get storage array
+CALL b%set(0.d0)
+CALL b%get_local(Ti_res,1)
+CALL b%get_local(Te_res,2)
+diag_vals=0.d0
+!$omp parallel private(m,jr,curved,cell_dofs,Ti_weights_loc, &
+!$omp Te_weights_loc,res_loc,jac_mat,jac_det,T_i,T_e,dT_i,dT_e) reduction(+:diag_vals)
+ALLOCATE(Ti_weights_loc(oft_lagrange%nce),Te_weights_loc(oft_lagrange%nce))
+ALLOCATE(cell_dofs(oft_lagrange%nce),res_loc(oft_lagrange%nce,2))
+!$omp do schedule(static)
+DO i=1,mesh%nc
+  call oft_lagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+  res_loc = 0.d0 ! Zero local (cell) contribution to function
+  Ti_weights_loc = Ti_weights(cell_dofs)
+  Te_weights_loc = Te_weights(cell_dofs)
+!---------------------------------------------------------------------------
+! Quadrature Loop
+!---------------------------------------------------------------------------
+  DO m=1,quad%np
+    jac_det=self%jac_vals(m,i)*quad%wts(m)
+    !---Reconstruct values of solution fields
+    T_i = 0.d0; dT_i = 0.d0; T_e = 0.d0; dT_e = 0.d0
+    !$omp simd reduction(+:T_i,dT_i,T_e,dT_e)
+    DO jr=1,oft_lagrange%nce
+      T_i = T_i + Ti_weights_loc(jr)*self%full_rops(jr,m,i,1)
+      T_e = T_e + Te_weights_loc(jr)*self%full_rops(jr,m,i,1)
+      dT_i = dT_i + Ti_weights_loc(jr)*self%full_rops(jr,m,i,2:4)
+      dT_e = dT_e + Te_weights_loc(jr)*self%full_rops(jr,m,i,2:4)
+    END DO
+    diag_vals = diag_vals + [T_i,T_e]*jac_det
+    !---Compute local function contributions
+    !$omp simd
+    DO jr=1,oft_lagrange%nce
+      res_loc(jr,1) = res_loc(jr,1) &
+        + (self%full_rops(jr,m,i,1)*T_i &
+        + self%dt*kappa_i*(T_i**2.5d0)*DOT_PRODUCT(self%full_rops(jr,m,i,2:4),dT_i)*jac_det &
+        - self%full_rops(jr,m,i,1)*self%dt*tau_eq_inv*(T_e-T_i))*jac_det
+      res_loc(jr,2) = res_loc(jr,2) &
+        + (self%full_rops(jr,m,i,1)*T_e &
+        + self%dt*kappa_e*(T_e**2.5d0)*DOT_PRODUCT(self%full_rops(jr,m,i,2:4),dT_e) &
+        - self%full_rops(jr,m,i,1)*self%dt*tau_eq_inv*(T_i-T_e))*jac_det
+    END DO
+  END DO
+  !---Add local values to full vector
+  !$omp simd
+  DO jr=1,oft_lagrange%nce
+    !$omp atomic
+    Ti_res(cell_dofs(jr)) = Ti_res(cell_dofs(jr)) + res_loc(jr,1)
+    !$omp atomic
+    Te_res(cell_dofs(jr)) = Te_res(cell_dofs(jr)) + res_loc(jr,2)
+  END DO
+END DO
+!---Cleanup thread-local storage
+DEALLOCATE(Ti_weights_loc,Te_weights_loc,cell_dofs,res_loc)
+!$omp end parallel
+IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
+CALL fem_dirichlet_vec(oft_lagrange,Ti_weights,Ti_res,self%Ti_bc)
+CALL fem_dirichlet_vec(oft_lagrange,Te_weights,Te_res,self%Te_bc)
+!---Put results into full vector
+CALL b%restore_local(Ti_res,1,add=.TRUE.,wait=.TRUE.)
+CALL b%restore_local(Te_res,2,add=.TRUE.)
+self%diag_vals=oft_mpi_sum(diag_vals,2)
+!---Cleanup remaining storage
+DEALLOCATE(Ti_res,Te_res,Ti_weights,Te_weights)
+end subroutine nlfun_apply_full
+!---------------------------------------------------------------------------
+!> Compute the NL error function, where we are solving F(x) = 0
+!!
+!! b = F(a)
+!---------------------------------------------------------------------------
+subroutine nlfun_apply_red(self,a,b)
+class(tdiff_nlfun), intent(inout) :: self !< NL function object
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_vector), intent(inout) :: b !< Result of metric function
+type(oft_quad_type), pointer :: quad
+LOGICAL :: curved
+INTEGER(i4) :: i,m,jr,k
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+REAL(r8) :: kappa_e,kappa_i,tau_eq_inv,diag_vals(2)
+REAL(r8) :: T_i,T_e,dT_i(3),dT_e(3),jac_mat(3,4),jac_det
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,Ti_weights_loc,Te_weights_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads,res_loc
+REAL(r8), POINTER, DIMENSION(:) :: Ti_weights,Te_weights,Ti_res,Te_res
+quad=>oft_lagrange%quad
+NULLIFY(Ti_weights,Te_weights,Ti_res,Te_res)
+!---Get weights from solution vector
+CALL a%get_local(Ti_weights,1)
+CALL a%get_local(Te_weights,2)
+!---
+kappa_e=self%kappa_e
+kappa_i=self%kappa_i
+IF(self%tau_eq>0.d0)THEN
+  tau_eq_inv=1.d0/self%tau_eq
+ELSE
+  tau_eq_inv=1.d0
+END IF
+!---Zero result and get storage array
+CALL b%set(0.d0)
+CALL b%get_local(Ti_res,1)
+CALL b%get_local(Te_res,2)
+diag_vals=0.d0
+!$omp parallel private(m,jr,k,curved,cell_dofs,basis_vals,basis_grads,Ti_weights_loc, &
+!$omp Te_weights_loc,res_loc,jac_mat,jac_det,T_i,T_e,dT_i,dT_e) reduction(+:diag_vals)
+ALLOCATE(basis_vals(oft_lagrange%nce),basis_grads(oft_lagrange%nce,3))
+ALLOCATE(Ti_weights_loc(oft_lagrange%nce),Te_weights_loc(oft_lagrange%nce))
+ALLOCATE(cell_dofs(oft_lagrange%nce),res_loc(oft_lagrange%nce,2))
+!$omp do schedule(static)
+DO i=1,mesh%nc
+  call oft_lagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+  res_loc = 0.d0 ! Zero local (cell) contribution to function
+  Ti_weights_loc = Ti_weights(cell_dofs)
+  Te_weights_loc = Te_weights(cell_dofs)
+!---------------------------------------------------------------------------
+! Quadrature Loop
+!---------------------------------------------------------------------------
+  DO m=1,quad%np
+    jac_det=self%jac_vals(m,i)*quad%wts(m)
+    basis_grads=0.d0
+    DO k=1,4
+      basis_vals=MATMUL(self%cell_trans(:,:,i,1),self%template_rops(:,m,k+1))
+      DO jr=1,3
+        basis_grads(:,jr) = basis_grads(:,jr) + basis_vals*self%jac_mat(m,i,k,jr)
+      END DO
+    END DO
+    basis_vals=MATMUL(self%cell_trans(:,:,i,1),self%template_rops(:,m,1))
+    !---Reconstruct values of solution fields
+    T_i = 0.d0; dT_i = 0.d0; T_e = 0.d0; dT_e = 0.d0
+    !$omp simd reduction(+:T_i,dT_i,T_e,dT_e)
+    DO jr=1,oft_lagrange%nce
+      T_i = T_i + Ti_weights_loc(jr)*basis_vals(jr)
+      T_e = T_e + Te_weights_loc(jr)*basis_vals(jr)
+      dT_i = dT_i + Ti_weights_loc(jr)*basis_grads(jr,:)
+      dT_e = dT_e + Te_weights_loc(jr)*basis_grads(jr,:)
+    END DO
+    diag_vals = diag_vals + [T_i,T_e]*jac_det
+    !---Compute local function contributions
+    !$omp simd
+    DO jr=1,oft_lagrange%nce
+      res_loc(jr,1) = res_loc(jr,1) &
+        + (basis_vals(jr)*T_i &
+        + self%dt*kappa_i*(T_i**2.5d0)*DOT_PRODUCT(basis_grads(jr,:),dT_i)*jac_det &
+        - basis_vals(jr)*self%dt*tau_eq_inv*(T_e-T_i))*jac_det
+      res_loc(jr,2) = res_loc(jr,2) &
+        + (basis_vals(jr)*T_e &
+        + self%dt*kappa_e*(T_e**2.5d0)*DOT_PRODUCT(basis_grads(jr,:),dT_e) &
+        - basis_vals(jr)*self%dt*tau_eq_inv*(T_i-T_e))*jac_det
+    END DO
+  END DO
+  !---Add local values to full vector
+  !$omp simd
+  DO jr=1,oft_lagrange%nce
+    !$omp atomic
+    Ti_res(cell_dofs(jr)) = Ti_res(cell_dofs(jr)) + res_loc(jr,1)
+    !$omp atomic
+    Te_res(cell_dofs(jr)) = Te_res(cell_dofs(jr)) + res_loc(jr,2)
+  END DO
+END DO
+!---Cleanup thread-local storage
+DEALLOCATE(basis_vals,basis_grads,Ti_weights_loc,Te_weights_loc,cell_dofs,res_loc)
+!$omp end parallel
+IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
+CALL fem_dirichlet_vec(oft_lagrange,Ti_weights,Ti_res,self%Ti_bc)
+CALL fem_dirichlet_vec(oft_lagrange,Te_weights,Te_res,self%Te_bc)
+!---Put results into full vector
+CALL b%restore_local(Ti_res,1,add=.TRUE.,wait=.TRUE.)
+CALL b%restore_local(Te_res,2,add=.TRUE.)
+self%diag_vals=oft_mpi_sum(diag_vals,2)
+!---Cleanup remaining storage
+DEALLOCATE(Ti_res,Te_res,Ti_weights,Te_weights)
+end subroutine nlfun_apply_red
+!---------------------------------------------------------------------------
+!> Compute the NL error function, where we are solving F(x) = 0
+!!
+!! b = F(a)
+!---------------------------------------------------------------------------
+subroutine nlfun_setup(self)
+class(tdiff_nlfun), intent(inout) :: self !< NL function object
+type(oft_quad_type), pointer :: quad
+LOGICAL :: curved
+INTEGER(i4) :: i,m,jr,k,jc
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+REAL(r8) :: jac_mat(3,4),jac_det,req_mem
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads
+REAL(r8), ALLOCATABLE, DIMENSION(:,:,:) :: mass_template
+quad=>oft_lagrange%quad
+!
+ALLOCATE(self%full_rops(oft_lagrange%nce,quad%np,mesh%nc,4))
+self%full_rops=0.d0
+ALLOCATE(self%jac_vals(quad%np,mesh%nc))
+self%jac_vals=0.d0
+req_mem = SIZE(self%full_rops)*8.d0+SIZE(self%jac_vals)*8.d0
+WRITE(*,'(A,ES12.3)')'Required memory (full) [MB]',req_mem/1.E6
+ALLOCATE(self%template_rops(oft_lagrange%nce,quad%np,5))
+self%template_rops=0.d0
+ALLOCATE(self%jac_mat(quad%np,mesh%nc,4,3))
+self%jac_mat=0.d0
+ALLOCATE(self%cell_trans(oft_lagrange%nce,oft_lagrange%nce,mesh%nc,1))
+self%cell_trans=0.d0
+req_mem = SIZE(self%template_rops)*8.d0+SIZE(self%jac_vals)*8.d0+SIZE(self%jac_mat)*8.d0+SIZE(self%cell_trans)*8.d0
+WRITE(*,'(A,ES12.3)')'Required memory (reduced) [MB]',req_mem/1.E6
+!!$omp parallel private(m,jr,k,jc,curved,cell_dofs,basis_vals,basis_grads, &
+!!$omp jac_mat,jac_det,mass_template)
+ALLOCATE(basis_vals(oft_lagrange%nce),basis_grads(3,oft_lagrange%nce))
+ALLOCATE(cell_dofs(oft_lagrange%nce),mass_template(oft_lagrange%nce,oft_lagrange%nce,1))
+!!$omp do schedule(static)
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i) ! Straight cell test
+  ! call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+!---------------------------------------------------------------------------
+! Quadrature Loop
+!---------------------------------------------------------------------------
+  mass_template=0.d0
+  DO m=1,quad%np
+    if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
+    self%jac_vals(m,i)=jac_det
+    self%jac_mat(m,i,:,:)=TRANSPOSE(jac_mat)
+    !---Evaluate value and gradients of basis functions at current point
+    DO jr=1,oft_lagrange%nce ! Loop over degrees of freedom
+      CALL oft_lag_eval(oft_lagrange,i,jr,quad%pts(:,m),self%full_rops(jr,m,i,1))
+      CALL oft_lag_geval(oft_lagrange,i,jr,quad%pts(:,m),self%full_rops(jr,m,i,2:4),jac_mat)
+    END DO
+    IF(i==1)THEN
+      DO jr=1,oft_lagrange%nce
+        CALL oft_lag_eval(oft_lagrange,i,jr,quad%pts(:,m),self%template_rops(jr,m,1),cell_orient=.FALSE.)
+        CALL oft_lag_geval(oft_lagrange,i,jr,quad%pts(:,m),self%template_rops(jr,m,2:5),jac_mat,cell_orient=.FALSE.)
+      END DO
+    END IF
+    basis_vals = self%template_rops(:,m,1)
+    DO jr=1,oft_lagrange%nce
+      DO jc=1,oft_lagrange%nce
+        mass_template(jr,jc,1) = mass_template(jr,jc,1) + basis_vals(jr)*basis_vals(jc)*jac_det*quad%wts(m)
+        self%cell_trans(jr,jc,i,1) = self%cell_trans(jr,jc,i,1) + basis_vals(jr)*self%full_rops(jc,m,i,1)*jac_det*quad%wts(m)
+      END DO
+    END DO
+  END DO
+  CALL lapack_matinv(oft_lagrange%nce,self%cell_trans(:,:,i,1),jc)
+  IF(jc/=0)WRITE(*,*)'Bad factor',i
+  self%cell_trans(:,:,i,1)=MATMUL(self%cell_trans(:,:,i,1),mass_template(:,:,1))
+END DO
+!---Cleanup thread-local storage
+DEALLOCATE(basis_vals,basis_grads,cell_dofs,mass_template)
+!!$omp end parallel
+end subroutine nlfun_setup
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
