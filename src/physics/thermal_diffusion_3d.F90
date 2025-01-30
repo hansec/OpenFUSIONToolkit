@@ -308,7 +308,7 @@ kappa_i=self%kappa_i
 IF(self%tau_eq>0.d0)THEN
   tau_eq_inv=1.d0/self%tau_eq
 ELSE
-  tau_eq_inv=1.d0
+  tau_eq_inv=0.d0
 END IF
 !---Zero result and get storage array
 CALL b%set(0.d0)
@@ -410,7 +410,7 @@ kappa_i=self%kappa_i
 IF(self%tau_eq>0.d0)THEN
   tau_eq_inv=1.d0/self%tau_eq
 ELSE
-  tau_eq_inv=1.d0
+  tau_eq_inv=0.d0
 END IF
 !--Setup thread locks
 ALLOCATE(tlocks(self%fe_rep%nfields))
