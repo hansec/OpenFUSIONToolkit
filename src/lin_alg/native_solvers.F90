@@ -2017,6 +2017,8 @@ IF(native_matrix_cast(A_native,self%A)<0)CALL oft_abort('Native matrix required'
   'bjprecond_apply',__FILE__)
 !---Initialize local matrix
 IF(.NOT.self%initialized)THEN
+  IF(.NOT.ASSOCIATED(self%pre))CALL oft_abort('No sub-solver (preconditioner defined)', &
+    'bjprecond_apply',__FILE__)
   color_avail=.FALSE.
   CALL solver_setup(self)
   IF(self%nlocal==-1)THEN
@@ -2199,6 +2201,7 @@ IF(.NOT.self%initialized)THEN
     ALLOCATE(uloc%stitch_info)
     uloc%stitch_info%skip=.TRUE.
     !---Create local sub-matrices
+    !$omp parallel do
     DO i=1,self%nlocal
       CALL self%alocals(i)%setup(A_native,uloc,part=self%parts(i)%v)
       ALLOCATE(self%solvers(i)%s, source=pretmp)
@@ -2221,6 +2224,7 @@ thread_safe=self%pre%check_thread()
 IF(self%nlocal>1)THEN
   IF(self%update_slice)THEN
     CALL A_native%update_slice
+    !$omp parallel do
     DO i=1,self%nlocal
       CALL self%alocals(i)%update_slice
     END DO
