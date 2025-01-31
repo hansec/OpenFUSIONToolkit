@@ -1,3 +1,11 @@
+!!MUG Example: Spheromak Heating    {#doc_mug_sph_ex5}
+!!============================
+!!
+!![TOC]
+!!
+!! This example demonstrates the use of \ref doc_mhd_main "MUG"
+!!
+! START SOURCE
 PROGRAM tDiff_circle
 !---Runtime
 USE oft_base
@@ -63,3 +71,4 @@ CALL tDiff_sim%run_simulation()
 !---Finalize enviroment
 CALL oft_finalize
 END PROGRAM tDiff_circle
+! STOP SOURCE

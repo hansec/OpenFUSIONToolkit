@@ -58,9 +58,9 @@ PUBLIC lapack_matinv, lapack_cholesky
 !> Native ILU(0) preconditioner information object
 !---------------------------------------------------------------------------
 TYPE :: native_ilu_struc
-  INTEGER(i4), POINTER, DIMENSION(:) :: ju => NULL() !< Diagonal entry indices
-  INTEGER(i4), POINTER, DIMENSION(:) :: jlu => NULL() !< Column values in iLU factors
-  REAL(r8), POINTER, DIMENSION(:) :: alu => NULL() !< Values of iLU factors
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: ju => NULL() !< Diagonal entry indices
+  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: jlu => NULL() !< Column values in iLU factors
+  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: alu => NULL() !< Values of iLU factors
 END TYPE native_ilu_struc
 !---------------------------------------------------------------------------
 ! TYPE superlu_struc
@@ -576,7 +576,7 @@ SELECT CASE(TRIM(self%package))
       CALL oft_superlu_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
         self%superlu_struct%f_factors,self%superlu_struct%col_perm,ierr)
-      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (SuperLU)','lusolver_apply',__FILE__)
 #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
       !$omp end critical (superlu_solve)
 #endif
@@ -590,7 +590,7 @@ SELECT CASE(TRIM(self%package))
     CALL oft_superlu_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
       self%superlu_struct%f_factors,self%superlu_struct%col_perm,ierr)
-    IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
+    IF(ierr/=0)CALL oft_abort('Solve failed (SuperLU)','lusolver_apply',__FILE__)
 #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
     !$omp end critical (superlu_solve)
 #endif
@@ -619,7 +619,7 @@ CASE("superd")
         self%superlu_struct%csc_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
         self%superlu_struct%grid_handle,self%superlu_struct%f_factors, &
         self%superlu_struct%col_perm,ierr)
-      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (SuperLU-DIST)','lusolver_apply',__FILE__)
 !      !$omp end critical (superlu_solve)
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
@@ -630,7 +630,7 @@ CASE("superd")
       self%superlu_struct%csc_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
       self%superlu_struct%grid_handle,self%superlu_struct%f_factors, &
       self%superlu_struct%col_perm,ierr)
-    IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
+    IF(ierr/=0)CALL oft_abort('Solve failed (SuperLU-DIST)','lusolver_apply',__FILE__)
 !    !$omp end critical (superlu_solve)
 #else
     CALL oft_abort('OFT not compiled with SuperLU-DIST','lusolver_apply',__FILE__)
@@ -644,7 +644,7 @@ CASE("superd")
       CALL oft_umfpack_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
         self%superlu_struct%f_factors,self%superlu_struct%col_perm,ierr)
-      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (UMFPACK)','lusolver_apply',__FILE__)
       !$omp end critical (umfpack_solve)
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
@@ -654,7 +654,7 @@ CASE("superd")
     CALL oft_umfpack_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
       self%superlu_struct%f_factors,self%superlu_struct%col_perm,ierr)
-    IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
+    IF(ierr/=0)CALL oft_abort('Solve failed (UMFPACK)','lusolver_apply',__FILE__)
     !$omp end critical (umfpack_solve)
 #else
     CALL oft_abort('OFT not compiled with UMFPACK','lusolver_apply',__FILE__)
@@ -670,7 +670,7 @@ CASE("superd")
       CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
         mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
         nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
-      IF(ierr/=0)CALL oft_abort('Factorization failed','lusolver_apply',__FILE__)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (MKL-PARDISO)','lusolver_apply',__FILE__)
       self%pardiso_struct%iparm(1)=0
       self%pardiso_struct%iparm(27)=0
       self%refactor=.FALSE.
@@ -680,7 +680,7 @@ CASE("superd")
     CALL pardiso(self%pardiso_struct%pt,1,1,self%pardiso_struct%mtype,mode,A_native%nr, &
       mat_vals,A_native%kr,A_native%lc,self%pardiso_struct%perm, &
       nrhs,self%pardiso_struct%iparm,self%pardiso_struct%msglvl,b,vals,ierr)
-    IF(ierr/=0)CALL oft_abort('Solve failed','lusolver_apply',__FILE__)
+    IF(ierr/=0)CALL oft_abort('Solve failed (MKL-PARDISO)','lusolver_apply',__FILE__)
     DEALLOCATE(b)
 #else
     CALL oft_abort('OFT not compiled with MKL-PARDISO','lusolver_apply',__FILE__)
@@ -879,7 +879,8 @@ CLASS(oft_vector), INTENT(inout) :: u,g
 !---
 INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
 INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
-REAL(r8), POINTER, DIMENSION(:) :: mat_vals,csc_vals,vtmp
+REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: mat_vals
+REAL(r8), POINTER, DIMENSION(:) :: csc_vals,vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vals,b
 CLASS(oft_native_matrix), POINTER :: A_native
 TYPE(oft_timer) :: mytimer

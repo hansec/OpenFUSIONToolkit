@@ -96,17 +96,19 @@ USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
 USE oft_lag_basis, ONLY: oft_lagrange, oft_lagrange_lin, oft_lagrange_level, &
   oft_lagrange_nlevels, oft_lagrange_blevel, oft_lagrange_ops, oft_lag_eval_all, &
-  oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem
+  oft_lag_geval_all, oft_lag_set_level, ML_oft_lagrange, oft_scalar_fem, &
+  oft_lag_eval, oft_lag_geval
 USE oft_lag_fields, ONLY: oft_lag_create, oft_lag_vcreate
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
   oft_lag_vproject, oft_lag_project_div, oft_lag_rinterp, oft_lag_ginterp, &
   lag_vbc_tensor, lag_vbc_diag
 USE oft_hcurl_basis, ONLY: oft_hcurl, oft_hcurl_ops, oft_hcurl_level, &
   oft_hcurl_nlevels, oft_hcurl_lev, oft_hcurl_blevel, oft_hcurl_eval_all, &
-  oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem
+  oft_hcurl_ceval_all, ML_oft_hcurl, oft_hcurl_get_cgops, oft_hcurl_fem, &
+  oft_hcurl_eval, oft_hcurl_ceval
 USE oft_hcurl_fields, ONLY: oft_hcurl_create
 USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp
-USE oft_h0_basis, ONLY: oft_h0_ops, oft_h0_geval_all, oft_h0_fem
+USE oft_h0_basis, ONLY: oft_h0_ops, oft_h0_geval_all, oft_h0_fem, oft_h0_geval
 USE oft_h0_fields, ONLY: oft_h0_create
 USE oft_h0_operators, ONLY: oft_h0_getlop, oft_h0_getmop, h0_zerogrnd, h0_zeroi
 USE oft_h1_basis, ONLY: oft_hgrad, oft_h1_ops, oft_h1_set_level, ML_oft_hgrad
@@ -701,6 +703,16 @@ IF(xmhd_rw)THEN
   END DO
   DEALLOCATE(vals)
 END IF
+!
+CALL nlfun_setup(oft_xmhd_ops%A)
+IF(oft_env%head_proc)CALL mytimer%tick()
+DO i=1,20
+  CALL oft_xmhd_ops%A%apply(u,v)
+END DO
+IF(oft_env%head_proc)THEN
+  elapsed_time=mytimer%tock()
+  WRITE(*,'(2X,A,ES12.3)')'NL-function time = ',elapsed_time/20.d0
+END IF
 !---------------------------------------------------------------------------
 ! Compute energies
 !---------------------------------------------------------------------------
@@ -796,8 +808,6 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
   WRITE(*,*)
 END IF
-CALL nlfun_setup(oft_xmhd_ops%A)
-RETURN
 IF(PRESENT(profile_only))THEN
   IF(profile_only)CALL xmhd_profile(u)
 END IF
@@ -920,6 +930,7 @@ DO i=1,nsteps
        END IF
     END IF
     IF(xmhd_opcount==0)THEN
+      IF(oft_env%head_proc)WRITE(*,*)'Refactor Jacobian'
       jac_dt=dt/2.d0
       xmhd_skip_update=.FALSE.
       CALL xmhd_set_ops(u)
@@ -2776,6 +2787,8 @@ type(oft_quad_type), pointer :: quad
 TYPE(xmhd_interp) :: full_interp
 type(xmhd_loc_values) :: u0
 DEBUG_STACK_PUSH
+CALL xmhd_errmatrix_capply(self,a,b)
+RETURN
 IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD non-linear function'
 quad=>oft_hcurl%quad
 neg_vols=0.d0
@@ -3365,6 +3378,743 @@ END IF
 DEBUG_STACK_POP
 end subroutine xmhd_errmatrix_apply
 !---------------------------------------------------------------------------
+!> Compute the NL metric for solution field
+!!
+!! b = F(a)
+!---------------------------------------------------------------------------
+subroutine xmhd_errmatrix_capply(self,a,b)
+class(oft_xmhd_errmatrix), intent(inout) :: self !< Error matrix object
+class(oft_vector), target, intent(inout) :: a !< Source field
+class(oft_vector), intent(inout) :: b !< Result of metric function
+integer(i4) :: i,ii,ip,j,m,jr,jp,ncemax,nrows,ptind(2),te_loc_ind,n2_loc_ind,nlag
+integer(i4), allocatable, dimension(:) :: j_lag,j_hgrad,j_hcurl
+real(r8) :: f,diff,chi_temp(2),bmag,det
+real(r8) :: mloc(3,3),goptmp(3,4),vol,eta_curr,neg_vols(3),divv
+real(r8) :: bhat(3),jp0q(3),np0q,vad(3),vad_mag,he,c1,cgop(3,6),nu_tmp(3),ten1(3,3)
+real(r8) :: diag_vals(7),pt(3),pt_r,floor_tmp(3),fulltmp(40),u,uvec(3),umat(3,3)
+real(r8), allocatable, dimension(:) :: bc_loc,bg_loc,jpin_loc,te_loc,j2_loc,n2_loc
+real(r8), allocatable, dimension(:,:) :: vpin_loc,lag_loc
+real(r8), allocatable, dimension(:) :: bgrad_coffs_loc,bcurl_coffs_loc,J2_coffs_loc
+real(r8), allocatable, dimension(:,:) :: lag_coffs_loc
+real(r8), pointer, dimension(:) :: bgrad_coffs,bcurl_coffs,J2_coffs
+real(r8), pointer, dimension(:,:) :: lag_coffs
+! real(r8), target, allocatable, dimension(:) :: lag_rop
+! real(r8), target, allocatable, dimension(:,:) :: lag_gop,hgrad_rop,hcurl_rop,hcurl_cop
+real(r8), pointer, contiguous, dimension(:) :: jpin,npin
+real(r8), pointer, contiguous, dimension(:) :: bcout,bgout,nout,tout,teout,j2out,n2out
+real(r8), pointer, contiguous, dimension(:,:) :: vpin,vout
+real(r8), pointer, dimension(:) :: vtmp
+logical :: curved,back_step
+type(oft_quad_type), pointer :: quad
+type(xmhd_loc_values) :: u0
+DEBUG_STACK_PUSH
+IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD non-linear function'
+quad=>oft_hcurl%quad
+neg_vols=0.d0
+!---------------------------------------------------------------------------
+! Get local field values from previous step if necessary
+!---------------------------------------------------------------------------
+NULLIFY(jpin,npin,vpin)
+back_step=.FALSE.
+IF(ASSOCIATED(self%up))THEN
+  CALL self%up%get_local(jpin,1)
+  CALL self%up%get_local(npin,6)
+  IF(xmhd_upwind)THEN
+    ALLOCATE(vpin(oft_lagrange%ne,3))
+    vtmp=>vpin(:,1)
+    CALL self%up%get_local(vtmp,3)
+    vtmp=>vpin(:,2)
+    CALL self%up%get_local(vtmp,4)
+    vtmp=>vpin(:,3)
+    CALL self%up%get_local(vtmp,5)
+  END IF
+  back_step=.TRUE.
+END IF
+!---------------------------------------------------------------------------
+! Get local field values for result
+!---------------------------------------------------------------------------
+NULLIFY(bcout,bgout,nout,tout,teout,j2out,n2out)
+CALL b%set(0.d0)
+CALL b%get_local(bcout,1)
+CALL b%get_local(bgout,2)
+ALLOCATE(vout(oft_lagrange%ne,3))
+vtmp=>vout(:,1)
+CALL b%get_local(vtmp,3)
+vtmp=>vout(:,2)
+CALL b%get_local(vtmp,4)
+vtmp=>vout(:,3)
+CALL b%get_local(vtmp,5)
+CALL b%get_local(nout,6)
+CALL b%get_local(tout,7)
+nlag=5
+IF(xmhd_two_temp)THEN
+  CALL b%get_local(teout,te_ind)
+  nlag=nlag+1
+  te_loc_ind=nlag
+END IF
+IF(j2_ind>0)CALL b%get_local(j2out,j2_ind)
+IF(n2_ind>0)THEN
+  CALL b%get_local(n2out,n2_ind)
+  nlag=nlag+1
+  n2_loc_ind=nlag
+END IF
+!---
+NULLIFY(bcurl_coffs,bgrad_coffs,J2_coffs)
+CALL a%get_local(bcurl_coffs,1)
+CALL a%get_local(bgrad_coffs,2)
+ALLOCATE(lag_coffs(oft_lagrange%ne,nlag))
+vtmp=>lag_coffs(:,1)
+CALL a%get_local(vtmp,3)
+vtmp=>lag_coffs(:,2)
+CALL a%get_local(vtmp,4)
+vtmp=>lag_coffs(:,3)
+CALL a%get_local(vtmp,5)
+vtmp=>lag_coffs(:,4)
+CALL a%get_local(vtmp,6)
+vtmp=>lag_coffs(:,5)
+CALL a%get_local(vtmp,7)
+IF(xmhd_two_temp)THEN
+  vtmp=>lag_coffs(:,te_loc_ind)
+  CALL a%get_local(vtmp,te_ind)
+END IF
+IF(j2_ind>0)CALL a%get_local(J2_coffs,j2_ind)
+IF(n2_ind>0)THEN
+  vtmp=>lag_coffs(:,n2_loc_ind)
+  CALL a%get_local(vtmp,n2_ind)
+END IF
+!---Zero diagnostic values
+diag_vals=0.d0
+ptind=(/1,2/)
+IF(xmhd_taxis==1)ptind(1)=3
+IF(xmhd_taxis==2)ptind(2)=3
+!---------------------------------------------------------------------------
+! Apply metric function
+!---------------------------------------------------------------------------
+!$omp parallel private(det,j_lag,j_hgrad,j_hcurl,bgrad_coffs_loc,bcurl_coffs_loc,lag_coffs_loc, &
+!$omp J2_coffs_loc,curved,goptmp,vol,j,m,jr,bhat,jp0q,vad,vad_mag,he,c1,cgop,divv, &
+!$omp np0q,eta_curr,u,bc_loc,bg_loc,lag_loc,pt_r,vpin_loc,jpin_loc,chi_temp,te_loc, &
+!$omp j2_loc,n2_loc,bmag,uvec,umat,pt,nu_tmp,ten1,i,ii,floor_tmp,u0,fulltmp) &
+!$omp reduction(+:neg_vols) reduction(+:diag_vals)
+allocate(j_lag(oft_lagrange%nce),j_hgrad(oft_hgrad%nce),j_hcurl(oft_hcurl%nce))
+ALLOCATE(bgrad_coffs_loc(oft_hgrad%nce))
+ALLOCATE(bcurl_coffs_loc(oft_hcurl%nce))
+IF(j2_ind>0)ALLOCATE(J2_coffs_loc(oft_hcurl%nce))
+ALLOCATE(lag_coffs_loc(oft_lagrange%nce,nlag))
+allocate(bc_loc(oft_hcurl%nce),bg_loc(oft_hgrad%nce))
+allocate(lag_loc(oft_lagrange%nce,5))
+IF(xmhd_two_temp)allocate(te_loc(oft_lagrange%nce))
+IF(j2_ind>0)allocate(j2_loc(oft_hcurl%nce))
+IF(n2_ind>0)allocate(n2_loc(oft_lagrange%nce))
+IF(back_step)allocate(vpin_loc(oft_lagrange%nce,4),jpin_loc(oft_hcurl%nce))
+!--- Define viscosity temporary varible (currently static)
+nu_tmp(1) = nu_par
+nu_tmp(2) = nu_perp
+!---Loop over cells
+!$omp do schedule(static)
+DO ip=1,mesh%nparts
+do ii=1,mesh%tloc_c(ip)%n
+  i=mesh%tloc_c(ip)%v(ii)
+  curved=cell_is_curved(mesh,i) ! Straight cell test
+  he = (6.d0*SQRT(2.d0)*mesh%cv(i))**(1.d0/3.d0)/REAL(oft_lagrange%order,8) ! Cell node spacing
+  call oft_lagrange%ncdofs(i,j_lag)
+  call oft_hgrad%ncdofs(i,j_hgrad)
+  call oft_hcurl%ncdofs(i,j_hcurl)
+  bgrad_coffs_loc=bgrad_coffs(j_hgrad)
+  bcurl_coffs_loc=bcurl_coffs(j_hcurl)
+  IF(j2_ind>0)J2_coffs_loc=J2_coffs(j_hcurl)
+  DO jr=1,nlag
+    lag_coffs_loc(:,jr)=lag_coffs(j_lag,jr)
+  END DO
+!---------------------------------------------------------------------------
+! Init local entries
+!---------------------------------------------------------------------------
+  bc_loc=0.d0; bg_loc=0.d0; lag_loc=0.d0
+  IF(xmhd_two_temp)te_loc=0.d0
+  IF(j2_ind>0)j2_loc=0.d0
+  IF(n2_ind>0)n2_loc=0.d0
+  !---Lagrange elements
+  IF(back_step)THEN
+    do jr=1,oft_lagrange%nce
+      vpin_loc(jr,1) = npin(j_lag(jr))
+      IF(xmhd_upwind)vpin_loc(jr,2:4) = vpin(j_lag(jr),:)
+    end do
+    !---H1(Curl) elements
+    do jr=1,oft_hcurl%nce
+      jpin_loc(jr) = jpin(j_hcurl(jr))
+    end do
+  END IF
+!---------------------------------------------------------------------------
+! Quadrature Loop
+!---------------------------------------------------------------------------
+  DO m=1,quad%np
+!---------------------------------------------------------------------------
+! Get local reconstructed operators
+!---------------------------------------------------------------------------
+    det=self%jac_vals(m,i)*quad%wts(m)
+    !---Reconstruct velocity field and shear tensor
+    DO j=1,3
+      u=0.d0; uvec=0.d0
+      !$omp simd reduction(+:u,uvec)
+      DO jr=1,oft_lagrange%nce
+        u = u + lag_coffs_loc(jr,j)*self%lag_rops(jr,m,i,1)
+        uvec = uvec + lag_coffs_loc(jr,j)*self%lag_rops(jr,m,i,2:4)
+      END DO
+      u0%V(j)=u*vel_scale
+      u0%dV(j,:)=uvec*vel_scale
+    END DO
+    !
+    u=0.d0; uvec=0.d0
+    !$omp simd reduction(+:u,uvec)
+    DO jr=1,oft_lagrange%nce
+      u = u + lag_coffs_loc(jr,4)*self%lag_rops(jr,m,i,1)
+      uvec = uvec + lag_coffs_loc(jr,4)*self%lag_rops(jr,m,i,2:4)
+    END DO
+    u0%N=u*den_scale
+    u0%dN=uvec*den_scale
+    !
+    u=0.d0; uvec=0.d0
+    !$omp simd reduction(+:u,uvec)
+    DO jr=1,oft_lagrange%nce
+      u = u + lag_coffs_loc(jr,5)*self%lag_rops(jr,m,i,1)
+      uvec = uvec + lag_coffs_loc(jr,5)*self%lag_rops(jr,m,i,2:4)
+    END DO
+    u0%Ti=u
+    u0%dTi=uvec
+    IF(xmhd_two_temp)THEN
+      u=0.d0; uvec=0.d0
+      !$omp simd reduction(+:u,uvec)
+      DO jr=1,oft_lagrange%nce
+        u = u + lag_coffs_loc(jr,te_loc_ind)*self%lag_rops(jr,m,i,1)
+        uvec = uvec + lag_coffs_loc(jr,te_loc_ind)*self%lag_rops(jr,m,i,2:4)
+      END DO
+      u0%Te=u
+      u0%dTe=uvec
+    ELSE
+      u0%Te=u0%Ti*te_factor
+      u0%dTe=u0%dTi*te_factor
+    END IF
+    u0%N2=0.d0; u0%dN2=0.d0
+    IF(n2_ind>0)THEN
+      u=0.d0; uvec=0.d0
+      !$omp simd reduction(+:u,uvec)
+      DO jr=1,oft_lagrange%nce
+        u = u + lag_coffs_loc(jr,n2_loc_ind)*self%lag_rops(jr,m,i,1)
+        uvec = uvec + lag_coffs_loc(jr,n2_loc_ind)*self%lag_rops(jr,m,i,2:4)
+      END DO
+      u0%N2=u
+      u0%dN2=uvec
+    END IF
+    !---Reconstruct magnetic field
+    u0%B=0.d0; u0%J=0.d0
+    uvec=0.d0
+    !$omp simd reduction(+:uvec)
+    do jr=1,oft_hgrad%nce
+      uvec = uvec + bgrad_coffs_loc(jr)*self%hgrad_rops(jr,m,i,:)
+    end do
+    !$omp simd reduction(+:uvec)
+    do jr=1,oft_hcurl%nce
+      uvec = uvec + bcurl_coffs_loc(jr)*self%hcurl_rops(jr,m,i,1:3)
+    end do
+    u0%B=uvec
+    uvec=0.d0
+    !$omp simd reduction(+:uvec)
+    do jr=1,oft_hcurl%nce
+      uvec = uvec + bcurl_coffs_loc(jr)*self%hcurl_rops(jr,m,i,4:6)
+    end do
+    u0%J=uvec
+    u0%J2=0.d0; u0%J2c=0.d0
+    IF(j2_ind>0)THEN
+      uvec=0.d0
+      !$omp simd reduction(+:uvec)
+      do jr=1,oft_hcurl%nce
+        uvec = uvec + J2_coffs_loc(jr)*self%hcurl_rops(jr,m,i,1:3)
+      end do
+      u0%J2=uvec
+      uvec=0.d0
+      !$omp simd reduction(+:uvec)
+      do jr=1,oft_hcurl%nce
+        uvec = uvec + J2_coffs_loc(jr)*self%hcurl_rops(jr,m,i,4:6)
+      end do
+      u0%J2c=uvec
+    END IF
+    divv = u0%dV(1,1)+u0%dV(2,2)+u0%dV(3,3)
+    bmag = SQRT(SUM(u0%B**2)) + xmhd_eps
+    bhat = u0%B/bmag
+    !---Reconstruct previous step fields if necessary
+    vad=u0%V; vad_mag = magnitude(vad)
+    np0q=u0%N; jp0q=u0%J
+    IF(back_step)THEN
+      np0q=0.d0; jp0q=0.d0
+      !$omp simd reduction(+:np0q)
+      do jr=1,oft_lagrange%nce
+        np0q = np0q + vpin_loc(jr,1)*self%lag_rops(jr,m,i,1)
+      end do
+      np0q = np0q*den_scale
+      IF(xmhd_upwind)THEN
+        vad=0.d0
+        !$omp simd reduction(+:vad)
+        do jr=1,oft_lagrange%nce
+          vad = vad + vpin_loc(jr,2:4)*self%lag_rops(jr,m,i,1)
+        end do
+        vad=vad*vel_scale; vad_mag = magnitude(vad)
+      END IF
+      !$omp simd reduction(+:jp0q)
+      do jr=1,oft_hcurl%nce
+        jp0q = jp0q + jpin_loc(jr)*self%hcurl_rops(jr,m,i,4:6)
+      end do
+    END IF
+    !---Handle floors
+    IF(u0%N<0.d0)neg_vols(1)=neg_vols(1)+det
+    IF(u0%Ti<0.d0)neg_vols(2)=neg_vols(2)+det
+    IF(u0%Te<0.d0)neg_vols(3)=neg_vols(3)+det
+    IF((den_floor>0.d0).AND.(u0%N<den_floor))neg_flag(1,i)=MAX(neg_flag(1,i),(den_floor-u0%N)/den_floor)
+    IF((temp_floor>0.d0).AND.(u0%Ti<temp_floor))neg_flag(2,i)=MAX(neg_flag(2,i),(temp_floor-u0%Ti)/temp_floor)
+    IF((temp_floor>0.d0).AND.(u0%Te<temp_floor))neg_flag(3,i)=MAX(neg_flag(3,i),(temp_floor-u0%Te)/temp_floor)
+    floor_tmp=(/u0%N,u0%Ti,u0%Te/)
+    IF(temp_floor>0.d0)u0%Ti=MAX(temp_floor,u0%Ti)
+    IF(temp_floor>0.d0)u0%Te=MAX(temp_floor,u0%Te)
+    IF(den_floor>0.d0)u0%N=MAX(den_floor,u0%N)
+    IF(den_floor>0.d0)np0q=MAX(den_floor,np0q)
+    !---Transport coefficients (if fixed)
+    eta_curr=eta*eta_reg(mesh%reg(i))
+    IF(.NOT.xmhd_brag)THEN
+      chi_temp(1)=kappa_par*den_scale/u0%N
+      chi_temp(2)=kappa_perp*den_scale/u0%N
+    END IF
+    !---Compute diagnostics
+    IF(self%dt<0.d0)THEN
+      pt=mesh%log2phys(i,quad%pts(:,m))
+      pt_r = MAX(1.d-10,SUM(pt(ptind)**2))
+      diag_vals(1) = diag_vals(1) + SUM(u0%B**2)*det
+      diag_vals(2) = diag_vals(2) + u0%N*SUM(u0%V**2)*det
+      uvec=cross_product(pt,u0%B)
+      diag_vals(3) = diag_vals(3) + uvec(xmhd_taxis)*det/pt_r
+      uvec=cross_product(pt,u0%J)
+      diag_vals(4) = diag_vals(4) + uvec(xmhd_taxis)*det/pt_r
+      diag_vals(5) = diag_vals(5) + u0%N*det
+      diag_vals(6) = diag_vals(6) + u0%Ti*det
+      diag_vals(7) = diag_vals(7) + u0%Te*det
+    END IF
+    !---------------------------------------------------------------------------
+    ! Compute F (u) for solid region
+    !---------------------------------------------------------------------------
+    IF(solid_cell(i))THEN
+      IF(xmhd_adv_b)THEN
+        !---Eta J
+        eta_curr=eta_reg(mesh%reg(i))
+        uvec = eta_curr*u0%J*self%dt*det
+        !$omp simd
+        do jr=1,oft_hcurl%nce
+          bc_loc(jr) = bc_loc(jr) + DOT_PRODUCT(self%hcurl_rops(jr,m,i,4:6),uvec) &
+            + DOT_PRODUCT(self%hcurl_rops(jr,m,i,1:3),u0%B)*det
+        end do
+        !$omp simd
+        do jr=1,oft_hgrad%nce
+          bg_loc(jr) = bg_loc(jr) + DOT_PRODUCT(self%hgrad_rops(jr,m,i,1:3),u0%B)*det
+        end do
+      END IF
+      CYCLE
+    END IF
+!---------------------------------------------------------------------------
+! Compute F_bc (u)
+!---------------------------------------------------------------------------
+    IF(xmhd_adv_b)THEN
+      IF(eta_temp>0.d0)THEN
+        IF(ASSOCIATED(res_profile))THEN
+          eta_curr=eta*res_profile(u0%Te)
+        ELSE
+          eta_curr=eta*(eta_temp/u0%Te)**(3.d0/2.d0)
+        END IF
+      END IF
+      !---Eta J - VxB
+      uvec = eta_curr*u0%J  + cross_product(u0%B,u0%V)
+      IF((self%dt>0.d0).OR.xmhd_diss_centered)THEN
+        c1 = 1.d0
+        IF(.NOT.xmhd_diss_centered)c1 = 2.d0
+        uvec = uvec - eta_hyper*U0%J2c*c1
+      END IF
+      !---Hall (JxB - grad Pe)
+      IF(xmhd_hall)THEN
+        uvec = uvec + cross_product(u0%J,u0%B)/(mu0*u0%N*elec_charge) &
+          - k_boltz*u0%Te*u0%dN/(u0%N*elec_charge)
+      END IF
+      uvec = uvec*self%dt
+      !---Hall (dJ/dt)
+      IF(xmhd_hall)THEN
+        uvec = uvec + 0.5d0*u0%J*me_factor*elec_mass/(mu0*u0%N*elec_charge**2)
+        IF(back_step)THEN
+          uvec = uvec + 0.5d0*u0%J*me_factor*elec_mass/(mu0*np0q*elec_charge**2) &
+            - 0.5d0*jp0q*me_factor*elec_mass/(mu0*u0%N*elec_charge**2)
+        END IF
+      END IF
+      uvec = uvec*det
+      !---Add contributions
+      !$omp simd
+      do jr=1,oft_hcurl%nce
+        bc_loc(jr) = bc_loc(jr) + DOT_PRODUCT(self%hcurl_rops(jr,m,i,4:6),uvec) &
+          + DOT_PRODUCT(self%hcurl_rops(jr,m,i,1:3),u0%B)*det
+      end do
+      !---Hyper-resistivity
+      IF((self%dt>0.d0).AND.(j2_ind>0))THEN
+        !$omp simd
+        do jr=1,oft_hcurl%nce
+          j2_loc(jr) = j2_loc(jr) + (DOT_PRODUCT(self%hcurl_rops(jr,m,i,1:3),u0%J2) &
+            + DOT_PRODUCT(self%hcurl_rops(jr,m,i,4:6),u0%J))*det/j2_scale
+        end do
+      END IF
+!---------------------------------------------------------------------------
+! Compute F_bg (u)
+!---------------------------------------------------------------------------
+      uvec=u0%B*det
+      !$omp simd
+      do jr=1,oft_hgrad%nce
+        bg_loc(jr) = bg_loc(jr) + DOT_PRODUCT(self%hgrad_rops(jr,m,i,1:3),uvec)
+      end do
+    END IF ! Advance B
+!---------------------------------------------------------------------------
+! Compute F_v (u)
+!---------------------------------------------------------------------------
+    uvec = 0.d0; umat = 0.d0
+    !---JxB
+    IF(xmhd_jcb)uvec = uvec - cross_product(u0%J,u0%B)/(u0%N*m_ion*mu0)
+    !---Gravity
+    uvec(3) = uvec(3) - g_accel
+    !---Advection
+    IF(xmhd_advec)uvec = uvec + MATMUL(u0%V,u0%dV)
+    !---Pressure
+    IF(xmhd_adv_den)uvec = uvec + u0%dN*(u0%Ti+u0%Te)*k_boltz/(u0%N*m_ion)
+    IF(xmhd_adv_temp)uvec = uvec + (u0%dTi+u0%dTe)*k_boltz/m_ion
+    !---Viscosity
+    IF((self%dt>0.d0).OR.xmhd_diss_centered)THEN
+      SELECT CASE(visc_itype)
+        CASE(1)
+          umat = nu_tmp(1)*u0%dV/(u0%N/den_scale)
+        CASE(2)
+          !--- Nabla(V) + (Nabla(V))^T
+          umat = nu_tmp(1)*(u0%dV+TRANSPOSE(u0%dV))/(u0%N/den_scale)
+          !--- - 2/3 I Div(V)
+          u = 2.d0*nu_tmp(1)*divv/(3.d0*u0%N/den_scale)
+          umat(1,1) = umat(1,1) - u
+          umat(2,2) = umat(2,2) - u
+          umat(3,3) = umat(3,3) - u
+        CASE(3)
+          !--- Nabla(V) + (Nabla(V))^T
+          umat = (u0%dV+TRANSPOSE(u0%dV))/(u0%N/den_scale)
+          !--- - 2/3 I Div(V)
+          u = 2.d0*divv/(3.d0*u0%N/den_scale)
+          umat(1,1) = umat(1,1) - u
+          umat(2,2) = umat(2,2) - u
+          umat(3,3) = umat(3,3) - u
+          !--- Anisotropic tensor (nu_par*bb + nu_perp*(I-bb))
+          do j=1,3
+            ten1(:,j) = (nu_tmp(1)-nu_tmp(2))*bhat(j)*bhat
+            ten1(j,j) = ten1(j,j)+nu_tmp(2)
+          end do
+          umat = MATMUL(ten1,umat)
+      END SELECT
+      IF(.NOT.xmhd_diss_centered)umat = 2.d0*umat
+      IF(xmhd_adv_den)uvec = uvec - MATMUL(u0%dN,umat)/u0%N
+      !---Upwinding
+      IF(xmhd_upwind)THEN
+        u = xmhd_upwind_weight(vad_mag,he,nu_tmp(2)*den_scale/u0%N)
+        IF(.NOT.xmhd_diss_centered)u = 2.d0*u
+        umat(:,1) = umat(:,1) + vad*u*DOT_PRODUCT(u0%V,u0%dV(:,1))
+        umat(:,2) = umat(:,2) + vad*u*DOT_PRODUCT(u0%V,u0%dV(:,2))
+        umat(:,3) = umat(:,3) + vad*u*DOT_PRODUCT(u0%V,u0%dV(:,3))
+      END IF
+    END IF
+    !---Mass and scale
+    umat = TRANSPOSE(umat)*self%dt*det/vel_scale
+    uvec = (uvec*self%dt + u0%V)*det/vel_scale
+    !---Add contributions
+    !$omp simd collapse(2)
+    do jr=1,oft_lagrange%nce
+      do j=1,3
+        lag_loc(jr,j) = lag_loc(jr,j) + self%lag_rops(jr,m,i,1)*uvec(j) &
+          + self%lag_rops(jr,m,i,2)*umat(j,1) + self%lag_rops(jr,m,i,3)*umat(j,2) &
+          + self%lag_rops(jr,m,i,4)*umat(j,3)
+      end do
+    end do
+!---------------------------------------------------------------------------
+! Compute F_n (u)
+!---------------------------------------------------------------------------
+    IF(xmhd_adv_den)THEN
+      u = 0.d0; uvec = 0.d0
+      !---Compression and advection
+      u = u + DOT_PRODUCT(u0%V,u0%dN)
+      u = u + u0%N*divv
+      !---Density diffusion
+      uvec = d_dens*u0%dN
+      IF((self%dt>0.d0).OR.xmhd_diss_centered)THEN
+        c1 = 1.d0
+        IF(.NOT.xmhd_diss_centered)c1 = 2.d0
+        uvec = uvec - d2_dens*u0%dN2
+      END IF
+      !---Upwinding
+      IF(xmhd_upwind)THEN
+        c1 = xmhd_upwind_weight(vad_mag,he,d_dens)
+        uvec = uvec + vad*c1*DOT_PRODUCT(u0%V,u0%dN)
+      END IF
+      IF(neg_source(1,i)>0.d0)u = u - neg_source(1,i)*den_floor/ABS(4.d0*self%dt)
+      !---Mass and scale
+      uvec = uvec*self%dt*det/den_scale
+      u = (u*self%dt + floor_tmp(1))*det/den_scale
+      !---Add contributions
+      !$omp simd
+      do jr=1,oft_lagrange%nce
+        lag_loc(jr,4) = lag_loc(jr,4) + self%lag_rops(jr,m,i,1)*u &
+          + DOT_PRODUCT(self%lag_rops(jr,m,i,2:4),uvec)
+      end do
+      !---Hyper-diffusivity
+      IF((self%dt>0.d0).AND.(n2_ind>0))THEN
+        u = u0%N2*det/n2_scale
+        uvec = u0%dN*det/n2_scale
+        !$omp simd
+        do jr=1,oft_lagrange%nce
+          n2_loc(jr) = n2_loc(jr) + self%lag_rops(jr,m,i,1)*u &
+            + DOT_PRODUCT(self%lag_rops(jr,m,i,2:4),uvec)
+        end do
+      END IF
+    END IF
+!---------------------------------------------------------------------------
+! Compute F_T (u)
+!---------------------------------------------------------------------------
+    IF(xmhd_adv_temp)THEN
+      u = 0.d0; uvec = 0.d0
+      !---Viscous heating
+      IF(xmhd_visc_heat)THEN
+        c1 = m_ion*(temp_gamma-1.d0)/(k_boltz*u0%N/den_scale)
+        IF(.NOT.xmhd_two_temp)c1=c1/(1.d0+te_factor)
+        SELECT CASE(visc_itype)
+          CASE(1)
+            u = u - nu_tmp(1)*c1*SUM(SUM(u0%dV*u0%dV,DIM=1))
+          CASE(2)
+            !--- Nabla(V) + (Nabla(V))^T
+            u = u - nu_tmp(1)*c1*SUM(SUM(u0%dV*(u0%dV + TRANSPOSE(u0%dV)),DIM=1))
+            !--- - 2/3 I Div(V)
+            u = u + 2.d0*nu_tmp(1)*c1*(divv**2)/3.d0
+          CASE(3)
+            !--- Nabla(V) + (Nabla(V))^T - 2/3 I Div(V)
+            umat = TRANSPOSE(u0%dV)+u0%dV
+            umat(1,1) = umat(1,1)-2.d0*divv/3.d0
+            umat(2,2) = umat(2,2)-2.d0*divv/3.d0
+            umat(3,3) = umat(3,3)-2.d0*divv/3.d0
+            !--- Anisotropic tensor (nu_par*bb + nu_perp*(I-bb))
+            do j=1,3
+              ten1(:,j) = (nu_tmp(1)-nu_tmp(2))*bhat(j)*bhat
+              ten1(j,j) = ten1(j,j)+nu_tmp(2)
+            end do
+            ten1 = MATMUL(ten1,umat)
+            u = u - c1*SUM(SUM(u0%dV*ten1,DIM=1))
+        END SELECT
+      END IF
+      !---Electron heat sources (Ohmic, Equilibration)
+      IF(xmhd_two_temp)THEN
+        IF(xmhd_therm_equil)u = u + (u0%Ti-u0%Te)/elec_ion_therm_rate(u0%Te,u0%N,mu_ion)
+      ELSE
+        IF(xmhd_ohmic)u = u &
+          -eta_curr*DOT_PRODUCT(u0%J,u0%J)*(temp_gamma-1.d0)/((1.d0+te_factor)*mu0*u0%N*k_boltz)
+      END IF
+      !---Compression and advection
+      u = u + DOT_PRODUCT(u0%V,u0%dTi)
+      u = u + divv*u0%Ti*(temp_gamma-1.d0)
+      !---Thermal conduction
+      IF((self%dt>0.d0).OR.xmhd_diss_centered)THEN
+        IF(xmhd_brag)THEN
+          IF(xmhd_two_temp)THEN
+            chi_temp=brag_ion_transport(u0%N,u0%Ti,mu_ion,bmag)/u0%N
+          ELSE
+            chi_temp=brag_comb_transport(u0%N,u0%Ti,mu_ion,bmag)/u0%N
+          END IF
+          chi_temp(1)=kappa_par*chi_temp(1)
+          chi_temp(2)=kappa_perp*chi_temp(2)
+        END IF
+        c1 = 1.d0
+        IF(.NOT.xmhd_diss_centered)c1 = 2.d0
+        uvec = uvec + ((chi_temp(1)-chi_temp(2))*bhat*DOT_PRODUCT(bhat,u0%dTi) &
+          + chi_temp(2)*u0%dTi)*(temp_gamma-1.d0)*c1
+        u = u - ((chi_temp(1)-chi_temp(2))*DOT_PRODUCT(u0%dN,bhat)*DOT_PRODUCT(bhat,u0%dTi) &
+          + chi_temp(2)*DOT_PRODUCT(u0%dN,u0%dTi))*(temp_gamma-1.d0)*c1/u0%N
+        !---Upwinding
+        IF(xmhd_upwind)THEN
+          c1 = xmhd_upwind_weight(vad_mag,he,chi_temp(2)*(temp_gamma-1.d0))
+          IF(.NOT.xmhd_diss_centered)c1 = 2.d0*c1
+          uvec = uvec + vad*c1*DOT_PRODUCT(u0%V,u0%dTi)
+        END IF
+      END IF
+      IF(neg_source(2,i)>0.d0)u = u - neg_source(2,i)*temp_floor/ABS(4.d0*self%dt)
+      !---Mass and scale
+      uvec = uvec*self%dt*det
+      u = (u*self%dt + floor_tmp(2))*det
+      !---Add contributions
+      !$omp simd
+      do jr=1,oft_lagrange%nce
+        lag_loc(jr,5) = lag_loc(jr,5) + self%lag_rops(jr,m,i,1)*u &
+          + DOT_PRODUCT(self%lag_rops(jr,m,i,2:4),uvec)
+      end do
+    END IF
+!---------------------------------------------------------------------------
+! Compute F_Te (u)
+!---------------------------------------------------------------------------
+    IF(xmhd_two_temp.AND.xmhd_adv_temp)THEN
+      u = 0.d0; uvec = 0.d0
+      !---Collisional Heating
+      IF(xmhd_therm_equil)u = u - (u0%Ti-u0%Te)/elec_ion_therm_rate(u0%Te,u0%N,mu_ion)
+      !---Ohmic heating
+      IF(xmhd_ohmic)u = u - eta_curr*DOT_PRODUCT(u0%J,u0%J)*(temp_gamma-1.d0)/(mu0*u0%N*k_boltz)
+      !---Compression and advection
+      u = u + DOT_PRODUCT(u0%V-u0%J/(mu0*u0%N*elec_charge),u0%dTe)
+      u = u + (divv+DOT_PRODUCT(u0%J,u0%dN)/(mu0*elec_charge*u0%N**2))*u0%Te*(temp_gamma-1.d0)
+      !---Thermal conduction
+      IF((self%dt>0.d0).OR.xmhd_diss_centered)THEN
+        IF(xmhd_brag)THEN
+          chi_temp = brag_elec_transport(u0%N,u0%Te,bmag)/u0%N
+          chi_temp(1) = kappa_par*chi_temp(1)
+          chi_temp(2) = MAX(1.d1, kappa_perp*chi_temp(2))
+        END IF
+        c1 = 1.d0
+        IF(.NOT.xmhd_diss_centered)c1 = 2.d0
+        uvec = uvec + ((chi_temp(1)-chi_temp(2))*bhat*DOT_PRODUCT(bhat,u0%dTe) &
+          + chi_temp(2)*u0%dTe)*(temp_gamma-1.d0)*c1
+        u = u - ((chi_temp(1)-chi_temp(2))*DOT_PRODUCT(u0%dN,bhat)*DOT_PRODUCT(bhat,u0%dTe) &
+          + chi_temp(2)*DOT_PRODUCT(u0%dN,u0%dTe))*(temp_gamma-1.d0)*c1/u0%N
+        !---Upwinding
+        IF(xmhd_upwind)THEN
+          IF(back_step)THEN
+            vad = vad-jp0q/(mu0*np0q*elec_charge)
+          ELSE
+            vad = vad-u0%J/(mu0*u0%N*elec_charge)
+          END IF
+          vad_mag = magnitude(vad)
+          c1 = xmhd_upwind_weight(vad_mag,he,chi_temp(2)*(temp_gamma-1.d0))
+          IF(.NOT.xmhd_diss_centered)c1 = 2.d0*c1
+          uvec = uvec + vad*c1*DOT_PRODUCT(u0%V-u0%J/(mu0*u0%N*elec_charge),u0%dTe)
+        END IF
+      END IF
+      IF(neg_source(3,i)>0.d0)u = u - neg_source(3,i)*temp_floor/ABS(4.d0*self%dt)
+      !---Mass and scale
+      uvec = uvec*self%dt*det
+      u = (u*self%dt + floor_tmp(3))*det
+      !---Add contributions
+      !$omp simd
+      do jr=1,oft_lagrange%nce
+        te_loc(jr) = te_loc(jr) + self%lag_rops(jr,m,i,1)*u &
+          + DOT_PRODUCT(self%lag_rops(jr,m,i,2:4),uvec)
+      end do
+    END IF
+!---------------------------------------------------------------------------
+! End quadrature loop
+!---------------------------------------------------------------------------
+  end do
+!---------------------------------------------------------------------------
+! Add local contributions
+!---------------------------------------------------------------------------
+  !---B rows
+  IF(xmhd_adv_b)THEN
+    !$omp critical(xmhderr_red)
+    do jr=1,oft_hcurl%nce
+      bcout(j_hcurl(jr)) = bcout(j_hcurl(jr)) + bc_loc(jr)
+      IF(j2_ind>0)j2out(j_hcurl(jr)) = j2out(j_hcurl(jr)) + j2_loc(jr)
+    end do
+    do jr=1,oft_hgrad%nce
+      bgout(j_hgrad(jr)) = bgout(j_hgrad(jr)) + bg_loc(jr)
+    end do
+    !$omp end critical(xmhderr_red)
+  END IF
+  !---Lagrange rows (V,n,T)
+  IF(.NOT.solid_cell(i))THEN
+    !$omp critical(xmhderr_red2)
+    DO jr=1,oft_lagrange%nce
+      vout(j_lag(jr),:) = vout(j_lag(jr),:) + lag_loc(jr,1:3)
+      IF(xmhd_adv_den)nout(j_lag(jr)) = nout(j_lag(jr)) + lag_loc(jr,4)
+      IF(xmhd_adv_temp)THEN
+        tout(j_lag(jr)) = tout(j_lag(jr)) + lag_loc(jr,5)
+        IF(xmhd_two_temp)teout(j_lag(jr)) = teout(j_lag(jr)) + te_loc(jr)
+      END IF
+      IF(n2_ind>0)n2out(j_lag(jr)) = n2out(j_lag(jr)) + n2_loc(jr)
+    END DO
+    !$omp end critical(xmhderr_red2)
+  END IF
+end do
+end do
+!---Delete temporary matrices
+deallocate(j_lag,j_hgrad,j_hcurl)
+DEALLOCATE(bgrad_coffs_loc,bcurl_coffs_loc,lag_coffs_loc)
+IF(j2_ind>0)DEALLOCATE(J2_coffs_loc)
+deallocate(bc_loc,bg_loc,lag_loc)
+IF(xmhd_two_temp)deallocate(te_loc)
+IF(n2_ind>0)DEALLOCATE(n2_loc)
+IF(j2_ind>0)DEALLOCATE(j2_loc)
+IF(back_step)deallocate(vpin_loc,jpin_loc)
+!$omp end parallel
+!---------------------------------------------------------------------------
+! Boundary conditions
+!---------------------------------------------------------------------------
+IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
+CALL fem_dirichlet_vec(oft_hcurl,bcurl_coffs,bcout,oft_xmhd_ops%b1_bc)
+CALL fem_dirichlet_vec(oft_hgrad,bgrad_coffs,bgout,oft_xmhd_ops%b2_bc)
+CALL fem_dirichlet_vec(oft_lagrange,lag_coffs(:,4),nout,oft_xmhd_ops%n_bc)
+CALL fem_dirichlet_vec(oft_lagrange,lag_coffs(:,5),tout,oft_xmhd_ops%t_bc)
+IF(xmhd_two_temp)CALL fem_dirichlet_vec(oft_lagrange,lag_coffs(:,te_loc_ind),teout,oft_xmhd_ops%t_bc)
+!---Velocity BC
+IF(xmhd_vbcdir)THEN
+  !$omp parallel do private(j,mloc)
+  DO i=1,oft_lagrange%nbe
+    j=oft_lagrange%lbe(i)
+    IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
+    CALL lag_vbc_tensor(j,vbc_type,mloc)
+    vout(j,:)=MATMUL(mloc,vout(j,:))
+    IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
+    CALL lag_vbc_diag(j,vbc_type,mloc)
+    vout(j,:)=vout(j,:)+MATMUL(mloc,lag_coffs(j,1:3))
+  END DO
+ELSE
+  CALL fem_dirichlet_vec(oft_lagrange,lag_coffs(:,1),vout(:,1),oft_xmhd_ops%v_bc)
+  CALL fem_dirichlet_vec(oft_lagrange,lag_coffs(:,2),vout(:,2),oft_xmhd_ops%v_bc)
+  CALL fem_dirichlet_vec(oft_lagrange,lag_coffs(:,3),vout(:,3),oft_xmhd_ops%v_bc)
+END IF
+!---------------------------------------------------------------------------
+! Set result from local field values, summing contributions across seams
+!---------------------------------------------------------------------------
+CALL b%restore_local(bcout,1,add=.TRUE.,wait=.TRUE.)
+CALL b%restore_local(bgout,2,add=.TRUE.,wait=.TRUE.)
+vtmp=>vout(:,1)
+CALL b%restore_local(vtmp,3,add=.TRUE.,wait=.TRUE.)
+vtmp=>vout(:,2)
+CALL b%restore_local(vtmp,4,add=.TRUE.,wait=.TRUE.)
+vtmp=>vout(:,3)
+CALL b%restore_local(vtmp,5,add=.TRUE.,wait=.TRUE.)
+CALL b%restore_local(nout,6,add=.TRUE.,wait=.TRUE.)
+CALL b%restore_local(tout,7,add=.TRUE.,wait=(7/=xmhd_rep%nfields))
+IF(xmhd_two_temp)CALL b%restore_local(teout,te_ind,add=.TRUE.,wait=(te_ind/=xmhd_rep%nfields))
+IF(n2_ind>0)CALL b%restore_local(n2out,n2_ind,add=.TRUE.,wait=(n2_ind/=xmhd_rep%nfields))
+IF(j2_ind>0)CALL b%restore_local(j2out,j2_ind,add=.TRUE.,wait=(j2_ind/=xmhd_rep%nfields))
+!---Pack diagnostics
+IF(self%dt<0.d0)THEN
+  diag_vals(3:4)=diag_vals(3:4)/(2*pi)
+  self%diag_vals=oft_mpi_sum(diag_vals,7)
+END IF
+!---------------------------------------------------------------------------
+! Destroy worker arrays
+!---------------------------------------------------------------------------
+DEALLOCATE(bcurl_coffs,bgrad_coffs,lag_coffs)
+DEALLOCATE(bcout,bgout,vout,nout,tout)
+IF(xmhd_two_temp)DEALLOCATE(teout)
+IF(n2_ind>0)DEALLOCATE(n2out)
+IF(j2_ind>0)DEALLOCATE(j2out,J2_coffs)
+IF(back_step)THEN
+  DEALLOCATE(jpin,npin)
+  IF(xmhd_upwind)DEALLOCATE(vpin)
+END IF
+!----
+IF(neg_vols(1)>0.d0)WRITE(*,'(A,I6,A,ES11.3)') '[',oft_env%rank,'] NEG Ne volume   = ',REAL(neg_vols(1),4)
+IF(neg_vols(2)>0.d0)WRITE(*,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Ti volume   = ',REAL(neg_vols(2),4)
+IF(xmhd_two_temp)THEN
+  IF(neg_vols(3)>0.d0)WRITE(*,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Te volume   = ',REAL(neg_vols(3),4)
+END IF
+DEBUG_STACK_POP
+end subroutine xmhd_errmatrix_capply
+!---------------------------------------------------------------------------
 !> Compute the NL error function, where we are solving F(x) = 0
 !!
 !! b = F(a)
@@ -3373,12 +4123,8 @@ subroutine nlfun_setup(self)
 class(oft_xmhd_errmatrix), intent(inout) :: self !< NL function object
 type(oft_quad_type), pointer :: quad
 LOGICAL :: curved
-INTEGER(i4) :: i,m,jr,k,jc
-! INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+INTEGER(i4) :: i,jr,m
 REAL(r8) :: jac_mat(3,4),jac_det,req_mem
-! REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals
-! REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads
-! REAL(r8), ALLOCATABLE, DIMENSION(:,:,:) :: mass_template
 quad=>oft_hcurl%quad
 !
 ALLOCATE(self%lag_rops(oft_lagrange%nce,quad%np,mesh%nc,4))
@@ -3390,33 +4136,32 @@ self%hcurl_rops=0.d0
 ALLOCATE(self%jac_vals(quad%np,mesh%nc))
 self%jac_vals=0.d0
 req_mem = SIZE(self%lag_rops)+SIZE(self%hgrad_rops)+SIZE(self%hcurl_rops)+SIZE(self%jac_vals)
-WRITE(*,'(A,ES12.3)')'Required memory (full) [MB]',req_mem*8.d0/1.E6
-! !!$omp parallel private(m,jr,k,jc,curved,cell_dofs,basis_vals,basis_grads, &
-! !!$omp jac_mat,jac_det,mass_template)
-! ! ALLOCATE(basis_vals(oft_lagrange%nce),basis_grads(3,oft_lagrange%nce))
-! ! ALLOCATE(cell_dofs(oft_lagrange%nce),mass_template(oft_lagrange%nce,oft_lagrange%nce,1))
-! !!$omp do schedule(static)
-! DO i=1,mesh%nc
-!   curved=cell_is_curved(mesh,i) ! Straight cell test
-!   ! call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
-! !---------------------------------------------------------------------------
-! ! Quadrature Loop
-! !---------------------------------------------------------------------------
-!   ! mass_template=0.d0
-!   DO m=1,quad%np
-!     if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
-!     self%jac_vals(m,i)=jac_det
-!     ! self%jac_mat(m,i,:,:)=TRANSPOSE(jac_mat)
-!     !---Evaluate value and gradients of basis functions at current point
-!     DO jr=1,oft_lagrange%nce ! Loop over degrees of freedom
-!       CALL oft_lag_eval(oft_lagrange,i,jr,quad%pts(:,m),self%lag_rops(jr,m,i,1))
-!       CALL oft_lag_geval(oft_lagrange,i,jr,quad%pts(:,m),self%lag_rops(jr,m,i,2:4),jac_mat)
-!     END DO
-!   END DO
-! END DO
-! !---Cleanup thread-local storage
-! ! DEALLOCATE(basis_vals,basis_grads,cell_dofs,mass_template)
-! !!$omp end parallel
+req_mem = req_mem*8.d0
+IF(req_mem>1.E3)THEN
+  WRITE(*,'(A,ES12.3)')'Required memory (full) [GB]',req_mem/1.E9
+ELSE
+  WRITE(*,'(A,ES12.3)')'Required memory (full) [MB]',req_mem/1.E6
+END IF
+!$omp parallel do private(m,jr,curved,jac_det,jac_mat) schedule(static)
+DO i=1,mesh%nc
+  curved=cell_is_curved(mesh,i) ! Straight cell test
+  DO m=1,quad%np
+    if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
+    self%jac_vals(m,i)=jac_det
+    !---Evaluate value and gradients of basis functions at current point
+    DO jr=1,oft_lagrange%nce ! Loop over degrees of freedom
+      CALL oft_lag_eval(oft_lagrange,i,jr,quad%pts(:,m),self%lag_rops(jr,m,i,1))
+      CALL oft_lag_geval(oft_lagrange,i,jr,quad%pts(:,m),self%lag_rops(jr,m,i,2:4),jac_mat)
+    END DO
+    DO jr=1,oft_hgrad%nce ! Loop over degrees of freedom
+      CALL oft_h0_geval(oft_hgrad,i,jr,quad%pts(:,m),self%hgrad_rops(jr,m,i,:),jac_mat)
+    END DO
+    DO jr=1,oft_hcurl%nce ! Loop over degrees of freedom
+      CALL oft_hcurl_eval(oft_hcurl,i,jr,quad%pts(:,m),self%hcurl_rops(jr,m,i,1:3),jac_mat)
+      CALL oft_hcurl_ceval(oft_hcurl,i,jr,quad%pts(:,m),self%hcurl_rops(jr,m,i,4:6),jac_mat)
+    END DO
+  END DO
+END DO
 end subroutine nlfun_setup
 !---------------------------------------------------------------------------
 !> Compute the mass matrix for solution field
