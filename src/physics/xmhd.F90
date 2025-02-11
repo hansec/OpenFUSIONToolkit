@@ -4124,7 +4124,7 @@ class(oft_xmhd_errmatrix), intent(inout) :: self !< NL function object
 type(oft_quad_type), pointer :: quad
 LOGICAL :: curved
 INTEGER(i4) :: i,jr,m
-REAL(r8) :: jac_mat(3,4),jac_det,req_mem
+REAL(r8) :: jac_mat(3,4),jac_det,req_mem,req_mem_max
 quad=>oft_hcurl%quad
 !
 ALLOCATE(self%lag_rops(oft_lagrange%nce,quad%np,mesh%nc,4))
@@ -4137,10 +4137,14 @@ ALLOCATE(self%jac_vals(quad%np,mesh%nc))
 self%jac_vals=0.d0
 req_mem = SIZE(self%lag_rops)+SIZE(self%hgrad_rops)+SIZE(self%hcurl_rops)+SIZE(self%jac_vals)
 req_mem = req_mem*8.d0
-IF(req_mem>1.E3)THEN
-  WRITE(*,'(A,ES12.3)')'Required memory (full) [GB]',req_mem/1.E9
-ELSE
-  WRITE(*,'(A,ES12.3)')'Required memory (full) [MB]',req_mem/1.E6
+req_mem_max = oft_mpi_max(req_mem)
+!req_mem = oft_mpi_sum(req_mem)
+IF(oft_env%head_proc)THEN
+  IF(req_mem>1.E9)THEN
+    WRITE(*,'(A,F12.3)')'Required memory per task [GB]',req_mem_max/1.E9
+  ELSE
+    WRITE(*,'(A,F12.3)')'Required memory per task [MB]',req_mem_max/1.E6
+  END IF
 END IF
 !$omp parallel do private(m,jr,curved,jac_det,jac_mat) schedule(static)
 DO i=1,mesh%nc
