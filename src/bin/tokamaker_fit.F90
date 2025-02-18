@@ -131,7 +131,8 @@ END IF
 ! Setup Mesh
 !---------------------------------------------------------------------------
 CALL multigrid_construct_surf
-CALL smesh%setup_io(order)
+CALL mygs%xdmf%setup("TokaMaker")
+CALL smesh%setup_io(mygs%xdmf,order)
 !---------------------------------------------------------------------------
 ! Setup Lagrange Elements
 !---------------------------------------------------------------------------
@@ -219,15 +220,14 @@ IF(adjust_coils)THEN
   DO i=1,mygs%ncoils
     coil_wt=ABS(1.d0/(0.05d0*mygs%coil_currs(i)/mu0)) ! Assume 5% error in coils
   END DO
-  CALL fit_gs(mygs, fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
-    fitR0=adjust_R0, fitV0=adjust_V0, coil_wt=coil_wt, fitF0=adjust_F0, &
-    fixedCentering=fixed_center)
+  CALL fit_gs(mygs, 'fit.in', 'fit.out', fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
+              fitR0=adjust_R0, fitV0=adjust_V0, coil_wt=coil_wt, fitF0=adjust_F0, &
+              fixedCentering=fixed_center)
   DEALLOCATE(coil_wt)
 ELSE
   !---Solve
-  CALL fit_gs(mygs, fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
-    fitR0=adjust_R0, fitV0=adjust_V0, fitF0=adjust_F0, &
-    fixedCentering=fixed_center)
+  CALL fit_gs(mygs, 'fit.in', 'fit.out', fitPnorm=adjust_pnorm, fitAlam=adjust_alam, &
+              fitR0=adjust_R0, fitV0=adjust_V0, fitF0=adjust_F0, fixedCentering=fixed_center)
 END IF
 !---------------------------------------------------------------------------
 ! Post-solution analysis
