@@ -199,6 +199,10 @@ tokamaker_set_coil_vsc = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_vsc,
 tokamaker_set_cond_eigs = ctypes_subroutine(oftpy_lib.tokamaker_set_cond_eigs,
     [ctypes_numpy_array(numpy.int32,1), ctypes_numpy_array(numpy.float64,2)])
 
+# tokamaker_get_cond_weights(weights)
+tokamaker_get_cond_weights = ctypes_subroutine(oftpy_lib.tokamaker_get_cond_weights,
+    [ctypes_numpy_array(numpy.float64,1)])
+
 tokamaker_get_vfixed = ctypes_subroutine(oftpy_lib.tokamaker_get_vfixed, #(npts,pts,fluxes)
     [c_int_ptr, c_double_ptr_ptr, c_double_ptr_ptr])
 

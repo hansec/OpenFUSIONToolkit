@@ -347,13 +347,14 @@ END SUBROUTINE tokamaker_analyze
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_recon_run(vacuum,settings,coil_wt,error_flag) BIND(C,NAME="tokamaker_recon_run")
+SUBROUTINE tokamaker_recon_run(vacuum,settings,coil_wt,nonax_corr,error_flag) BIND(C,NAME="tokamaker_recon_run")
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
 TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_wt !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: nonax_corr !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
 LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitF0,fixedCentering
-REAL(8), POINTER :: coil_wt_tmp(:)
+REAL(8), POINTER :: coil_wt_tmp(:),nonax_corr_tmp(:,:)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 error_flag=0
@@ -372,18 +373,36 @@ CALL c_f_pointer(settings%outfile,outfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(infile_c,infile)
 CALL copy_string_rev(outfile_c,outfile)
 gs_global%timing=0.d0
+IF(c_associated(nonax_corr))THEN
+  CALL c_f_pointer(nonax_corr, nonax_corr_tmp, [gs_global%ncond_eigs+1,100])
+ELSE
+  NULLIFY(nonax_corr_tmp)
+END IF
 IF(c_associated(coil_wt))THEN
   CALL c_f_pointer(coil_wt, coil_wt_tmp, [gs_global%ncoils])
   CALL fit_gs(gs_global,infile,outfile,fitI=fitI,fitP=fitP,fitPnorm=fitPnorm,&
               fitAlam=fitAlam,fitR0=fitR0,fitV0=fitV0,coil_wt=coil_wt_tmp, &
-              fitF0=fitF0,fixedCentering=fixedCentering)
+              fitF0=fitF0,fixedCentering=fixedCentering,nonax_corr=nonax_corr_tmp)
 ELSE
   CALL fit_gs(gs_global,infile,outfile,fitI=fitI,fitP=fitP,fitPnorm=fitPnorm,&
               fitAlam=fitAlam,fitR0=fitR0,fitV0=fitV0, &
-              fitF0=fitF0,fixedCentering=fixedCentering)
+              fitF0=fitF0,fixedCentering=fixedCentering,nonax_corr=nonax_corr_tmp)
 END IF
 gs_global%has_plasma=.TRUE.
 END SUBROUTINE tokamaker_recon_run
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_recon_set_nonax(icon,nonax_corr) BIND(C,NAME="tokamaker_recon_set_nonax")
+INTEGER(c_int), VALUE, INTENT(in) :: icon !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: nonax_corr !< Needs docs
+INTEGER(4) :: i
+REAL(8) :: curr
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CALL c_f_pointer(nonax_corr, vals_tmp, [gs_global%ncoils])
+gs_global%coil_currs = vals_tmp*mu0
+gs_global%vcontrol_val = 0.d0
+END SUBROUTINE tokamaker_recon_set_nonax
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1055,6 +1074,16 @@ ALLOCATE(gs_global%cond_weights(gs_global%ncond_eigs))
 CALL gs_get_cond_weights(gs_global,gs_global%cond_weights,.FALSE.)
 CALL gs_set_cond_weights(gs_global,gs_global%cond_weights,.FALSE.)
 END SUBROUTINE tokamaker_set_cond_eigs
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_cond_weights(weights) BIND(C,NAME="tokamaker_get_cond_weights")
+TYPE(c_ptr), VALUE, INTENT(in) :: weights !< Needs docs
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+IF(gs_global%ncond_eigs<=0)RETURN
+CALL c_f_pointer(weights, vals_tmp, [gs_global%ncond_eigs])
+vals_tmp=gs_global%cond_weights
+END SUBROUTINE tokamaker_get_cond_weights
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------

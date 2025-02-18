@@ -152,6 +152,8 @@ class TokaMaker():
         self.nvac = 0
         ## Limiting contour
         self.lim_contour = None
+        ## Number of conductor modes
+        self.ncond_modes = 0
 
     def reset(self):
         '''! Reset G-S object to enable loading a new mesh and coil configuration'''
@@ -190,6 +192,7 @@ class TokaMaker():
         self.reg = None
         self.nvac = 0
         self.lim_contour = None
+        self.ncond_modes = 0
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
         '''! Setup mesh for static and time-dependent G-S calculations
@@ -512,6 +515,18 @@ class TokaMaker():
         if (cond_modes.shape[1] != self.np) or (cond_modes.shape[0] != numpy.sum(nmodes)):
             raise IndexError('Incorrect size of "cond_modes", should be [sum(nmodes),np]')
         tokamaker_set_cond_eigs(nmodes,cond_modes)
+        self.ncond_modes = sum(nmodes)
+    
+    def get_cond_weights(self):
+        r'''! Get weight of conductor modes defined by @ref TokaMaker.set_cond_modes
+        
+        @returns `mode_weights` Weight of each mode in current solution [ncond_modes]
+        '''
+        if self.ncond_modes <= 0:
+            raise ValueError("No conductor modes defined")
+        mode_weights = numpy.zeros((self.ncond_modes,), dtype=numpy.float64)
+        tokamaker_get_cond_weights(mode_weights)
+        return mode_weights
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None):
         r'''! Initialize \f$\psi\f$ using uniform current distributions

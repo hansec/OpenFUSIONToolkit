@@ -57,7 +57,7 @@ def tokamaker_recon_default_settings(oft_env):
 
 ## @cond
 tokamaker_recon_run = ctypes_subroutine(oftpy_lib.tokamaker_recon_run,
-    [c_bool, ctypes.POINTER(tokamaker_recon_settings_struct), c_void_p, c_int_ptr])
+    [c_bool, ctypes.POINTER(tokamaker_recon_settings_struct), c_void_p, c_double_ptr, c_int_ptr])
 ## @endcond
 
 Mirnov_con_id = 1
@@ -69,9 +69,14 @@ q_con_id = 10
 saddle_con_id = 11
 
 
-class Mirnov_con:
+class TokaMaker_con:
+    def get_nonax_corr(self):
+        return None
+
+
+class Mirnov_con(TokaMaker_con):
     '''! TokaMaker equilibrium reconstruction Mirnov sensor constraint'''
-    def __init__(self, loc=None, phi=0., norm=None, val=None, err=None):
+    def __init__(self, loc=None, phi=0., norm=None, val=None, err=None, nonax_corr=None):
         '''! Create Mirnov sensor constraint
         
         @param loc Location of Mirnov in R-Z plane [2]
@@ -85,6 +90,10 @@ class Mirnov_con:
         self.norm = norm
         self.val = val
         self.err = err
+        self.nonax_corr = nonax_corr
+    
+    def get_nonax_corr(self):
+        return self.nonax_corr
 
     def read(self, file):
         '''! Read Mirnov constraint from file
@@ -111,7 +120,7 @@ class Mirnov_con:
         file.write(' {0:E} {1:E}\n\n'.format(self.val, 1./self.err))
 
 
-class Ip_con:
+class Ip_con(TokaMaker_con):
     '''! TokaMaker equilibrium reconstruction plasma current constraint'''
     def __init__(self, val=None, err=None):
         '''! Create plasma current constraint
@@ -140,7 +149,7 @@ class Ip_con:
         file.write(' {0:E} {1:E}\n\n'.format(self.val, 1./self.err))
 
 
-class fluxLoop_con:
+class fluxLoop_con(TokaMaker_con):
     '''! TokaMaker equilibrium reconstruction full flux loop constraint'''
     def __init__(self, loc=None, val=None, err=None):
         '''! Create full flux loop sensor constraint
@@ -174,7 +183,7 @@ class fluxLoop_con:
         file.write(' {0:E} {1:E}\n\n'.format(self.val, 1./self.err))
 
 
-class dFlux_con:
+class dFlux_con(TokaMaker_con):
     '''! TokaMaker equilibrium reconstruction diamagnetic flux constraint'''
     def __init__(self, val=None, err=None):
         '''! Create diamagnetic flux constraint
@@ -203,7 +212,7 @@ class dFlux_con:
         file.write(' {0:E} {1:E}\n\n'.format(self.val, 1./self.err))
 
 
-class Press_con:
+class Press_con(TokaMaker_con):
     '''! TokaMaker equilibrium reconstruction plasma pressure constraint'''
     def __init__(self, loc=None, val=None, err=None):
         '''! Create plasma pressure constraint
@@ -237,7 +246,7 @@ class Press_con:
         file.write(' {0:E} {1:E}\n\n'.format(self.val, 1./self.err))
 
 
-class q_con:
+class q_con(TokaMaker_con):
     '''! TokaMaker equilibrium reconstruction local safety factor constraint'''
     def __init__(self, type=None, loc=0., val=None, err=None):
         r'''! Create local safety factor constraint
@@ -274,7 +283,7 @@ class q_con:
         file.write(' {0:E} {1:E}\n\n'.format(self.val, 1./self.err))
 
 
-class saddle_con:
+class saddle_con(TokaMaker_con):
     '''! TokaMaker equilibrium reconstruction saddle flux loop constraint '''
     def __init__(self, pt1=None, pt2=None, width=None, val=None, err=None):
         '''! Create saddle flux loop sensor constraint
@@ -376,6 +385,7 @@ class reconstruction():
         self._mirnovs = []
         self._saddles = []
         self._pressure_cons = []
+        self._nonax_corrs = []
     
     def set_Ip(self,Ip,err):
         '''! Set plasma current constraint
@@ -424,7 +434,7 @@ class reconstruction():
         '''
         self._flux_loops.append(fluxLoop_con(loc=loc, val=val, err=err))
 
-    def add_Mirnov(self,loc,norm,val,err):
+    def add_Mirnov(self,loc,norm,val,err,nonax_corr=None):
         '''! Add Mirnov sensor constraint
         
         @param loc Location of Mirnov in R-Z plane [2]
@@ -432,7 +442,9 @@ class reconstruction():
         @param val Value of Mirnov constraint [T]
         @param err Error in constraint [T]
         '''
-        self._mirnovs.append(Mirnov_con(loc=loc, norm=norm, val=val, err=err))
+        if len(nonax_corr) != self._gs_obj.ncond_modes+1:
+            raise ValueError("Non-axisymmetric correction for constraint has incorrect size")
+        self._mirnovs.append(Mirnov_con(loc=loc, norm=norm, val=val, err=err, nonax_corr=nonax_corr))
     
     def add_saddle(self,p1,p2,width,val,err):
         '''! Add saddle loop constraint
@@ -464,6 +476,7 @@ class reconstruction():
         self._pressure_cons = []
         self._coil_targets = None
         self._coil_wts = None
+        self._nonax_corrs = []
     
     def write_fit_in(self):
         '''! Create reconstruction input file for specified constraints'''
@@ -473,10 +486,25 @@ class reconstruction():
         if self._Dflux_con is not None:
             constraints.append(self._Dflux_con)
         ncons = len(constraints)
+        nonax_corrs = []
+        if self._coil_targets is not None:
+            for i in range(self._gs_obj.ncoils):
+                nonax_corrs.append(None)
         with open(self.con_file, 'w+') as fid:
             fid.write('{0:d}\n\n'.format(ncons))
             for con in constraints:
                 con.write(fid)
+                nonax_corrs.append(con.get_nonax_corr())
+        has_nonaxi = False
+        for i, nonax_corr in enumerate(nonax_corrs):
+            if nonax_corr is None:
+                nonax_corrs[i] = [-1.0] + [0.0 for _ in range(self._gs_obj.ncond_modes)]
+            else:
+                if len(nonax_corr) != self._gs_obj.ncond_modes+1:
+                    raise ValueError("Non-axisymmetric correction for constraint {0} has incorrect size".format(i))
+                has_nonaxi = True
+        if has_nonaxi:
+            self._nonax_corrs = numpy.asarray(nonax_corrs)
     
     def read_fit_in(self):
         '''! Read constraints from existing input file'''
@@ -513,9 +541,13 @@ class reconstruction():
         error_flag = c_int()
         if self._coil_targets is not None:
             self._gs_obj.set_coil_currents(self._coil_targets)
+        nonax_corr_ptr = None
+        if self._nonax_corrs is not None:
+            nonax_corr = numpy.ascontiguousarray(self._nonax_corrs, dtype=numpy.float64)
+            nonax_corr_ptr = nonax_corr.ctypes.data_as(c_double_ptr)
         if self._coil_wts is None:
-            tokamaker_recon_run(c_bool(vacuum),self.settings,c_void_p(),ctypes.byref(error_flag))
+            tokamaker_recon_run(c_bool(vacuum),self.settings,c_void_p(),nonax_corr_ptr,ctypes.byref(error_flag))
         else:
             coil_wts_ptr = self._coil_wts.ctypes.data_as(c_void_p)
-            tokamaker_recon_run(c_bool(vacuum),self.settings,coil_wts_ptr,ctypes.byref(error_flag))
+            tokamaker_recon_run(c_bool(vacuum),self.settings,coil_wts_ptr,nonax_corr_ptr,ctypes.byref(error_flag))
         return error_flag.value

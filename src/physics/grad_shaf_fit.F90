@@ -216,7 +216,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,coil_wt,fitF0,fixedCentering)
+SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,coil_wt,fitF0,fixedCentering,nonax_corr)
 TYPE(gs_eq), TARGET, INTENT(inout) :: gs
 CHARACTER(LEN=*), INTENT(in) :: inpath
 CHARACTER(LEN=*), INTENT(in) :: outpath
@@ -229,6 +229,7 @@ LOGICAL, OPTIONAL, INTENT(in) :: fitV0
 REAL(r8), OPTIONAL, INTENT(in) :: coil_wt(:)
 LOGICAL, OPTIONAL, INTENT(in) :: fitF0
 LOGICAL, OPTIONAL, INTENT(in) :: fixedCentering
+REAL(r8), OPTIONAL, POINTER, INTENT(in) :: nonax_corr(:,:)
 !---
 real(8), allocatable :: fjac(:,:),qtf(:),error(:),cofs(:)
 real(8), allocatable :: wa1(:),wa2(:),wa3(:),wa4(:)
@@ -255,6 +256,17 @@ gs_active=>gs
 WRITE(*,*)
 WRITE(*,'(A)')'*** Loading fit constraints ***'
 CALL fit_load(inpath,conlist,coil_wt)
+IF(PRESENT(nonax_corr))THEN
+  IF(ASSOCIATED(nonax_corr))THEN
+    DO i=1,SIZE(conlist)
+      IF(nonax_corr(1,i)>0.d0)THEN
+        WRITE(*,*)'Setting nonax',i,nonax_corr(1:gs_active%ncond_eigs+1,i)
+        ALLOCATE(conlist(i)%con%nax_corr(gs_active%ncond_eigs))
+        conlist(i)%con%nax_corr=nonax_corr(2:gs_active%ncond_eigs+1,i)
+      END IF
+    END DO
+  END IF
+END IF
 !---Count coefficients
 ncofs=0
 IF(gs%free)THEN
@@ -1106,6 +1118,7 @@ DO i=1,n
   SELECT CASE(m)
     CASE(1)
       ALLOCATE(field_con)
+      WRITE(*,*)'Mirnov con',j
       READ(io_unit,*,END=300)rtmp,field_con%phi
       READ(io_unit,*,END=300)field_con%v
       READ(io_unit,*,END=300)field_con%val,field_con%wt
