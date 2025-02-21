@@ -14,6 +14,7 @@ MODULE thin_wall
 USE, INTRINSIC :: iso_c_binding, only: c_loc
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array
+USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_bmesh
 USE oft_mesh_local, ONLY: bmesh_local_init
@@ -127,6 +128,7 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: qbasis => NULL() !< Basis function pre-evaluated at cell centers
+  TYPE(xdmf_plot_file) :: xdmf
   CLASS(oft_vector), POINTER :: Uloc => NULL() !< FE vector for thin-wall model
   CLASS(oft_vector), POINTER :: Uloc_pts => NULL() !< Needs docs
   TYPE(oft_native_matrix), POINTER :: Rmat => NULL() !< Resistivity matrix for thin-wall model
@@ -541,7 +543,7 @@ ALLOCATE(normals(3,self%mesh%nc))
 DO i=1,self%mesh%nc
   CALL self%mesh%norm(i,ftmp,normals(:,i))
 END DO
-CALL self%mesh%save_cell_vector(normals, 'Nhat')
+CALL self%mesh%save_cell_vector(normals,self%xdmf,'Nhat')
 !---Save hole info
 DO i=1,self%nholes
   normals=0.d0
@@ -551,7 +553,7 @@ DO i=1,self%nholes
     END DO
   END DO
   WRITE(plt_tag,'(I4.4)')i
-  CALL self%mesh%save_cell_scalar(normals(1,:), 'Ho_'//plt_tag)
+  CALL self%mesh%save_cell_scalar(normals(1,:),self%xdmf,'Ho_'//plt_tag)
 END DO
 CALL tw_save_hole_debug(self)
 DEALLOCATE(normals)
@@ -2281,9 +2283,12 @@ integer(4) :: ncoil_sets,nread,coil_type
 TYPE(fox_node), POINTER :: doc,coil_set,coil,thincurr_group,xml_attr
 TYPE(fox_nodelist), POINTER :: coil_sets,coil_list
 !---
-INTEGER(4) :: i,j,k,io_unit,ierr,id,cell
+LOGICAL :: success
+INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims
+INTEGER(4), ALLOCATABLE :: dim_sizes(:)
 REAL(8) :: pts_tmp(2),res_per_len,radius,dl,theta
-CHARACTER(LEN=4) :: coil_ind
+CHARACTER(LEN=10) :: coil_ind
+CHARACTER(LEN=OFT_PATH_SLEN) :: coil_path
 TYPE(tw_coil_set), POINTER :: coil_tmp
 TYPE(fox_DOMException) :: xml_ex
 ! IF(.NOT.ASSOCIATED(oft_env%xml))RETURN
@@ -2337,39 +2342,67 @@ DO i=1,ncoils
   ALLOCATE(coil_tmp%coils(coil_tmp%ncoils))
   DO j=1,coil_tmp%ncoils
     coil=>fox_item(coil_list,j-1)
-    !---Get coil type
-    coil_type=2
-    !xml_attr=>fox_getAttributeNode(coil,"type")
-    !IF(ASSOCIATED(xml_attr))CALL fox_extractDataContent(xml_attr,coil_type,num=nread,iostat=ierr)
-    !---Read number of points
-    xml_attr=>fox_getAttributeNode(coil,"npts")
+    !---Look for HDF5 path
+    xml_attr=>fox_getAttributeNode(coil,"path")
     IF(ASSOCIATED(xml_attr))THEN
-      CALL fox_extractDataContent(xml_attr,coil_tmp%coils(j)%npts,num=nread,iostat=ierr)
+      CALL fox_extractDataContent(xml_attr,coil_path,num=nread,iostat=ierr)
+      IF(ierr/=0)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+      ipath=INDEX(coil_path,":")
+      IF(ipath==0)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Misformatted "path" attribute in coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+      CALL hdf5_field_get_sizes(coil_path(1:ipath-1),coil_path(ipath+1:OFT_PATH_SLEN),ndims,dim_sizes)
+      IF(ndims<0)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Failed to read HDF5 data sizes for coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+      IF(dim_sizes(1)/=3)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Incorrect first dimension of HDF5 dataset for coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+      coil_tmp%coils(j)%npts=dim_sizes(2)
+      DEALLOCATE(dim_sizes)
+      ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
+      CALL hdf5_read(coil_tmp%coils(j)%pts,coil_path(1:ipath-1),coil_path(ipath+1:OFT_PATH_SLEN),success=success)
+      IF(.NOT.success)THEN
+        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        CALL oft_abort('Failed to read HDF5 data for coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
     ELSE
-      coil_type=1
-    !   CALL oft_abort('"npts" not specified for general coil', 'tw_load_coils', __FILE__)
+      !---Read number of points
+      xml_attr=>fox_getAttributeNode(coil,"npts")
+      IF(ASSOCIATED(xml_attr))THEN
+        CALL fox_extractDataContent(xml_attr,coil_tmp%coils(j)%npts,num=nread,iostat=ierr)
+        coil_type=2
+      ELSE
+        coil_type=1
+      END IF
+      SELECT CASE(coil_type)
+        CASE(1)
+          CALL fox_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
+          IF(ierr/=0)THEN
+            WRITE(coil_ind,'(I4,2X,I4)')i,j
+            CALL oft_abort('Error reading circular coil '//coil_ind,'tw_load_coils',__FILE__)
+          END IF
+          IF(coil_tmp%coils(j)%npts==0)coil_tmp%coils(j)%npts=181
+          ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
+          DO k=1,coil_tmp%coils(j)%npts
+            theta=(k-1)*2.d0*pi/REAL(coil_tmp%coils(j)%npts-1,8)
+            coil_tmp%coils(j)%pts(:,k)=[pts_tmp(1)*COS(theta),pts_tmp(1)*SIN(theta),pts_tmp(2)]
+          END DO
+        CASE(2)
+          ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
+          CALL fox_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
+          IF(ierr/=0)THEN
+            WRITE(coil_ind,'(I4,2X,I4)')i,j
+            CALL oft_abort('Error reading coil '//coil_ind,'tw_load_coils',__FILE__)
+          END IF
+      END SELECT
     END IF
-    SELECT CASE(coil_type)
-      CASE(1)
-        CALL fox_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
-        IF(ierr/=0)THEN
-          WRITE(coil_ind,'(I4)')i
-          CALL oft_abort('Error reading circular coil in set '//coil_ind,'tw_load_coils',__FILE__)
-        END IF
-        IF(coil_tmp%coils(j)%npts==0)coil_tmp%coils(j)%npts=181
-        ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-        DO k=1,coil_tmp%coils(j)%npts
-          theta=(k-1)*2.d0*pi/REAL(coil_tmp%coils(j)%npts-1,8)
-          coil_tmp%coils(j)%pts(:,k)=[pts_tmp(1)*COS(theta),pts_tmp(1)*SIN(theta),pts_tmp(2)]
-        END DO
-      CASE(2)
-        ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-        CALL fox_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
-        IF(ierr/=0)THEN
-          WRITE(coil_ind,'(I4)')i
-          CALL oft_abort('Error reading coil in set '//coil_ind,'tw_load_coils',__FILE__)
-        END IF
-    END SELECT
     !---Get scale factor
     xml_attr=>fox_getAttributeNode(coil,"scale")
     IF(ASSOCIATED(xml_attr))CALL fox_extractDataContent(xml_attr,coil_tmp%scales(j),num=nread,iostat=ierr)
@@ -2876,7 +2909,7 @@ DEBUG_STACK_PUSH
 !---Avg to cells
 ALLOCATE(cellvec(3,self%mesh%nc))
 CALL tw_recon_curr(self,a,cellvec)
-CALL self%mesh%save_cell_vector(cellvec/mu0,TRIM(tag)) ! Convert back to Amps
+CALL self%mesh%save_cell_vector(cellvec/mu0,self%xdmf,TRIM(tag)) ! Convert back to Amps
 !---Avg to points
 ALLOCATE(ptvec(3,self%mesh%np))
 DO i=1,self%mesh%np
@@ -2886,13 +2919,13 @@ DO i=1,self%mesh%np
   END DO
   ptvec(:,i) = ptvec(:,i)/self%mesh%va(i)
 END DO
-CALL self%mesh%save_vertex_vector(ptvec/mu0,TRIM(tag)//'_v') ! Convert back to Amps
+CALL self%mesh%save_vertex_vector(ptvec/mu0,self%xdmf,TRIM(tag)//'_v') ! Convert back to Amps
 !
 ptvec=0.d0
 DO i=1,self%mesh%np
   IF(self%pmap(i)>0)ptvec(1,i)=a(self%pmap(i))
 END DO
-CALL self%mesh%save_vertex_scalar(ptvec(1,:),TRIM(tag)//'_p')
+CALL self%mesh%save_vertex_scalar(ptvec(1,:),self%xdmf,TRIM(tag)//'_p')
 DEALLOCATE(ptvec,cellvec)
 DEBUG_STACK_POP
 END SUBROUTINE tw_save_pfield
@@ -2926,7 +2959,7 @@ END DO
 !WRITE(pltnum,'(I3.3)')ih
 !CALL self%mesh%save_cell_vector(cellvec,"hole_"//pltnum)
 END DO
-CALL self%mesh%save_cell_vector(cellvec,"hole_vec")
+CALL self%mesh%save_cell_vector(cellvec,self%xdmf,"hole_vec")
 DEALLOCATE(cellvec)
 END SUBROUTINE tw_save_hole_debug
 !---------------------------------------------------------------------------

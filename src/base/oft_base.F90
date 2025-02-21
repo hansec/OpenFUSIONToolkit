@@ -178,7 +178,14 @@ INTERFACE
 !---------------------------------------------------------------------------
   SUBROUTINE oft_set_signal_handlers()  BIND(C)
   END SUBROUTINE oft_set_signal_handlers
+!---------------------------------------------------------------------------
+!> Prototype for abort callback to override usual abort process
+!---------------------------------------------------------------------------
+  SUBROUTINE oft_abort_callback()  BIND(C)
+  END SUBROUTINE oft_abort_callback
 END INTERFACE
+!> Abort callback for graceful abort in Python interface
+PROCEDURE(oft_abort_callback), POINTER :: oft_abort_cb
 CONTAINS
 !---------------------------------------------------------------------------
 !> Initializes Open FUSION Toolkit run environment
@@ -317,8 +324,8 @@ IF(oft_env%rank==0)THEN
 #else
   WRITE(*,'(A)')    '  Not compiled with OpenMP'
 #endif
-  WRITE(*,'(2A)')   'Fortran input file    = ',oft_env%ifile
-  WRITE(*,'(2A)')   'XML input file        = ',oft_env%xml_file
+  WRITE(*,'(2A)')   'Fortran input file    = ',TRIM(oft_env%ifile)
+  WRITE(*,'(2A)')   'XML input file        = ',TRIM(oft_env%xml_file)
   WRITE(*,'(A,3I4)')'Integer Precisions    = ',i4,i8
   WRITE(*,'(A,3I4)')'Float Precisions      = ',r4,r8,r10
   WRITE(*,'(A,3I4)')'Complex Precisions    = ',c4,c8
@@ -400,6 +407,7 @@ OPEN(outunit,FILE='abort_'//proc//'.err')
 !---Print error information
 100 FORMAT (A,I5,2A)
 101 FORMAT (2A)
+WRITE(outunit,'(X)')
 WRITE(outunit,'(A)')'#----------------------------------------------'
 IF(oft_env%nprocs>1)THEN
   WRITE(outunit,100)  '[',oft_env%rank,'] ERROR: ',TRIM(error_str)
@@ -410,11 +418,15 @@ ELSE
   WRITE(outunit,101)  'SUBROUTINE: ',TRIM(sname)
   WRITE(outunit,101)  'FILE: ',TRIM(fname)
 END IF
+WRITE(outunit,'(A)')'#----------------------------------------------'
+WRITE(outunit,'(X)')
 #ifdef OFT_ABORT_FILES
 CLOSE(outunit)
 #endif
 !---
 CALL oft_stack_print
+!---
+IF(ASSOCIATED(oft_abort_cb))CALL oft_abort_cb
 !---Abort run
 errcode=99
 #ifdef HAVE_MPI
@@ -994,12 +1006,61 @@ list(ltmp)=list
 DEALLOCATE(ltmp)
 END SUBROUTINE orient_listn_inv
 !------------------------------------------------------------------------------
+!> Compute coefficients for linear 1-D interpolation of function F(x)
+!!
+!! @warning This function requires `x` be sorted lowest to highest.
+!! @note This function performs an interval search each time it is called.
+!------------------------------------------------------------------------------
+SUBROUTINE linterp_facs(x,n,xx,inds,facs,extrap)
+REAL(r8), INTENT(in) :: x(n) !< Paramaterizing array \f$ x_i \f$ [n]
+REAL(r8), INTENT(in) :: xx !< Location to perform interpolation
+INTEGER(i4), INTENT(in) :: n !< Length of function parameterization
+INTEGER(i4), INTENT(out) :: inds(2) !< Indices of points bounding subinterval (-1 -> error)
+REAL(r8), INTENT(out) :: facs(2) !< Interpolation factors for point in `inds(2)`
+INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Extrapolation mode (0: none, 1: constant, 2: linear)
+INTEGER(i4) :: i
+DO i=2,n
+  IF(x(i-1)<=xx.AND.x(i)>=xx)EXIT
+END DO
+IF(i<=n)THEN
+  inds=[i,i-1]
+  facs=[1.d0,-1.d0]*(xx-x(i-1))/(x(i)-x(i-1)) + [0.d0,1.d0]
+ELSE
+  IF(PRESENT(extrap))THEN
+    SELECT CASE(extrap)
+    CASE(0)
+      inds=[-1,-1]
+      facs=[0.d0,0.d0]
+    CASE(1)
+      IF(xx<x(1))THEN
+        inds=[1,1]
+        facs=[1.d0,0.d0]
+      ELSE IF(xx>x(n))THEN
+        inds=[n,n]
+        facs=[1.d0,0.d0]
+      END IF
+    CASE(2)
+      IF(xx<x(1))THEN
+        inds=[2,1]
+        facs=[1.d0,-1.d0]*(xx-x(1))/(x(2)-x(1)) + [0.d0,1.d0]
+      ELSE IF(xx>x(n))THEN
+        inds=[n,n-1]
+        facs=[1.d0,-1.d0]*(xx-x(n-1))/(x(n)-x(n-1)) + [0.d0,1.d0]
+      END IF
+    CASE DEFAULT
+      inds=[-2,-2]
+      facs=[0.d0,0.d0]
+    END SELECT
+  END IF
+END IF
+END SUBROUTINE linterp_facs
+!------------------------------------------------------------------------------
 !> Perform linear 1-D interpolation of function F(x)
 !!
 !! @warning This function requires `x` be sorted lowest to highest.
 !! @note This function performs an interval search each time it is called.
 !!
-!! @returns \f$ F(xx) \f$ (-1.E99 if outside domain and `extrap=0`)
+!! @returns \f$ F(xx) \f$ (-1.E99 if outside domain and `extrap=0` or invalid value for `extrap`)
 !------------------------------------------------------------------------------
 FUNCTION linterp(x,y,n,xx,extrap) result(yy)
 REAL(r8), INTENT(in) :: x(n) !< Paramaterizing array \f$ x_i \f$ [n]
@@ -1007,34 +1068,13 @@ REAL(r8), INTENT(in) :: y(n) !< Function values \f$ F(x_i) \f$ [n]
 REAL(r8), INTENT(in) :: xx !< Location to perform interpolation
 INTEGER(i4), INTENT(in) :: n !< Length of function parameterization
 INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Extrapolation mode (0: none, 1: constant, 2: linear)
-INTEGER(i4) :: i
-REAL(r8) :: yy
-yy=-1.d99
-DO i=2,n
-  IF(x(i-1)<=xx.AND.x(i)>=xx)EXIT
-END DO
-IF(i<=n)THEN
-  yy=(y(i)-y(i-1))*(xx-x(i-1))/(x(i)-x(i-1)) + y(i-1)
+INTEGER(i4) :: inds(2)
+REAL(r8) :: yy,facs(2)
+CALL linterp_facs(x,n,xx,inds,facs,extrap)
+IF(inds(1)>0)THEN
+  yy=y(inds(1))*facs(1)+y(inds(2))*facs(2)
 ELSE
-  IF(PRESENT(extrap))THEN
-    SELECT CASE(extrap)
-    CASE(0)
-    CASE(1)
-      IF(xx<x(1))THEN
-        yy=y(1)
-      ELSE IF(xx>x(n))THEN
-        yy=y(n)
-      END IF
-    CASE(2)
-      IF(xx<x(1))THEN
-        yy=(y(2)-y(1))*(xx-x(1))/(x(2)-x(1)) + y(1)
-      ELSE IF(xx>x(n))THEN
-        yy=(y(n)-y(n-1))*(xx-x(n-1))/(x(n)-x(n-1)) + y(n-1)
-      END IF
-    CASE DEFAULT
-      CALL oft_abort("Invalid extrapolation type","linterp",__FILE__)
-    END SELECT
-  END IF
+  yy=-1.d99
 END IF
 END FUNCTION linterp
 !---------------------------------------------------------------------------
