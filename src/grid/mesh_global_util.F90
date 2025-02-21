@@ -337,10 +337,15 @@ end subroutine mesh_global_set_curved
 !------------------------------------------------------------------------------
 subroutine mesh_global_save(mesh)
 class(oft_amesh), intent(inout) :: mesh
-integer(8) :: nloc(6),ntmp(4),nfb,nfl,nfg
-integer(i4) :: i,j,k,l,nfmax
+integer(8) :: nloc(6),ntmp(4),nfb,nfl,nfg,nfmax
+integer(i4) :: i,j,k,l
 #ifdef HAVE_MPI
-integer(i4) :: stat(MPI_STATUS_SIZE),ierr
+integer(i4) :: ierr
+#ifdef OFT_MPI_F08
+type(mpi_status) :: stat
+#else
+integer(i4) :: stat(MPI_STATUS_SIZE)
+#endif
 #endif
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting I/O information'
@@ -469,7 +474,11 @@ INTEGER(i4) :: i,j,k,l,ierr
 INTEGER(i8) :: grnd_global
 LOGICAL :: owned
 #ifdef HAVE_MPI
+#ifdef OFT_MPI_F08
+type(mpi_status) :: stat
+#else
 integer(i4) :: stat(MPI_STATUS_SIZE)
+#endif
 #endif
 DEBUG_STACK_PUSH
 !---Locate local surface ground point
@@ -881,13 +890,12 @@ ELSE
   end do
   allocate(smesh%lco(smesh%nc))
   ! !$omp parallel do private(kf,j,etmp,ftmp)
-  allocate(kf(smesh%cell_np))
-  allocate(ltmp(smesh%cell_np))
+  allocate(kf(smesh%cell_np),kfg(smesh%cell_np))
   do i=1,smesh%nc
-    kf=smesh%global%lp(smesh%lc(:,i))
+    kfg=smesh%global%lp(smesh%lc(:,i))
     do j=1,smesh%cell_ne
       ed=smesh%cell_ed(:,j)
-      etmp=kf(ed) !(/kf(mesh%bmesh%face_ed(1,j)),kf(mesh%bmesh%face_ed(2,j))/)
+      etmp=kfg(ed)
       if(smesh%periodic%nper>0.AND.(etmp(1)==etmp(2)))then
         IF(smesh%lc(ed(1),i)>smesh%lc(ed(2),i))THEN
           etmp(1)=etmp(1)+smesh%global%np
@@ -901,10 +909,10 @@ ELSE
         smesh%lce(j,i)=ABS(smesh%lce(j,i))
       end if
     end do
-    ltmp=INT(kf,4)
-    CALL find_orient_listn(smesh%lco(i),ltmp,smesh%cell_np)
+    kf=INT(kfg,4)
+    CALL find_orient_listn(smesh%lco(i),kf,smesh%cell_np)
   end do
-  deallocate(kf,ltmp)
+  deallocate(kf,kfg)
 END IF
 DEBUG_STACK_POP
 end subroutine bmesh_global_orient
