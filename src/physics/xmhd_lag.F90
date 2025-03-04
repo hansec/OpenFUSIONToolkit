@@ -73,7 +73,7 @@ MODULE xmhd_lag
 #endif
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
-  hdf5_create_timestep, hdf5_field_exist, oft_bin_file
+  hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: mesh, cell_is_curved
 USE multigrid, ONLY: mg_mesh, multigrid_level, multigrid_base_pushcc
@@ -273,8 +273,8 @@ end interface
 ! Global variables
 !---------------------------------------------------------------------------
 INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
-TYPE(fox_node), POINTER :: xmhd_root_node => NULL() !< xMHD XML node
-TYPE(fox_node), POINTER :: xmhd_pre_node => NULL() !< preconditioner XML node
+TYPE(xml_node), POINTER :: xmhd_root_node => NULL() !< xMHD XML node
+TYPE(xml_node), POINTER :: xmhd_pre_node => NULL() !< preconditioner XML node
 !---Equation control
 LOGICAL :: xmhd_jcb = .TRUE. !< Include JxB force on fluid
 LOGICAL :: xmhd_advec = .TRUE. !< Include fluid advection
@@ -436,11 +436,6 @@ integer(i4), intent(out) :: rst_freq !< Frequency to save restart files
 integer(i4), intent(out) :: nclean !< Frequency to clean divergence
 integer(i4), intent(out) :: maxextrap !< Extrapolation order for initial guess
 integer(i4), intent(out) :: ittarget !< Maximum number of linear iterations
-!---XML solver fields
-#ifdef HAVE_XML
-integer(i4) :: nnodes
-TYPE(fox_nodelist), POINTER :: current_nodes
-#endif
 integer(i4) :: io_unit,ierr
 !---
 namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,xmhd_ohmic, &
@@ -471,14 +466,10 @@ if(ierr>0)call oft_abort('Error parsing MHD options in input file.','xmhd_read_s
 !---Look for xMHD node
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  current_nodes=>fox_getElementsByTagName(oft_env%xml,"xmhd")
-  nnodes=fox_getLength(current_nodes)
-  IF(nnodes>0)THEN
-    xmhd_root_node=>fox_item(current_nodes,0)
+  CALL xml_get_element(oft_env%xml,"xmhd",xmhd_root_node,ierr)
+  IF(ierr==0)THEN
     !---Look for pre node
-    current_nodes=>fox_getElementsByTagName(xmhd_root_node,"pre")
-    nnodes=fox_getLength(current_nodes)
-    IF(nnodes>0)xmhd_pre_node=>fox_item(current_nodes,0)
+    CALL xml_get_element(xmhd_root_node,"pre",xmhd_pre_node,ierr)
   END IF
 END IF
 #endif
@@ -1019,7 +1010,7 @@ real(r8) :: fac,lramp,tflux,tcurr,t,dtin,div_error,jump_error,derror,de_scale
 real(r8) :: ndens,npart,temp_avg,tempe_avg,mesh_vol,dtp
 real(r8), pointer, dimension(:) :: vals => NULL()
 character(LEN=XMHD_RST_LEN) :: rst_char
-character(LEN=OFT_HIST_SLEN) :: comm_line
+character(LEN=OFT_SLEN) :: comm_line
 !---Extrapolation fields
 integer(i4) :: nextrap
 real(r8), allocatable, dimension(:) :: extrapt
@@ -2442,10 +2433,10 @@ end subroutine xmhd_alloc_ops
 subroutine xmhd_setup_regions()
 !---XML solver fields
 #ifdef HAVE_XML
-integer(i4) :: nnodes,nnodes_inner,nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
+integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
 real(r8) :: eta(1)
-TYPE(fox_node), POINTER :: smd_node,reg_node,inner_node
-TYPE(fox_nodelist), POINTER :: current_nodes,reg_nodes,inner_nodes
+TYPE(xml_node), POINTER :: reg_node,inner_node
+TYPE(xml_nodelist) :: reg_nodes
 #endif
 integer(i4), ALLOCATABLE :: regs(:),reg_types(:)
 DEBUG_STACK_PUSH
@@ -2459,18 +2450,15 @@ solid_cell=.FALSE.
 #ifdef HAVE_XML
 IF(ASSOCIATED(xmhd_root_node))THEN
   !---Look for pre node
-  reg_nodes=>fox_getElementsByTagName(xmhd_root_node,"region")
-  nnodes=fox_getLength(reg_nodes)
-  IF(nnodes>0)THEN
-    DO i=0,nnodes-1
-      reg_node=>fox_item(reg_nodes,i)
+  CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
+  IF(reg_nodes%n>0)THEN
+    DO i=0,reg_nodes%n-1
+      reg_node=>reg_nodes%nodes(i+1)%this
       !---
-      inner_nodes=>fox_getElementsByTagName(reg_node,"id")
-      nnodes_inner=fox_getLength(inner_nodes)
-      IF(nnodes_inner==0)CALL oft_abort("No regions IDs specified for region group", &
-      "xmhd_setup_regions",__FILE__)
-      inner_node=>fox_item(inner_nodes,0)
-      CALL fox_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
+      CALL xml_get_element(reg_node,"id",inner_node,ierr)
+      IF(ierr/=0)CALL oft_abort("Error reading regions IDs for group", &
+        "xmhd_setup_regions",__FILE__)
+      CALL xml_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
       IF(nread_id==0)CALL oft_abort("Zero values given in id group", &
       "xmhd_setup_regions",__FILE__)
       IF(ierr>0)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
@@ -2478,12 +2466,8 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       IF(ANY(regs(1:nread_id)>mesh%nreg).OR.ANY(regs(1:nread_id)<=0))CALL oft_abort( &
       "Invalid region ID","xmhd_setup_regions",__FILE__)
       !---
-      inner_nodes=>fox_getElementsByTagName(reg_node,"eta")
-      nnodes_inner=fox_getLength(inner_nodes)
-      IF(nnodes_inner==0)CALL oft_abort("No eta values specified for region group", &
-      "xmhd_setup_regions",__FILE__)
-      inner_node=>fox_item(inner_nodes,0)
-      CALL fox_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
+      CALL xml_get_element(reg_node,"eta",inner_node,ierr)
+      CALL xml_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
       IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
       "xmhd_setup_regions",__FILE__)
       IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
@@ -2491,19 +2475,18 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       IF(eta(1)<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
       __FILE__)
       !---Get region type
-      inner_nodes=>fox_getElementsByTagName(reg_node,"type")
-      nnodes_inner=fox_getLength(inner_nodes)
-      IF(nnodes_inner==0)THEN
+      CALL xml_get_element(reg_node,"type",inner_node,ierr)
+      IF(ierr/=0)THEN
         reg_type(1)=2.d0
       ELSE
-        inner_node=>fox_item(inner_nodes,0)
-        CALL fox_extractDataContent(inner_node,reg_type,num=nread_type,iostat=ierr)
-        IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
-        "xmhd_setup_regions",__FILE__)
-        IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &
-        __FILE__)
+        ! inner_node=>xml_item(inner_nodes,0)
+        ! CALL xml_extractDataContent(inner_node,reg_type,num=nread_type,iostat=ierr)
+        ! IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
+        ! "xmhd_setup_regions",__FILE__)
+        ! IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &
+        ! __FILE__)
         IF(reg_type(1)<1.OR.reg_type(1)>2)CALL oft_abort("Invalid type specified","xmhd_setup_regions", &
-        __FILE__)
+          __FILE__)
       END IF
       !---
       DO j=1,nread_id
@@ -4474,6 +4457,7 @@ real(r8) :: mag,div_err,mer,merp,ver,verp,gerr,cerr,verr
 real(r8) :: fac,lramp,tflux,tcurr,t,tp,td
 real(r8) :: ndens
 !---
+TYPE(xdmf_plot_file) :: xdmf
 LOGICAL :: rst,first
 character(LEN=XMHD_RST_LEN) :: rst_char
 CHARACTER(LEN=OFT_PATH_SLEN) :: file_tmp,file_prev
@@ -4505,6 +4489,9 @@ read(io_unit,xmhd_plot_options,IOSTAT=ierr)
 close(io_unit)
 if(ierr<0)call oft_abort('No MHD plot options found in input file.','xmhd_plot',__FILE__)
 if(ierr>0)call oft_abort('Error parsing MHD plot options in input file.','xmhd_plot',__FILE__)
+!---
+CALL xdmf%setup("mug")
+CALL mesh%setup_io(xdmf,oft_lagrange%order)
 !---------------------------------------------------------------------------
 ! Check run type and optional fields
 !---------------------------------------------------------------------------
@@ -4608,16 +4595,16 @@ IF(linear)THEN
 !---------------------------------------------------------------------------
   vals=>bvout(1,:)
   CALL sub_fields%Ne%get_local(vals)
-  CALL mesh%save_vertex_scalar(vals,'N0')
+  CALL mesh%save_vertex_scalar(vals,xdmf,'N0')
 !---------------------------------------------------------------------------
 ! Extract temperatures and plot
 !---------------------------------------------------------------------------
   CALL sub_fields%Ti%get_local(vals)
-  CALL mesh%save_vertex_scalar(vals,'T0')
+  CALL mesh%save_vertex_scalar(vals,xdmf,'T0')
   !---Electron temperature
   IF(xmhd_two_temp)THEN
     CALL sub_fields%Te%get_local(vals)
-    CALL mesh%save_vertex_scalar(vals,'Te0')
+    CALL mesh%save_vertex_scalar(vals,xdmf,'Te0')
   END IF
 !---------------------------------------------------------------------------
 ! Extract velocity and plot
@@ -4628,7 +4615,7 @@ IF(linear)THEN
   CALL sub_fields%V%get_local(vals,2)
   vals=>bvout(3,:)
   CALL sub_fields%V%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'V0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'V0')
 !---------------------------------------------------------------------------
 ! Extract magnetic field and plot
 !---------------------------------------------------------------------------
@@ -4638,7 +4625,7 @@ IF(linear)THEN
   CALL sub_fields%B%get_local(vals,2)
   vals=>bvout(3,:)
   CALL sub_fields%B%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'B0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'B0')
   !---Project current density and plot
   Jfield%u=>sub_fields%B
   CALL Jfield%setup
@@ -4651,7 +4638,7 @@ IF(linear)THEN
   CALL ap%get_local(vals,2)
   vals=>bvout(3,:)
   CALL ap%get_local(vals,3)
-  CALL mesh%save_vertex_vector(bvout,'J0')
+  CALL mesh%save_vertex_vector(bvout,xdmf,'J0')
 END IF
 !---------------------------------------------------------------------------
 ! Count restart file list
@@ -4755,7 +4742,7 @@ DO
       ELSE
         CALL uc%add(0.d0,(td-t)/(tp-t),up,(td-tp)/(t-tp),u)
       END IF
-      CALL hdf5_create_timestep(td)
+      CALL xdmf%add_timestep(td)
 !---------------------------------------------------------------------------
 ! Retrieve sub-fields and scale
 !---------------------------------------------------------------------------
@@ -4779,21 +4766,21 @@ DO
 !---------------------------------------------------------------------------
       vals=>bvout(1,:)
       CALL sub_fields%Ne%get_local(vals)
-      CALL mesh%save_vertex_scalar(vals,'N')
+      CALL mesh%save_vertex_scalar(vals,xdmf,'N')
       !---Hyper-diff aux field
       IF(n2_ind>0)THEN
         CALL sub_fields%N2%get_local(vals)
-        CALL mesh%save_vertex_scalar(vals,'N2')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'N2')
       END IF
 !---------------------------------------------------------------------------
 ! Extract temperatures and plot
 !---------------------------------------------------------------------------
       CALL sub_fields%Ti%get_local(vals)
-      CALL mesh%save_vertex_scalar(vals,'T')
+      CALL mesh%save_vertex_scalar(vals,xdmf,'T')
       !---Electron temperature
       IF(xmhd_two_temp)THEN
         CALL sub_fields%Te%get_local(vals)
-        CALL mesh%save_vertex_scalar(vals,'Te')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'Te')
       END IF
 !---------------------------------------------------------------------------
 ! Extract velocity and plot
@@ -4804,7 +4791,7 @@ DO
       CALL sub_fields%V%get_local(vals,2)
       vals=>bvout(3,:)
       CALL sub_fields%V%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'V')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'V')
 !---------------------------------------------------------------------------
 ! Project magnetic field and plot
 !---------------------------------------------------------------------------
@@ -4814,7 +4801,7 @@ DO
       CALL sub_fields%B%get_local(vals,2)
       vals=>bvout(3,:)
       CALL sub_fields%B%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'B')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'B')
       !---Hyper-res aux field
       IF(j2_ind>0)THEN
         J2field%u=>sub_fields%J2
@@ -4828,7 +4815,7 @@ DO
         CALL ap%get_local(vals,2)
         vals=>bvout(3,:)
         CALL ap%get_local(vals,3)
-        CALL mesh%save_vertex_vector(bvout,'J2')
+        CALL mesh%save_vertex_vector(bvout,xdmf,'J2')
       END IF
       !---Current density
       Jfield%u=>sub_fields%B
@@ -4842,7 +4829,7 @@ DO
       CALL ap%get_local(vals,2)
       vals=>bvout(3,:)
       CALL ap%get_local(vals,3)
-      CALL mesh%save_vertex_vector(bvout,'J')
+      CALL mesh%save_vertex_vector(bvout,xdmf,'J')
       !---Divergence error
       IF(plot_div)THEN
         Bfield%u=>sub_fields%B
@@ -4856,7 +4843,7 @@ DO
         CALL lminv%apply(ap,bp)
         vals=>bvout(1,:)
         CALL ap%get_local(vals,1)
-        CALL mesh%save_vertex_scalar(vals,'divB')
+        CALL mesh%save_vertex_scalar(vals,xdmf,'divB')
       END IF
 !---------------------------------------------------------------------------
 ! Update sampling time
