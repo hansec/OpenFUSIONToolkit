@@ -18,7 +18,7 @@
 MODULE thermal_diffusion_2d
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
-  hdf5_create_timestep, hdf5_field_exist, oft_bin_file
+  hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_type, ONLY: smesh, cell_is_curved
 !
@@ -72,12 +72,13 @@ TYPE, public :: oft_tdiff_sim
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: Te_bc => NULL() !< Te BC flag
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: jacobian_block_mask => NULL() !< Matrix block mask
   TYPE(oft_fem_comp_type), POINTER :: fe_rep => NULL() !< Finite element representation for solution field
+  TYPE(xdmf_plot_file) :: xdmf_plot
   CLASS(oft_vector), POINTER :: u => NULL() !< Needs docs
   CLASS(oft_matrix), POINTER :: jacobian => NULL() !< Needs docs
   TYPE(oft_mf_matrix), POINTER :: mf_mat => NULL() !< Matrix free operator
   TYPE(tdiff_nlfun), POINTER :: nlfun => NULL() !< Needs docs
-  TYPE(fox_node), POINTER :: xml_root => NULL() !< XML root element
-  TYPE(fox_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
+  TYPE(xml_node), POINTER :: xml_root => NULL() !< XML root element
+  TYPE(xml_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
 contains
   !> Setup
   PROCEDURE :: setup => setup
@@ -136,11 +137,11 @@ CALL u%add(0.d0,1.d0,self%u)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'tDiff_'//rst_char//'.rst', 'U')
 NULLIFY(plot_vals)
-CALL hdf5_create_timestep(self%t)
+CALL self%xdmf_plot%add_timestep(self%t)
 CALL self%u%get_local(plot_vals,1)
-CALL smesh%save_vertex_scalar(plot_vals,'Ti')
+CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
 CALL self%u%get_local(plot_vals,2)
-CALL smesh%save_vertex_scalar(plot_vals,'Te')
+CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
 
 !
 ALLOCATE(self%nlfun)
@@ -264,11 +265,11 @@ DO i=1,self%nsteps
       CALL hist_file%flush
     END IF
     !---
-    CALL hdf5_create_timestep(self%t)
+    CALL self%xdmf_plot%add_timestep(self%t)
     CALL self%u%get_local(plot_vals,1)
-    CALL smesh%save_vertex_scalar(plot_vals,'Ti')
+    CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Ti')
     CALL self%u%get_local(plot_vals,2)
-    CALL smesh%save_vertex_scalar(plot_vals,'Te')
+    CALL smesh%save_vertex_scalar(plot_vals,self%xdmf_plot,'Te')
   END IF
 END DO
 CALL hist_file%close()
@@ -519,24 +520,19 @@ subroutine setup(self,order)
 class(oft_tdiff_sim), intent(inout) :: self
 integer(i4), intent(in) :: order
 integer(i4) :: ierr,io_unit
-#ifdef HAVE_XML
-integer(i4) :: nnodes
-TYPE(fox_nodelist), POINTER :: current_nodes
-#endif
 IF(ASSOCIATED(self%fe_rep))CALL oft_abort("Setup can only be called once","setup",__FILE__)
 IF(ASSOCIATED(oft_blagrange))CALL oft_abort("FE space already built","setup",__FILE__)
 
 !---Look for XML defintion elements
 #ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
-  current_nodes=>fox_getElementsByTagName(oft_env%xml,"tdiff")
-  nnodes=fox_getLength(current_nodes)
-  IF(nnodes>0)THEN
-    self%xml_root=>fox_item(current_nodes,0)
+  CALL xml_get_element(oft_env%xml,"tdiff",self%xml_root,ierr)
+  IF(ierr==0)THEN
     !---Look for pre node
-    current_nodes=>fox_getElementsByTagName(self%xml_root,"pre")
-    nnodes=fox_getLength(current_nodes)
-    IF(nnodes>0)self%xml_pre_def=>fox_item(current_nodes,0)
+    CALL xml_get_element(self%xml_root,"pre",self%xml_pre_def,ierr)
+    IF(ierr/=0)NULLIFY(self%xml_pre_def)
+  ELSE
+    NULLIFY(self%xml_root)
   END IF
 END IF
 #endif
@@ -544,7 +540,8 @@ END IF
 !---Setup FE representation
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
 CALL oft_lag_setup(order, -1)
-CALL smesh%setup_io(order)
+CALL self%xdmf_plot%setup("tdiff")
+CALL smesh%setup_io(self%xdmf_plot,order)
 
 !---Build composite FE definition for solution field
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating FE type'
