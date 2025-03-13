@@ -2253,28 +2253,28 @@ DO i=1,self%ncond_regs
 DO k=1,self%cond_regions(i)%neigs
   kk=kk+1
   psi_eval%u=>self%cond_regions(i)%psi_eig(k)%f
-  CALL psi_eval%setup()
+  CALL psi_eval%setup(self%fe_rep)
   psi_geval%u=>self%cond_regions(i)%psi_eig(k)%f
-  CALL psi_geval%setup()
+  CALL psi_geval%setup(self%fe_rep)
   DO j=1,self%isoflux_ntargets
-    CALL bmesh_findcell(smesh,cells(j),self%isoflux_targets(1:2,j),f)
-    ! CALL smesh%jacobian(cells(j),f,goptmp,v)
+    CALL bmesh_findcell(self%fe_rep%mesh,cells(j),self%isoflux_targets(1:2,j),f)
+    ! CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
     CALL psi_eval%interp(cells(j),f,goptmp,pol_val)
     err_mat(j,kk)=pol_val(1)!*self%isoflux_targets(3,j)
   END DO
   roffset=self%isoflux_ntargets
   coffset=self%isoflux_ntargets
   DO j=1,self%flux_ntargets
-    CALL bmesh_findcell(smesh,cells(coffset+j),self%flux_targets(1:2,j),f)
-    ! CALL smesh%jacobian(cells(j),f,goptmp,v)
+    CALL bmesh_findcell(self%fe_rep%mesh,cells(coffset+j),self%flux_targets(1:2,j),f)
+    ! CALL self%fe_rep%mesh%jacobian(cells(j),f,goptmp,v)
     CALL psi_eval%interp(cells(coffset+j),f,goptmp,pol_val)
     err_mat(roffset+j,kk)=pol_val(1)
   END DO
   roffset=roffset+self%flux_ntargets
   coffset=coffset+self%flux_ntargets
   DO j=1,self%saddle_ntargets
-    CALL bmesh_findcell(smesh,cells(coffset+j),self%saddle_targets(1:2,j),f)
-    CALL smesh%jacobian(cells(coffset+j),f,goptmp,v)
+    CALL bmesh_findcell(self%fe_rep%mesh,cells(coffset+j),self%saddle_targets(1:2,j),f)
+    CALL self%fe_rep%mesh%jacobian(cells(coffset+j),f,goptmp,v)
     CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
     err_mat(roffset+2*(j-1)+1,kk)=gpsi(1)*self%saddle_targets(3,j)
     err_mat(roffset+2*(j-1)+2,kk)=gpsi(2)*self%saddle_targets(3,j)
@@ -4857,23 +4857,24 @@ r=ptmp(1)
 z=ptmp(2)
 end subroutine gs_find_xpoint
 !---------------------------------------------------------------------------
-! SUBROUTINE gs_get_qprof
-!---------------------------------------------------------------------------
-!>
+!> Get q profile for equilibrium
 !---------------------------------------------------------------------------
 subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs)
-class(gs_eq), intent(inout) :: gseq
-integer(4), intent(in) :: nr
-real(8), intent(in) :: psi_q(nr)
-real(8), intent(out) :: prof(nr),dl,rbounds(2,2),zbounds(2,2)
-real(8), optional, intent(out) :: ravgs(nr,2)
+class(gs_eq), intent(inout) :: gseq !< G-S object
+integer(4), intent(in) :: nr !< Number of flux surfaces to sample
+real(8), intent(in) :: psi_q(nr) !< Locations to sample in normalized flux
+real(8), intent(out) :: prof(nr) !< q value at each sampling location
+real(8), intent(out) :: dl !< Arc length of surface `psi_q(1)`
+real(8), intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)`
+real(8), intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)`
+real(8), optional, intent(out) :: ravgs(nr,2) !< Flux surface averages <R> and <1/R>
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
-type(gsinv_interp), target :: field
+type(gsinv_interp), pointer :: field
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
 !---
 raxis=gseq%o_point(1)
@@ -4911,12 +4912,14 @@ END IF
 !---Trace
 call set_tracer(1)
 !$omp parallel private(psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
+ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
 IF(PRESENT(ravgs))THEN
   field%compute_geom=.TRUE.
   active_tracer%neq=5
 ELSE
+  field%compute_geom=.FALSE.
   active_tracer%neq=3
 END IF
 active_tracer%B=>field
@@ -4987,6 +4990,8 @@ do j=1,nr
 end do
 CALL active_tracer%delete
 DEALLOCATE(ptout)
+CALL field%delete()
+DEALLOCATE(field)
 !$omp end parallel
 CALL psi_int%delete()
 end subroutine gs_get_qprof
