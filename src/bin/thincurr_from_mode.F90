@@ -67,7 +67,7 @@ ALLOCATE(tw_sim%closures(tw_sim%nclosures))
 tw_sim%closures(1)=1 !INT(tw_sim%mesh%nc/2.d0,4)
 CALL tw_sim%setup(hole_nsets)
 !---Setup I/0
-CALL tw_sim%xdmf%setup("ThinCurr")
+CALL tw_sim%xdmf%setup("thincurr")
 CALL tw_sim%mesh%setup_io(tw_sim%xdmf,1)
 !---Compute face mutuals
 CALL tw_compute_LmatDirect(tw_sim,tw_sim%Lmat)
@@ -148,8 +148,6 @@ DEALLOCATE(utmp,vtmp)
 DEALLOCATE(tw_sim%Lmat)
 CALL oft_finalize
 CONTAINS
-!------------------------------------------------------------------------------
-! SUBROUTINE setup_mode_mesh
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -288,8 +286,6 @@ DO i=1,nsample
 END DO
 END SUBROUTINE setup_mode_mesh
 !------------------------------------------------------------------------------
-! SUBROUTINE solve_inv
-!------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE solve_inv(self,u,g)
@@ -336,8 +332,6 @@ CALL uloc%delete()
 CALL gloc%delete()
 DEALLOCATE(uloc,gloc)
 END SUBROUTINE solve_inv
-!------------------------------------------------------------------------------
-! SUBROUTINE get_torus_loop
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

@@ -67,7 +67,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 #ifdef HAVE_XML
-TYPE(fox_node), POINTER :: xml_node
+TYPE(xml_node), POINTER :: thincurr_node
 #endif
 CALL copy_string('',error_str)
 CALL copy_string_rev(mesh_file,filename)
@@ -196,8 +196,8 @@ ELSE
 END IF
 IF(c_associated(xml_ptr))THEN
 #ifdef HAVE_XML
-  CALL c_f_pointer(xml_ptr, xml_node)
-  CALL xml_get_element(xml_node,"thincurr",tw_obj%xml,ierr)
+  CALL c_f_pointer(xml_ptr, thincurr_node)
+  CALL xml_get_element(thincurr_node,"thincurr",tw_obj%xml,ierr)
   IF(ierr/=0)THEN
     CALL copy_string('Error getting ThinCurr XML node',error_str)
     RETURN
@@ -241,10 +241,10 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
-  CALL tw_obj%xdmf%setup('ThinCurr',pathprefix)
+  CALL tw_obj%xdmf%setup('thincurr',pathprefix)
   CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 ELSE
-  CALL tw_obj%xdmf%setup('ThinCurr')
+  CALL tw_obj%xdmf%setup('thincurr')
   CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 END IF
 IF(tw_obj%n_vcoils>0)THEN
