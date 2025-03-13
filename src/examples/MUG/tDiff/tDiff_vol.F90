@@ -2,21 +2,22 @@ PROGRAM tDiff_circle
 !---Runtime
 USE oft_base
 !---Grid
-USE oft_mesh_type, ONLY: mesh
+USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !
-USE oft_lag_basis, ONLY: oft_lagrange
-USE oft_lag_operators, ONLY: lag_zerob, oft_lag_getmop, oft_lag_project
+USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getmop, oft_lag_project
 USE oft_scalar_inits, ONLY: poss_scalar_field
 USE thermal_diffusion_3d
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 REAL(r8), POINTER :: vec_vals(:)
 TYPE(oft_tdiff_sim) :: tDiff_sim
+TYPE(multigrid_mesh) :: mg_mesh
+TYPE(oft_lag_zerob), TARGET :: lag_zerob
 !---Mass matrix solver
 TYPE(poss_scalar_field) :: field_init
 CLASS(oft_solver), POINTER :: minv => NULL()
@@ -44,40 +45,42 @@ CLOSE(io_unit)
 !---------------------------------------------------------------------------
 ! Setup grid
 !---------------------------------------------------------------------------
-CALL multigrid_construct
-CALL tDiff_sim%setup(order)
+CALL multigrid_construct(mg_mesh)
+CALL tDiff_sim%setup(mg_mesh,order)
+lag_zerob%ML_lag_rep=>ML_oft_lagrange
 
 !---------------------------------------------------------------------------
 ! Set intial conditions from analytic functions
 !---------------------------------------------------------------------------
 !---Generate mass matrix
 NULLIFY(mop) ! Ensure the matrix is unallocated (pointer is NULL)
-CALL oft_lag_getmop(mop,"none") ! Construct mass matrix with "none" BC
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,"none") ! Construct mass matrix with "none" BC
 !---Setup linear solver
 CALL create_cg_solver(minv)
 minv%A=>mop ! Set matrix to be solved
 minv%its=-2 ! Set convergence type (in this case "full" CG convergence)
 CALL create_diag_pre(minv%pre) ! Setup Preconditioner
 !---Create fields for solver
-CALL oft_lagrange%vec_create(u)
-CALL oft_lagrange%vec_create(v)
+CALL ML_oft_lagrange%vec_create(u)
+CALL ML_oft_lagrange%vec_create(v)
 
 !---Project Ti initial condition onto scalar Lagrange basis
 field_init%func=>Ti_init
-CALL oft_lag_project(field_init,v)
+field_init%mesh=>mesh
+CALL oft_lag_project(ML_oft_lagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL lag_zerob(u)
+CALL lag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,tDiff_sim%xdmf_plot,'Ti0')
 CALL tDiff_sim%u%restore_local(vec_vals,1)
 
 !---Project Te initial condition onto scalar Lagrange basis
 field_init%func=>Te_init
-CALL oft_lag_project(field_init,v)
+CALL oft_lag_project(ML_oft_lagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL lag_zerob(u)
+CALL lag_zerob%apply(u)
 CALL u%get_local(vec_vals)
 CALL mesh%save_vertex_scalar(vec_vals,tDiff_sim%xdmf_plot,'Te0')
 CALL tDiff_sim%u%restore_local(vec_vals,2)

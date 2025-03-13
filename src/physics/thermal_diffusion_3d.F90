@@ -20,7 +20,8 @@ USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
   hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
-USE oft_mesh_type, ONLY: mesh, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
+USE multigrid, ONLY: multigrid_mesh
 !
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_local_mat, oft_vector_ptr, &
   vector_extrapolate
@@ -29,9 +30,10 @@ USE oft_deriv_matrices, ONLY: oft_noop_matrix, oft_mf_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
 !
+USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_lagrange, oft_lag_eval, oft_lag_geval
+USE oft_lag_basis, ONLY: oft_lag_setup, oft_scalar_fem, oft_lag_eval, oft_lag_geval, oft_3D_lagrange_cast
 IMPLICIT NONE
 #include "local.h"
 #if !defined(TDIFF_RST_LEN)
@@ -90,6 +92,11 @@ contains
   PROCEDURE :: rst_load => rst_load
 END TYPE oft_tdiff_sim
 TYPE(oft_tdiff_sim), POINTER :: current_sim => NULL()
+!
+CLASS(multigrid_mesh), POINTER :: mg_mesh => NULL()
+CLASS(oft_mesh), POINTER, PUBLIC :: mesh => NULL()
+TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_lagrange
+CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
 CONTAINS
 !---------------------------------------------------------------------------
 !> Needs Docs
@@ -516,10 +523,13 @@ END SUBROUTINE update_jacobian
 !---------------------------------------------------------------------------
 !> Setup composite FE representation and ML environment
 !---------------------------------------------------------------------------
-subroutine setup(self,order)
+subroutine setup(self,mg_mesh_in,order)
 class(oft_tdiff_sim), intent(inout) :: self
+CLASS(multigrid_mesh), TARGET, intent(in) :: mg_mesh_in
 integer(i4), intent(in) :: order
 integer(i4) :: ierr,io_unit
+mg_mesh=>mg_mesh_in
+mesh=>mg_mesh%mesh
 IF(ASSOCIATED(self%fe_rep))CALL oft_abort("Setup can only be called once","setup",__FILE__)
 IF(ASSOCIATED(oft_lagrange))CALL oft_abort("FE space already built","setup",__FILE__)
 
@@ -539,7 +549,8 @@ END IF
 
 !---Setup FE representation
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
-CALL oft_lag_setup(order, -1)
+CALL oft_lag_setup(mg_mesh,order,ML_lag_obj=ML_oft_lagrange,minlev=-1)
+IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,ML_oft_lagrange%current_level))CALL oft_abort("Invalid lagrange FE object","setup",__FILE__)
 CALL self%xdmf_plot%setup("tdiff")
 CALL mesh%setup_io(self%xdmf_plot,order)
 
