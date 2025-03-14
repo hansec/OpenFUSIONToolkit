@@ -80,6 +80,7 @@ CALL multigrid_construct(mg_mesh)
 !---------------------------------------------------------------------------
 ! Build FE structures
 !---------------------------------------------------------------------------
+ALLOCATE(ML_oft_h1,ML_oft_hcurl,ML_hcurl_grad,ML_h1grad,ML_oft_lagrange,ML_oft_vlagrange)
 !--- Lagrange
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=minlev)
 CALL lag_setup_interp(ML_oft_lagrange)

@@ -46,10 +46,12 @@ USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc
 !---Physics
-USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam
+USE taylor, ONLY: taylor_hmodes, taylor_hffa, taylor_hlam, &
+  ML_oft_hcurl, ML_oft_h1, ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
 USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_taxis, vel_scale, den_scale, &
-  den_floor, temp_floor, xmhd_sub_fields, ML_oft_hcurl, &
-  ML_oft_h1, ML_hcurl_grad, ML_h1grad, ML_oft_lagrange, ML_oft_vlagrange
+  den_floor, temp_floor, xmhd_sub_fields, xmhd_ML_hcurl => ML_oft_hcurl, &
+  xmhd_ML_h1 => ML_oft_h1, xmhd_ML_hcurl_grad => ML_hcurl_grad, &
+  xmhd_ML_h1grad => ML_h1grad, xmhd_ML_lagrange => ML_oft_lagrange, xmhd_ML_vlagrange => ML_oft_vlagrange
 IMPLICIT NONE
 !!\subsection doc_mug_sph_ex2_code_vars Local Variables
 !! Next we define the local variables needed to initialize our case and
@@ -88,12 +90,18 @@ CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
 !---------------------------------------------------------------------------
 !--- Lagrange
 CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,ML_vlag_obj=ML_oft_vlagrange,minlev=-1)
+xmhd_ML_lagrange=>ML_oft_lagrange
+xmhd_ml_vlagrange=>ML_oft_vlagrange
 !--- Grad(H^1) subspace
 CALL oft_h1_setup(mg_mesh,order+1,ML_oft_h1,minlev=-1)
+xmhd_ml_h1=>ML_oft_h1
 !--- H(Curl) subspace
 CALL oft_hcurl_setup(mg_mesh,order,ML_oft_hcurl,minlev=-1)
+xmhd_ml_hcurl=>ML_oft_hcurl
 !--- Full H(Curl) space
 CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,-1)
+xmhd_ml_hcurl_grad=>ML_hcurl_grad
+xmhd_ml_h1grad=>ML_h1grad
 h1_zerogrnd%ML_H1_rep=>ML_h1grad
 !!\subsection doc_mug_sph_ex2_code_plot Perform post-processing
 !!
@@ -130,8 +138,9 @@ linv%its=-2
 CALL create_bjacobi_pre(linv%pre,-1)
 DEALLOCATE(linv%pre%pre)
 CALL create_ilu_pre(linv%pre%pre)
-divout%solver=>linv
-divout%bc=>h1_zerogrnd
+! divout%solver=>linv
+! divout%bc=>h1_zerogrnd
+CALL divout%setup(ML_hcurl_grad,'grnd',solver=linv)
 divout%keep_boundary=.TRUE.
 !---------------------------------------------------------------------------
 ! Setup initial conditions

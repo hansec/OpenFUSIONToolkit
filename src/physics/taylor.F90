@@ -162,7 +162,7 @@ DO i=1,nlevels_wop
     CALL oft_lag_getlop(ML_oft_lagrange%current_level,ml_lop(i)%M,"zerob")
   END IF
 END DO
-CALL ML_oft_hcurl%set_level(ML_oft_hcurl%level)
+CALL ML_oft_hcurl%set_level(ML_oft_hcurl%nlevels)
 !---------------------------------------------------------------------------
 ! Loop over desired number of modes
 !---------------------------------------------------------------------------
