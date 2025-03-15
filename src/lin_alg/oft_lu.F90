@@ -551,22 +551,22 @@ CASE("superd")
     IF(self%refactor)THEN
       mode=3
       IF(self%update_graph)mode=1
-      !$omp critical (umfpack_solve)
+      !!$omp critical (umfpack_solve)
       CALL oft_umfpack_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
         self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
       IF(ierr/=0)CALL oft_abort('Factorization failed (UMFPACK)','lusolver_apply',__FILE__)
-      !$omp end critical (umfpack_solve)
+      !!$omp end critical (umfpack_solve)
       self%refactor=.FALSE.
       self%update_graph=.FALSE.
     END IF
     mode=2
-    !$omp critical (umfpack_solve)
+    !!$omp critical (umfpack_solve)
     CALL oft_umfpack_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
       self%superlu_struct%f_factors,self%superlu_struct%col_perm,self%iter_refine,ierr)
     IF(ierr/=0)CALL oft_abort('Solve failed (UMFPACK)','lusolver_apply',__FILE__)
-    !$omp end critical (umfpack_solve)
+    !!$omp end critical (umfpack_solve)
 #else
     CALL oft_abort('OFT not compiled with UMFPACK','lusolver_apply',__FILE__)
 #endif

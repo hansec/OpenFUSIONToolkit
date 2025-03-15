@@ -38,7 +38,7 @@ USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
-USE oft_la_utils, ONLY: create_matrix
+USE oft_la_utils, ONLY: create_matrix, create_identity_matrix
 USE oft_solver_utils, ONLY: create_mlpre, create_cg_solver, create_diag_pre, &
   create_native_pre
 !---
@@ -1106,6 +1106,7 @@ end subroutine hcurl_orthog_delete
 !------------------------------------------------------------------------------
 SUBROUTINE hcurl_setup_interp(ML_hcurl_rep)
 CLASS(oft_ml_fem_type), intent(inout) :: ML_hcurl_rep
+CLASS(oft_vector), POINTER :: hcurl_vec_fine,hcurl_vec_cors
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---
@@ -1122,6 +1123,15 @@ DO i=ML_hcurl_rep%minlev+1,ML_hcurl_rep%nlevels
   else
     CALL hcurl_pinterpmatrix(ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m)
     CALL ML_hcurl_rep%interp_matrices(ML_hcurl_rep%level)%m%assemble
+    !
+    NULLIFY(hcurl_vec_cors,hcurl_vec_fine)
+    CALL ML_hcurl_rep%vec_create(hcurl_vec_fine)
+    CALL ML_hcurl_rep%vec_create(hcurl_vec_cors,ML_hcurl_rep%level-1)
+    CALL create_identity_matrix(ML_hcurl_rep%lower_matrices(ML_hcurl_rep%level)%m,ML_hcurl_rep%lower_graphs(ML_hcurl_rep%level)%g,hcurl_vec_cors,hcurl_vec_fine)
+    CALL hcurl_vec_cors%delete()
+    CALL hcurl_vec_fine%delete()
+    DEALLOCATE(hcurl_vec_cors,hcurl_vec_fine)
+    CALL ML_hcurl_rep%lower_matrices(ML_hcurl_rep%level)%m%assemble
   end if
 END DO
 DEBUG_STACK_POP

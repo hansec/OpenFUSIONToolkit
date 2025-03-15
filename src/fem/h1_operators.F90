@@ -26,7 +26,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, oft_graph_ptr, &
   oft_graph
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
-USE oft_la_utils, ONLY: create_matrix
+USE oft_la_utils, ONLY: create_matrix, create_identity_matrix
 USE oft_solver_utils, ONLY: create_mlpre, create_native_pre
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
@@ -549,6 +549,7 @@ end subroutine oft_h1_project
 !------------------------------------------------------------------------------
 SUBROUTINE h1_setup_interp(ML_h1_rep)
 CLASS(oft_ml_fem_type), intent(inout) :: ML_h1_rep
+CLASS(oft_vector), POINTER :: h1_vec_fine,h1_vec_cors
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---
@@ -559,11 +560,19 @@ DO i=ML_h1_rep%minlev+1,ML_h1_rep%nlevels
   !---Setup interpolation
   if(ML_h1_rep%current_level%order==1)then
     CALL build_ginterpmatrix(ML_h1_rep%interp_matrices(ML_h1_rep%level)%m)
-    CALL ML_h1_rep%interp_matrices(ML_h1_rep%level)%m%assemble
   else
     CALL build_pinterpmatrix(ML_h1_rep%interp_matrices(ML_h1_rep%level)%m)
-    CALL ML_h1_rep%interp_matrices(ML_h1_rep%level)%m%assemble
   end if
+  CALL ML_h1_rep%interp_matrices(ML_h1_rep%level)%m%assemble
+  !
+  NULLIFY(h1_vec_cors,h1_vec_fine)
+  CALL ML_h1_rep%vec_create(h1_vec_fine)
+  CALL ML_h1_rep%vec_create(h1_vec_cors,ML_h1_rep%level-1)
+  CALL create_identity_matrix(ML_h1_rep%lower_matrices(ML_h1_rep%level)%m,ML_h1_rep%lower_graphs(ML_h1_rep%level)%g,h1_vec_cors,h1_vec_fine)
+  CALL h1_vec_cors%delete()
+  CALL h1_vec_fine%delete()
+  DEALLOCATE(h1_vec_cors,h1_vec_fine)
+  CALL ML_h1_rep%lower_matrices(ML_h1_rep%level)%m%assemble
 END DO
 DEBUG_STACK_POP
 CONTAINS

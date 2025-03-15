@@ -82,6 +82,7 @@ TYPE, PUBLIC :: oft_ml_fem_comp_type
   TYPE(oft_ml_fem_ptr), POINTER, DIMENSION(:) :: ml_fields => NULL() !< Individual ML FE objects for each field
   CHARACTER(LEN=4), POINTER, DIMENSION(:) :: field_tags => NULL() !< Character tags for fields
   TYPE(oft_matrix_ptr) :: interp_matrices(fem_max_levels) !< Level-to-level interpolation matrices
+  TYPE(oft_matrix_ptr) :: lower_matrices(fem_max_levels) !< Level-to-level lowering matrices
 CONTAINS
   !> Setup composite FE structure from sub-field FE definitions
   PROCEDURE :: setup => ml_fem_setup
@@ -700,6 +701,44 @@ OUTER: DO j=levmin,self%nlevels
   CALL cvec%delete
   CALL fvec%delete
   DEALLOCATE(cvec,fvec)
+! !---------------------------------------------------------------------------
+! ! Create composite matrix
+! !---------------------------------------------------------------------------
+!   CALL self%set_level(j)
+!   !---Specify child graphs
+!   ALLOCATE(graphs(self%nfields,self%nfields))
+!   DO i=1,self%nfields
+!     IF(.NOT.ASSOCIATED(self%ml_fields(i)%ml%lower_graphs(j)%g))THEN
+!       DEALLOCATE(graphs)
+!       CYCLE OUTER
+!     END IF
+!     graphs(i,i)%g=>self%ml_fields(i)%ml%lower_graphs(j)%g
+!   END DO
+!   !---Get coarse and fine vectors
+!   CALL self%vec_create(cvec,level=self%level-1)
+!   CALL self%vec_create(fvec)
+!   !---Construct matrix
+!   CALL create_matrix(self%lower_matrices(j)%m,graphs,cvec,fvec)
+!   DEALLOCATE(graphs)
+! !---------------------------------------------------------------------------
+! ! Combine child matrices into composite matrix
+! !---------------------------------------------------------------------------
+!   !---Specify child matrices
+!   ALLOCATE(mats(self%nfields,self%nfields))
+!   DO i=1,self%nfields
+!     IF(.NOT.ASSOCIATED(self%ml_fields(i)%ml%lower_matrices(j)%m))THEN
+!       CALL oft_abort('Sub-field matrix not allocated.','ml_fem_build_interp',__FILE__)
+!     END IF
+!     mats(i,i)%m=>self%ml_fields(i)%ml%lower_matrices(j)%m
+!   END DO
+!   !---Combine matrices
+!   CALL combine_matrices(mats,self%nfields,self%nfields,self%lower_matrices(j)%m)
+!   DEALLOCATE(mats)
+!   CALL self%lower_matrices(j)%m%assemble
+!   !---Delete temporaries
+!   CALL cvec%delete
+!   CALL fvec%delete
+!   DEALLOCATE(cvec,fvec)
 END DO OUTER
 DEBUG_STACK_POP
 end subroutine ml_fem_build_interp

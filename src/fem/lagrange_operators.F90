@@ -31,7 +31,7 @@ USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
   oft_graph, oft_graph_ptr
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
-USE oft_la_utils, ONLY: create_matrix, combine_matrices
+USE oft_la_utils, ONLY: create_matrix, combine_matrices, create_identity_matrix
 USE oft_solver_utils, ONLY: create_mlpre, create_native_pre
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
@@ -1502,6 +1502,7 @@ end subroutine lag_div
 SUBROUTINE lag_setup_interp(ML_lag_rep,ML_vlag_rep)
 CLASS(oft_ml_fem_type), intent(inout) :: ML_lag_rep
 CLASS(oft_ml_fem_comp_type), optional, intent(inout) :: ML_vlag_rep
+CLASS(oft_vector), POINTER :: lag_vec_fine,lag_vec_cors
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---
@@ -1514,10 +1515,21 @@ DO i=ML_lag_rep%minlev+1,ML_lag_rep%nlevels
   !---Setup interpolation
   if(ML_lag_rep%current_level%order==1)then
     CALL lag_ginterpmatrix(ML_lag_rep%interp_matrices(ML_lag_rep%level)%m)
+    ! NULLIFY(lag_vec_cors,lag_vec_fine)
+    ! CALL ML_lag_rep%vec_create(lag_vec_fine)
+    ! CALL ML_lag_rep%vec_create(lag_vec_cors,ML_lag_rep%level-1)
+    ! CALL create_identity_matrix(ML_lag_rep%lower_matrices(ML_lag_rep%level)%m,ML_lag_rep%lower_graphs(ML_lag_rep%level)%g,lag_vec_cors,lag_vec_fine)
+    ! CALL lag_vec_cors%delete()
+    ! CALL lag_vec_fine%delete()
+    ! DEALLOCATE(lag_vec_cors,lag_vec_fine)
   else
-    CALL lag_pinterpmatrix(ML_lag_rep%interp_matrices(ML_lag_rep%level)%m)
+    ALLOCATE(ML_lag_rep%interp_graphs(ML_lag_rep%level)%g)
+    CALL lag_pinterpmatrix(ML_lag_rep%interp_matrices(ML_lag_rep%level)%m,ML_lag_rep%interp_graphs(ML_lag_rep%level)%g,ML_lag_rep%level-1,ML_lag_rep%level)
+    ! ALLOCATE(ML_lag_rep%lower_graphs(ML_lag_rep%level)%g)
+    ! CALL lag_pinterpmatrix(ML_lag_rep%lower_matrices(ML_lag_rep%level)%m,ML_lag_rep%lower_graphs(ML_lag_rep%level)%g,ML_lag_rep%level,ML_lag_rep%level-1)
   end if
   CALL ML_lag_rep%interp_matrices(ML_lag_rep%level)%m%assemble
+  ! CALL ML_lag_rep%lower_matrices(ML_lag_rep%level)%m%assemble
 END DO
 !---Create vector interpolation operator
 IF(PRESENT(ML_vlag_rep))THEN
@@ -1643,8 +1655,10 @@ END SUBROUTINE lag_ginterpmatrix
 !------------------------------------------------------------------------------
 !> Construct interpolation matrix for polynomial levels
 !------------------------------------------------------------------------------
-SUBROUTINE lag_pinterpmatrix(mat)
+SUBROUTINE lag_pinterpmatrix(mat,interp_graph,level1,level2)
 class(oft_matrix), pointer, intent(inout) :: mat !< Needs docs
+type(oft_graph), POINTER, intent(inout) :: interp_graph
+integer(i4), intent(in) :: level1,level2
 INTEGER(i4) :: i,j,k,m,icors,ifine,jb,js,jn,i_ind(1),j_ind(1)
 INTEGER(i4) :: etmp(2),fc,ed,cell,dof,offset
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: pmap,emap,fmap,jcors,ftmp,fetmp,ctmp
@@ -1654,16 +1668,16 @@ CLASS(oft_scalar_fem), POINTER :: lag_cors => NULL()
 CLASS(oft_scalar_fem), POINTER :: lag_fine => NULL()
 CLASS(oft_vector), POINTER :: lag_vec_fine,lag_vec_cors
 type(oft_graph_ptr), pointer :: graphs(:,:)
-type(oft_graph), POINTER :: interp_graph
+! type(oft_graph), POINTER :: interp_graph
 class(oft_mesh), pointer :: mesh
-IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%current_level))CALL oft_abort("Incorrect fine FE type","lag_pinterpmatrix",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_fine,ML_lag_rep%levels(level2)%fe))CALL oft_abort("Incorrect fine FE type","lag_pinterpmatrix",__FILE__)
 mesh=>lag_fine%mesh
 allocate(ftmp(mesh%face_np),fetmp(mesh%face_np),ctmp(mesh%cell_np))
 !---
-IF(.NOT.oft_3D_lagrange_cast(lag_cors,ML_lag_rep%levels(ML_lag_rep%level-1)%fe))CALL oft_abort("Incorrect coarse FE type","lag_pinterpmatrix",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(lag_cors,ML_lag_rep%levels(level1)%fe))CALL oft_abort("Incorrect coarse FE type","lag_pinterpmatrix",__FILE__)
 CALL oft_lag_nodes(lag_fine%order,ed_nodes,fc_nodes,c_nodes)
-ALLOCATE(ML_lag_rep%interp_graphs(ML_lag_rep%level)%g)
-interp_graph=>ML_lag_rep%interp_graphs(ML_lag_rep%level)%g
+! ALLOCATE(ML_lag_rep%interp_graphs(level2)%g)
+! interp_graph=>ML_lag_rep%interp_graphs(level2)%g
 !---Setup matrix sizes
 interp_graph%nr=lag_fine%ne
 interp_graph%nrg=lag_fine%global%ne
@@ -1811,8 +1825,8 @@ END DO
 ! Construct matrix
 !------------------------------------------------------------------------------
 NULLIFY(lag_vec_fine,lag_vec_cors)
-CALL ML_lag_rep%vec_create(lag_vec_fine)
-CALL ML_lag_rep%vec_create(lag_vec_cors,ML_lag_rep%level-1)
+CALL ML_lag_rep%vec_create(lag_vec_fine,level2)
+CALL ML_lag_rep%vec_create(lag_vec_cors,level1)
 !---
 ALLOCATE(graphs(1,1))
 graphs(1,1)%g=>interp_graph

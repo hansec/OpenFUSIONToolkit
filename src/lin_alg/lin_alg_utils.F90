@@ -1184,18 +1184,25 @@ END SUBROUTINE combine_matrices_comp
 !---------------------------------------------------------------------------------
 !> Create an identity graph for a given vector
 !---------------------------------------------------------------------------------
-SUBROUTINE create_identity_graph(outgraph,vec)
+SUBROUTINE create_identity_graph(outgraph,vec,vecc)
 TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
-CLASS(oft_vector), POINTER, INTENT(in) :: vec !< Vector representing matrix rows/columns
+CLASS(oft_vector), TARGET, INTENT(in) :: vec !< Vector representing matrix rows/columns
+CLASS(oft_vector), TARGET, OPTIONAL, INTENT(in) :: vecc !< Vector representing matrix columns
+CLASS(oft_vector), POINTER :: col_vec
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
+IF(PRESENT(vecc))THEN
+  col_vec=>vecc
+ELSE
+  col_vec=>vec
+END IF
 !---Setup graph
 ALLOCATE(outgraph)
 outgraph%nnz=vec%n
 outgraph%nr=vec%n
 outgraph%nrg=vec%ng
-outgraph%nc=vec%n
-outgraph%ncg=vec%ng
+outgraph%nc=col_vec%n
+outgraph%ncg=col_vec%ng
 !---Create indexing
 ALLOCATE(outgraph%kr(outgraph%nr+1))
 ALLOCATE(outgraph%lc(outgraph%nnz))
@@ -1203,4 +1210,32 @@ outgraph%kr=[(i,i=1,outgraph%nr+1)]
 outgraph%lc=[(i,i=1,outgraph%nr)]
 DEBUG_STACK_POP
 END SUBROUTINE create_identity_graph
+!------------------------------------------------------------------------------
+!> Create an identity graph for a given vector
+!------------------------------------------------------------------------------
+SUBROUTINE create_identity_matrix(outmat,outgraph,vec,vecc)
+CLASS(oft_matrix), POINTER, INTENT(inout) :: outmat !< Resulting matrix
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
+CLASS(oft_vector), TARGET, INTENT(in) :: vec !< Vector representing matrix rows/columns
+CLASS(oft_vector), TARGET, OPTIONAL, INTENT(in) :: vecc !< Vector representing matrix columns
+CLASS(oft_vector), POINTER :: col_vec
+type(oft_graph_ptr) :: graphs(1,1)
+integer(i4) :: i,ind(1)
+real(r8) :: mat_val(1,1)
+DEBUG_STACK_PUSH
+IF(PRESENT(vecc))THEN
+  col_vec=>vecc
+ELSE
+  col_vec=>vec
+END IF
+CALL create_identity_graph(outgraph,vec,vecc)
+graphs(1,1)%g=>outgraph
+CALL create_matrix(outmat,graphs,vec,col_vec)
+mat_val=1.d0
+DO i=1,vec%n
+  ind=i
+  CALL outmat%add_values(ind,ind,mat_val,1,1)
+END DO
+DEBUG_STACK_POP
+END SUBROUTINE create_identity_matrix
 END MODULE oft_la_utils

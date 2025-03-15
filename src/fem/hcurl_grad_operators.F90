@@ -1414,6 +1414,8 @@ DO i=ML_hcurl_aug_rep%minlev+1,ML_hcurl_aug_rep%nlevels
     CALL ML_h1_rep%set_level(ML_hcurl_aug_rep%level+1)
     ML_grad%interp_graphs(ML_grad%level)%g=>ML_h1_rep%interp_graphs(ML_hcurl_aug_rep%level+1)%g
     ML_grad%interp_matrices(ML_grad%level)%m=>ML_h1_rep%interp_matrices(ML_hcurl_aug_rep%level+1)%m
+    ! ML_grad%lower_graphs(ML_grad%level)%g=>ML_h1_rep%lower_graphs(ML_hcurl_aug_rep%level+1)%g
+    ! ML_grad%lower_matrices(ML_grad%level)%m=>ML_h1_rep%lower_matrices(ML_hcurl_aug_rep%level+1)%m
   END IF
 END DO
 !---Create full H(Curl) + Grad(H^1) interpolation operator

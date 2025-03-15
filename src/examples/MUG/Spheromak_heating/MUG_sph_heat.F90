@@ -44,15 +44,17 @@ USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre, create_bjacobi_pr
   create_ilu_pre
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
+USE oft_lag_operators, ONLY: lag_setup_interp
 !---H1 FE space (Grad(H^1) subspace)
 USE oft_h1_basis, ONLY: oft_h1_setup
-USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd
+USE oft_h1_operators, ONLY: oft_h1_getlop, oft_h1_zerogrnd, h1_setup_interp
 !---Full H(Curl) FE space
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
-USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, hcurl_grad_mc, hcurl_grad_setup_interp
 !---Physics
 USE taylor, ONLY: taylor_hmodes, oft_taylor_hmodes
-USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_taxis, vel_scale, den_scale, &
+USE xmhd, ONLY: xmhd_run, xmhd_plot, xmhd_taxis, vel_scale, den_scale, xmhd_minlev, &
   den_floor, temp_floor, xmhd_sub_fields, xmhd_ML_hcurl, &
   xmhd_ML_H1, xmhd_ML_hcurl_grad, xmhd_ML_H1grad, xmhd_ML_lagrange, xmhd_ML_vlagrange
 IMPLICIT NONE
@@ -93,13 +95,17 @@ CALL multigrid_construct(mg_mesh,[2.d0,0.d0,0.d0])
 ! Build FE structures
 !------------------------------------------------------------------------------
 !--- Lagrange
-CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=-1)
+CALL oft_lag_setup(mg_mesh,order,xmhd_ML_lagrange,ML_vlag_obj=xmhd_ML_vlagrange,minlev=mg_mesh%mgdim)
+CALL lag_setup_interp(xmhd_ML_lagrange)
 !--- Grad(H^1) subspace
-CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=-1)
+CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=mg_mesh%mgdim)
+CALL h1_setup_interp(xmhd_ML_H1)
 !--- H(Curl) subspace
-CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=-1)
+CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=mg_mesh%mgdim)
+CALL hcurl_setup_interp(xmhd_ML_hcurl)
 !--- Full H(Curl) space
-CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,minlev=-1)
+CALL oft_hcurl_grad_setup(xmhd_ML_hcurl,xmhd_ML_H1,xmhd_ML_hcurl_grad,xmhd_ML_H1grad,minlev=mg_mesh%mgdim)
+CALL hcurl_grad_setup_interp(xmhd_ML_hcurl_grad,xmhd_ML_H1)
 h1_zerogrnd%ML_H1_rep=>xmhd_ML_H1grad
 !!\subsection doc_mug_sph_ex2_code_plot Perform post-processing
 !!
@@ -209,6 +215,7 @@ temp_floor = t0*1.d-2
 xmhd_taxis=3
 oft_env%pm=pm
 !---Run simulation
+xmhd_minlev=mg_mesh%mgdim
 CALL xmhd_run(ic_fields)
 !---Finalize enviroment
 CALL oft_finalize
