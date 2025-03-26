@@ -1,4 +1,9 @@
-'''! Python interface for TokaMaker Grad-Shafranov functionality
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! Fortran interface definitions for TokaMaker
 
 @authors Chris Hansen
 @date May 2023
@@ -207,6 +212,10 @@ tokamaker_set_coil_vsc = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_vsc,
 tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk,
     [c_void_p, c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p,
      c_double, c_double, c_bool, c_char_p, c_double, c_char_p])
+
+# tokamaker_save_ifile(tMaker_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
+tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
+    [c_void_p, c_char_p, c_int, c_int, c_double, c_double, c_bool, c_bool, c_char_p])
 
 # tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,error_str)
 tokamaker_set_coil_current_dist = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_current_dist,

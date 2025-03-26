@@ -17,9 +17,9 @@ mesh volume 1
 # Save linear and quadratic Tet meshes
 block 1 volume 1
 block 1 element type tetra4
-export Genesis  "sphere_tet4_test.in.e" dimension 3 block 1 overwrite
+export Genesis  "sphere_tet4_test.g" dimension 3 block 1 overwrite
 block 1 element type tetra10
-export Genesis  "sphere_tet10_test.in.e" dimension 3 block 1 overwrite
+export Genesis  "sphere_tet10_test.g" dimension 3 block 1 overwrite
 
 
 # Create Hex mesh
@@ -31,6 +31,6 @@ mesh volume 1
 # Save linear and quadratic Hex meshes
 block 1 volume 1
 block 1 element type hex8
-export Genesis  "sphere_hex8_test.in.e" dimension 3 block 1 overwrite
+export Genesis  "sphere_hex8_test.g" dimension 3 block 1 overwrite
 block 1 element type hex27
-export Genesis  "sphere_hex27_test.in.e" dimension 3 block 1 overwrite
+export Genesis  "sphere_hex27_test.g" dimension 3 block 1 overwrite
