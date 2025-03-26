@@ -1,6 +1,6 @@
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> @file thermal_diffusion_3d.F90
 !
 !> Example module for modeling thermal diffusion of two species, with equilibration, in 2D
@@ -14,7 +14,7 @@
 !! @authors Chris Hansen
 !! @date January 2025
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE thermal_diffusion_3d
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
@@ -98,9 +98,9 @@ CLASS(oft_mesh), POINTER, PUBLIC :: mesh => NULL()
 TYPE(oft_ml_fem_type), TARGET, PUBLIC :: ML_oft_lagrange
 CLASS(oft_scalar_fem), POINTER :: oft_lagrange => NULL()
 CONTAINS
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine run_simulation(self)
 class(oft_tdiff_sim), target, intent(inout) :: self
 type(oft_nksolver) :: nksolver
@@ -123,9 +123,9 @@ integer(i4) :: i,j,io_stat,rst_tmp
 real(r8) :: Ti_avg,Te_avg,elapsed_time
 real(r8), pointer :: plot_vals(:)
 current_sim=>self
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create solver fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 call self%fe_rep%vec_create(u)
 call self%fe_rep%vec_create(up)
 call self%fe_rep%vec_create(v)
@@ -161,9 +161,9 @@ self%nlfun%Te_bc=>self%Te_bc
 !---
 CALL build_approx_jacobian(self,u)
 
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup linear solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(self%mfnk)THEN
   ALLOCATE(self%mf_mat)
   CALL up%set(1.d0)
@@ -186,9 +186,9 @@ ELSE
 END IF
 solver%pre%A=>self%jacobian
 
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup nonlinear solver
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 nksolver%A=>self%nlfun
 nksolver%J_inv=>solver
 nksolver%its=30
@@ -202,9 +202,9 @@ ELSE
   nksolver%up_freq=4
 END IF
 
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup history file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 IF(oft_env%head_proc)THEN
   CALL hist_file%setup('oft_tdiff.hist', desc="History file for non-linear thermal diffusion run")
   CALL hist_file%add_field('ts',   'i4', desc="Time step index")
@@ -218,9 +218,9 @@ IF(oft_env%head_proc)THEN
   CALL hist_file%open ! Open history file
 END IF
 
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Begin time stepping
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 DO i=1,self%nsteps
   IF(oft_env%head_proc)CALL mytimer%tick()
   self%nlfun%dt=0.d0
@@ -242,9 +242,9 @@ DO i=1,self%nsteps
   extrapt(1)=self%t
   IF(i>maxextrap)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,self%t+self%dt,u)
   CALL nksolver%apply(u,v)
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Write out initial solution progress
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   IF(oft_env%head_proc)THEN
     elapsed_time=mytimer%tock()
     hist_i4=[self%rst_base+i-1,nksolver%lits,nksolver%nlits]
@@ -254,9 +254,9 @@ DO i=1,self%nsteps
     IF(oft_debug_print(1))WRITE(*,*)
     CALL hist_file%write(data_i4=hist_i4, data_r4=hist_r4)
   END IF
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Update timestep and save solution
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   self%t=self%t+self%dt
   CALL self%u%add(0.d0,1.d0,u)
   IF(MOD(i,self%rst_freq)==0)THEN
@@ -287,11 +287,11 @@ CALL up%delete()
 CALL v%delete()
 DEALLOCATE(u,up,v,plot_vals)
 end subroutine run_simulation
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute the NL error function, where we are solving F(x) = 0
 !!
 !! b = F(a)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine nlfun_apply(self,a,b)
 class(tdiff_nlfun), intent(inout) :: self !< NL function object
 class(oft_vector), target, intent(inout) :: a !< Source field
@@ -335,9 +335,9 @@ DO i=1,mesh%nc
   res_loc = 0.d0 ! Zero local (cell) contribution to function
   Ti_weights_loc = Ti_weights(cell_dofs)
   Te_weights_loc = Te_weights(cell_dofs)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Quadrature Loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO m=1,quad%np
     if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
     !---Evaluate value and gradients of basis functions at current point
@@ -387,9 +387,9 @@ self%diag_vals=oft_mpi_sum(diag_vals,2)
 !---Cleanup remaining storage
 DEALLOCATE(Ti_res,Te_res,Ti_weights,Te_weights)
 end subroutine nlfun_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine build_approx_jacobian(self,a)
 class(oft_tdiff_sim), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Solution for computing jacobian
@@ -442,9 +442,9 @@ DO i=1,mesh%nc
   CALL self%fe_rep%mat_zero_local(jac_loc) ! Zero local (cell) contribution to matrix
   Ti_weights_loc = Ti_weights(cell_dofs)
   Te_weights_loc = Te_weights(cell_dofs)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Quadrature Loop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
   DO m=1,quad%np
     if(curved.OR.(m==1))call mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
     !---Evaluate value and gradients of basis functions at current point
@@ -504,25 +504,25 @@ call self%jacobian%assemble(tmp)
 call tmp%delete
 DEALLOCATE(tmp,Ti_weights,Te_weights)
 end subroutine build_approx_jacobian
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update Jacobian matrices on all levels with new fields
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine mfnk_update(uin)
 class(oft_vector), target, intent(inout) :: uin !< Current field
 IF(oft_debug_print(1))write(*,*)'Updating tDiff MF-Jacobian'
 CALL current_sim%mf_mat%update(uin)
 END SUBROUTINE mfnk_update
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Update Jacobian matrices on all levels with new solution
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine update_jacobian(uin)
 class(oft_vector), target, intent(inout) :: uin !< Current solution
 IF(oft_debug_print(1))write(*,*)'Updating tDiff approximate Jacobian'
 CALL build_approx_jacobian(current_sim,uin)
 END SUBROUTINE update_jacobian
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Setup composite FE representation and ML environment
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine setup(self,mg_mesh_in,order)
 class(oft_tdiff_sim), intent(inout) :: self
 CLASS(multigrid_mesh), TARGET, intent(in) :: mg_mesh_in
@@ -577,9 +577,9 @@ ALLOCATE(self%jacobian_block_mask(self%fe_rep%nfields,self%fe_rep%nfields))
 self%jacobian_block_mask=1
 CALL self%fe_rep%mat_create(self%jacobian,self%jacobian_block_mask)
 end subroutine setup
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Save xMHD solution state to a restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rst_save(self,u,t,dt,filename,path)
 class(oft_tdiff_sim), intent(inout) :: self
 class(oft_vector), pointer, intent(inout) :: u !< Solution to save
@@ -595,9 +595,9 @@ IF(oft_env%head_proc)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine rst_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine rst_load(self,u,filename,path,t,dt)
 class(oft_tdiff_sim), intent(inout) :: self
 class(oft_vector), pointer, intent(inout) :: u !< Solution to load

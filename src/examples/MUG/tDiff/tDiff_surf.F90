@@ -42,16 +42,16 @@ CALL oft_init
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,tdiff_options,IOSTAT=ierr)
 CLOSE(io_unit)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Setup grid
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CALL multigrid_construct_surf(mg_mesh)
 CALL tDiff_sim%setup(mg_mesh,order)
 blag_zerob%ML_lag_rep=>ML_oft_blagrange
 
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Set intial conditions from analytic functions
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !---Generate mass matrix
 NULLIFY(u,v,mop) ! Ensure the matrix is unallocated (pointer is NULL)
 CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,"none") ! Construct mass matrix with "none" BC
@@ -95,9 +95,9 @@ DEALLOCATE(minv%pre)
 CALL minv%delete ! Destroy solver
 DEALLOCATE(minv)
 
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Run simulation
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 tDiff_sim%kappa_i=kappa_i
 tDiff_sim%kappa_e=kappa_e
 tDiff_sim%tau_eq=tau_eq

@@ -1,6 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_gs_util.F90
 !
 !> Grad-Shafranov utility subroutines for TokaMaker
@@ -8,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date September 2017
 !! @ingroup doxy_oft_physics
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 MODULE oft_gs_util
 USE oft_base
 USE spline_mod
@@ -29,9 +31,9 @@ USE oft_gs, ONLY: gs_eq, flux_func, gs_get_cond_source, gs_get_cond_weights, &
 USE oft_gs_profiles
 IMPLICIT NONE
 #include "local.h"
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Need docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 type, extends(gsinv_interp) :: sauter_interp
   logical :: stage_1 = .FALSE.
   real(8) :: f_surf = 0.d0
@@ -46,12 +48,12 @@ CLASS(gs_eq), POINTER :: gs_fit => NULL()
 CLASS(flux_func), POINTER :: ff_fit => NULL()
 REAL(8), POINTER, DIMENSION(:,:) :: tmpprof => NULL()
 CONTAINS
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Create flux function object from definition file
 !!
 !! @param[in] filename File storing function definition
 !! @param[out] f Flux function object
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE gs_profile_load(filename,F)
 CHARACTER(LEN=*), INTENT(in) :: filename
 CLASS(flux_func), POINTER, INTENT(out) :: F
@@ -111,12 +113,12 @@ SELECT CASE(TRIM(profType))
 END SELECT
 CLOSE(io_unit)
 END SUBROUTINE gs_profile_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Save flux function object to definition file
 !!
 !! @param[in] filename File to store function definition
 !! @param[in] f Flux function object
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE gs_profile_save(filename,F)
 CHARACTER(LEN=*), INTENT(in) :: filename
 CLASS(flux_func), POINTER, INTENT(in) :: F
@@ -168,15 +170,15 @@ SELECT TYPE(this=>F)
 END SELECT
 CLOSE(io_unit)
 END SUBROUTINE gs_profile_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
 !! @param[in] filename Filename for restart file
 !! @param[in] mpsi_sample Number of flux (radial) sampling points (optional)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE gs_save(self,filename,mpsi_sample)
 class(gs_eq), target, intent(inout) :: self
 character(LEN=*), intent(in) :: filename
@@ -353,14 +355,14 @@ END IF
 !---
 DEALLOCATE(tmpout)
 END SUBROUTINE gs_save
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_load
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self G-S object
 !! @param[in] filename Filename for restart file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE gs_load(self,filename)
 class(gs_eq), target, intent(inout) :: self
 character(LEN=*), intent(in) :: filename
@@ -438,9 +440,9 @@ CALL fit_ff(self%P,tmpin)
 !---
 DEALLOCATE(tmpin)
 END SUBROUTINE gs_load
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! SUBROUTINE cond_fit_error
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
 !!
 !! @param[in,out] m Needs docs
@@ -448,7 +450,7 @@ END SUBROUTINE gs_load
 !! @param[in,out] cofs Needs docs [n]
 !! @param[in,out] err Needs docs [m]
 !! @param[in,out] iflag Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE cond_fit_error(m,n,cofs,err,iflag)
 integer(4), intent(in) :: m,n
 real(8), intent(in) :: cofs(n)
@@ -459,14 +461,14 @@ CALL gs_set_cond_weights(gs_fit,cofs,.FALSE.)
 CALL gs_get_cond_source(gs_fit,err)
 err=err-tmpprof(:,1)
 end subroutine cond_fit_error
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE cond_fit
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
 !!
 !! @param[in,out] self Needs docs
 !! @param[in,out] tmpin Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine cond_fit(self,tmpin)
 class(gs_eq), target, intent(inout) :: self
 real(8), target, intent(in) :: tmpin(:,:)
@@ -506,9 +508,9 @@ deallocate(wa3,wa4,ipvt)
 !---
 DEALLOCATE(contmp,wttmp)
 end subroutine cond_fit
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! SUBROUTINE fit_ff_error
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 !> Needs docs
 !!
 !! @param[in,out] m Needs docs
@@ -516,7 +518,7 @@ end subroutine cond_fit
 !! @param[in,out] cofs Needs docs [n]
 !! @param[in,out] err Needs docs [m]
 !! @param[in,out] iflag Needs docs
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 SUBROUTINE fit_ff_error(m,n,cofs,err,iflag)
 integer(4), intent(in) :: m,n
 real(8), intent(in) :: cofs(n)
@@ -540,14 +542,14 @@ DO i=1,mtmp
   err(mtmp+i)=tmpprof(2,i)-ff_fit%f(r)
 END DO
 end subroutine fit_ff_error
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE fit_ff
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
 !!
 !! @param[in,out] self Needs docs
 !! @param[in,out] tmpin Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine fit_ff(self,tmpin)
 class(flux_func), target, intent(inout) :: self
 real(8), target, intent(in) :: tmpin(:,:)
@@ -589,15 +591,15 @@ deallocate(wa3,wa4,ipvt)
 !---
 DEALLOCATE(contmp,coftmp)
 end subroutine fit_ff
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_comp_globals
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute toroidal current for Grad-Shafranov equilibrium
 !!
 !! @param[in,out] self G-S object
 !! @param[out] itor Toroidal current
 !! @param[out] centroid Current centroid (optional) [2]
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_comp_globals(self,itor,centroid,vol,pvol,dflux,tflux,bp_vol)
 class(gs_eq), intent(inout) :: self
 real(8), intent(out) :: itor,centroid(2),vol,pvol,dflux,tflux,bp_vol
@@ -676,9 +678,9 @@ tflux=tflux*self%psiscale
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_comp_globals
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Compute plasma loop voltage
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_calc_vloop(self,vloop)
 class(gs_eq), intent(inout) :: self !< G-S object
 real(8), intent(out) :: vloop !< loop voltage
@@ -744,11 +746,11 @@ vloop=self%psiscale*(eta_jsq/itor)
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_calc_vloop
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! SUBROUTINE gs_analyze
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 SUBROUTINE gs_analyze(self)
 class(gs_eq), intent(inout) :: self
 integer(4) :: i,io_unit
@@ -835,9 +837,9 @@ WRITE(*,'(2A,ES11.3)')oft_indent,'li                      = ',(bp_vol/vol)/((Ito
 ! END DO
 ! WRITE(*,*)
 CALL oft_decrease_indent
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create output file for q
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 OPEN(NEWUNIT=io_unit,FILE='safety_factor.dat')
 WRITE(io_unit,'(A)')'# TokaMaker q-profile "Psi, q"'
 DO i=1,npsi
@@ -845,15 +847,18 @@ DO i=1,npsi
 END DO
 CLOSE(io_unit)
 END SUBROUTINE gs_analyze
-!---------------------------------------------------------------------------
-! SUBROUTINE gs_save_decon
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
-subroutine gs_save_decon(gseq,npsi,ntheta,error_str)
+!------------------------------------------------------------------------------
+subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
 class(gs_eq), intent(inout) :: gseq
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: npsi
 integer(4), intent(in) :: ntheta
+REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
+REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
+LOGICAL, OPTIONAL, INTENT(in) :: pack_lcfs !< Use quadratic packing toward LCFS?
+LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision fields?
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 type(gsinv_interp), target :: field
 type(oft_lag_brinterp) :: psi_int
@@ -863,11 +868,16 @@ real(8), allocatable :: ptout(:,:)
 real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
+LOGICAL :: do_pack,save_single
 TYPE(spline_type) :: rz
 !---
 IF(PRESENT(error_str))error_str=""
-WRITE(*,'(2A)')oft_indent,'Saving DCON file'
+WRITE(*,'(3A)')oft_indent,'Saving iFile: ',TRIM(filename)
 CALL oft_increase_indent
+do_pack=.FALSE.
+save_single=.FALSE.
+IF(PRESENT(pack_lcfs))do_pack=pack_lcfs
+IF(PRESENT(single_prec))save_single=single_prec
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -875,9 +885,11 @@ x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
   x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
 END IF
+!
 xr = (x2-x1)
-x1 = x1 + xr*1.d-3
-x2 = x2 - xr*1.d-3
+x1 = x1 + xr*psi_pad
+xr = (x2-x1)
+!
 psi_int%u=>gseq%psi
 CALL psi_int%setup(gseq%fe_rep)
 !---Find Rmax along Zaxis
@@ -903,9 +915,9 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-ALLOCATE(cout(4,npsi))
-ALLOCATE(rout(npsi,ntheta))
-ALLOCATE(zout(npsi,ntheta))
+ALLOCATE(cout(npsi,4))
+ALLOCATE(rout(ntheta,npsi))
+ALLOCATE(zout(ntheta,npsi))
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup(gseq%fe_rep)
@@ -917,16 +929,20 @@ active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
 ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
-do j=1,npsi-1
+do j=2,npsi
   IF(PRESENT(error_str))THEN
     IF(error_str/="")CYCLE
   END IF
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Trace contour
-  !---------------------------------------------------------------------------
-  psi_surf(1)=(x2-x1)*(1.d0-j/REAL(npsi,4))**2
-  psi_surf(1)=x2 - psi_surf(1)
-  IF(gseq%diverted.AND.(psi_surf(1)-x1)/(x2-x1)<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  !------------------------------------------------------------------------------
+  IF(pack_lcfs)THEN
+    psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8))**2 + x1
+  ELSE
+    psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8)) + x1
+  END IF
+  ! psi_surf(1)=x2 - psi_surf(1)
+  IF(gseq%diverted.AND.ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near divertor
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
@@ -948,9 +964,9 @@ do j=1,npsi-1
       call oft_abort('Trace did not complete.','gs_save_decon',__FILE__)
     END IF
   END IF
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Perform cubic spline interpolation
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !---Allocate spline
   CALL spline_alloc(rz,active_tracer%nsteps,2)
   !---Setup Spline
@@ -961,24 +977,24 @@ do j=1,npsi-1
   !---Resample trace
   DO k=0,ntheta-1
     CALL spline_eval(rz,k/REAL(ntheta-1,8),0)
-    rout(j,k+1)=rz%f(1)
-    zout(j,k+1)=rz%f(2)
+    rout(k+1,j)=rz%f(1)
+    zout(k+1,j)=rz%f(2)
   END DO
   !---Destroy Spline
   CALL spline_dealloc(rz)
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Save DCON information
-  !---------------------------------------------------------------------------
-  cout(1,j)=psi_surf(1) ! Poloidal flux
+  !------------------------------------------------------------------------------
+  cout(j,1)=psi_surf(1) ! Poloidal flux
   !---Toroidal flux function
   IF(gseq%mode==0)THEN
-    cout(2,j)=gseq%alam*gseq%I%f(psi_surf(1))+gseq%I%f_offset
+    cout(j,2)=gseq%alam*gseq%I%f(psi_surf(1))+gseq%I%f_offset
   ELSE
-    cout(2,j)=SQRT(gseq%alam*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2) &
+    cout(j,2)=SQRT(gseq%alam*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2) &
     + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
   END IF
-  cout(3,j)=gseq%pnorm*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
-  cout(4,j)=cout(2,j)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
+  cout(j,3)=gseq%pnorm*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
+  cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
 end do
 CALL active_tracer%delete
 DEALLOCATE(ptout)
@@ -991,47 +1007,58 @@ IF(PRESENT(error_str))THEN
   END IF
 END IF
 !---Information for O-point
-rout(npsi,:)=raxis
-zout(npsi,:)=zaxis
-cout(1,npsi)=x2
+rout(:,1)=raxis
+zout(:,1)=zaxis
+cout(1,1)=x2
 IF(gseq%mode==0)THEN
-  cout(2,npsi)=(gseq%alam*gseq%I%f(x2)+gseq%I%f_offset)
+  cout(1,2)=(gseq%alam*gseq%I%f(x2)+gseq%I%f_offset)
 ELSE
-  cout(2,npsi)=SQRT(gseq%alam*gseq%I%f(x2) + gseq%I%f_offset**2) &
+  cout(1,2)=SQRT(gseq%alam*gseq%I%f(x2) + gseq%I%f_offset**2) &
       + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
 END IF
-cout(3,npsi)=gseq%pnorm*gseq%P%f(x2)/mu0
-cout(4,npsi)=(cout(4,npsi-2)-cout(4,npsi-1))*(x2-cout(1,npsi-1))/(cout(1,npsi-2)-cout(1,npsi-1)) + cout(4,npsi-1)
-!---------------------------------------------------------------------------
+cout(1,3)=gseq%pnorm*gseq%P%f(x2)/mu0
+cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
+!---Add LCFS pressure if specified
+IF(PRESENT(lcfs_press))cout(:,3)=cout(:,3)+lcfs_press
+!------------------------------------------------------------------------------
 ! Create output file
-!---------------------------------------------------------------------------
-OPEN(NEWUNIT=io_unit,FILE='Psitri.dci',FORM='UNFORMATTED')
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+OPEN(NEWUNIT=io_unit,FILE=TRIM(filename),FORM='UNFORMATTED')
+!------------------------------------------------------------------------------
 ! Write array lengths
-!---------------------------------------------------------------------------
-WRITE(io_unit)INT(npsi-1,4),INT(ntheta-1,4)
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+WRITE(io_unit)INT(npsi,4),INT(ntheta,4)
+!------------------------------------------------------------------------------
 ! Write out flux surface quantities
 !
-! cout(1,:) -> psi(0:mpsi)
-! cout(2,:) -> f(0:mpsi)
-! cout(3,:) -> p(0:mpsi)
-! cout(4,:) -> q(0:mpsi)
-!---------------------------------------------------------------------------
+! cout(:,1) -> psi(0:npsi)
+! cout(:,2) -> f(0:npsi)
+! cout(:,3) -> p(0:npsi)
+! cout(:,4) -> q(0:npsi)
+!------------------------------------------------------------------------------
 DO j=1,4
-  WRITE(io_unit)REAL(cout(j,:),4)
+  IF(save_single)THEN
+    WRITE(io_unit)REAL(cout(:,j),4)
+  ELSE
+    WRITE(io_unit)cout(:,j)
+  END IF
 END DO
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Write out inverse representation
 !
-! rout -> r(0:mpsi,0:mtheta)
-! zout -> z(0:mpsi,0:mtheta)
-!---------------------------------------------------------------------------
-WRITE(io_unit)REAL(rout,4)
-WRITE(io_unit)REAL(zout,4)
-!---------------------------------------------------------------------------
+! rout -> r(0:ntheta,0:npsi)
+! zout -> z(0:ntheta,0:npsi)
+!------------------------------------------------------------------------------
+IF(save_single)THEN
+  WRITE(io_unit)REAL(rout,4)
+  WRITE(io_unit)REAL(zout,4)
+ELSE
+  WRITE(io_unit)rout
+  WRITE(io_unit)zout
+END IF
+!------------------------------------------------------------------------------
 ! Close output file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 CLOSE(io_unit)
 !---
 IF(oft_debug_print(1))THEN
@@ -1043,13 +1070,13 @@ END IF
 CALL oft_decrease_indent
 !---
 DEALLOCATE(cout,rout,zout)
-end subroutine gs_save_decon
-!---------------------------------------------------------------------------
+end subroutine gs_save_ifile
+!------------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
-CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename 
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
 integer(4), intent(in) :: nz !< Number of vertical points for flux grid
 real(8), intent(in) :: rbounds(2) !< Radial extents for flux grid
@@ -1081,7 +1108,7 @@ REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 LOGICAL :: do_truncate
 !---
 IF(PRESENT(error_str))error_str=""
-WRITE(*,'(3A)')oft_indent,'Saving EQDSK file: ',TRIM(filename)
+WRITE(*,'(3A)')oft_indent,'Saving gEQDSK: ',TRIM(filename)
 CALL oft_increase_indent
 !---
 ALLOCATE(fpol(nr),pres(nr),ffprim(nr),pprime(nr),qpsi(nr))
@@ -1142,9 +1169,9 @@ do j=1,nr
   IF(PRESENT(error_str))THEN
     IF(error_str/="")CYCLE
   END IF
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Trace contour
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   psi_surf = x2 - xr*((j-1)/REAL(nr-1,8))
   psi_trace = psi_surf
   IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
@@ -1187,9 +1214,9 @@ do j=1,nr
     !     rHFS=ptout(2,k)
     !   END IF
     ! END DO
-    !---------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
     ! Perform Cubic Spline Interpolation
-    !---------------------------------------------------------------------------
+    !------------------------------------------------------------------------------
     !---Allocate spline
     CALL spline_alloc(rz,active_tracer%nsteps,2)
     !---Setup Spline
@@ -1207,9 +1234,9 @@ do j=1,nr
     CALL spline_dealloc(rz)
     DEALLOCATE(ptout)
   END IF
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Compute Mercier Profiles
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   !---Get flux variables
   IF(gseq%mode==0)THEN
     fptmp=gseq%alam*gseq%I%f(psi_trace)+gseq%I%f_offset
@@ -1269,9 +1296,9 @@ DO i=1,nr
   END DO
 END DO
 CALL psi_int%delete()
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 ! Create output file
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 WRITE(eqdsk_case,'(A,X,A)')'tMaker:',run_info
 rleft = rbounds(1)
 zmid = (zbounds(2)+zbounds(1))/2.d0
@@ -1351,9 +1378,9 @@ CALL oft_decrease_indent
 DEALLOCATE(rout,zout,rlim,zlim)
 DEALLOCATE(fpol,pres,ffprim,pprime,qpsi,psirz)
 end subroutine gs_save_eqdsk
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs Docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine sauter_apply(self,cell,f,gop,val)
 class(sauter_interp), intent(inout) :: self
 integer(4), intent(in) :: cell
@@ -1399,9 +1426,9 @@ ELSE
 END IF
 deallocate(j)
 end subroutine sauter_apply
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 !> Needs docs
-!---------------------------------------------------------------------------
+!------------------------------------------------------------------------------
 subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs)
 class(gs_eq), intent(inout) :: gseq
 integer(4), intent(in) :: nr
@@ -1462,9 +1489,9 @@ active_tracer%inv=.TRUE.
 ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 ! !$omp do schedule(dynamic,1)
 do j=1,nr
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   ! Trace contour
-  !---------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
   psi_surf=psi_q(j)*(x2-x1) + x1
   IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN ! Use higher tracing tolerance near divertor
     active_tracer%tol=1.d-10
