@@ -16,6 +16,14 @@
   filename="circle_2d.h5"
 /
 
+&cube_options
+ mesh_type=1
+ ref_per=T,F,F
+ ni=8,8,0
+ rscale=2.0,2.0,0.0
+ shift=-1.0,-1.0,0.0
+/
+
 &tdiff_options
   order=2
   ti0=1.0

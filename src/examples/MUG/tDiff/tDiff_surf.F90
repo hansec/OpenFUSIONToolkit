@@ -53,7 +53,7 @@ blag_zerob%ML_lag_rep=>ML_oft_blagrange
 ! Set intial conditions from analytic functions
 !------------------------------------------------------------------------------
 !---Generate mass matrix
-NULLIFY(u,v,mop) ! Ensure the matrix is unallocated (pointer is NULL)
+NULLIFY(u,v,mop,vec_vals) ! Ensure the matrix is unallocated (pointer is NULL)
 CALL oft_blag_getmop(ML_oft_blagrange%current_level,mop,"none") ! Construct mass matrix with "none" BC
 !---Setup linear solver
 CALL create_cg_solver(minv)
