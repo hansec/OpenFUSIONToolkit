@@ -1,7 +1,12 @@
-'''! Python interface for TokaMaker equilibrium reconstruction functionality
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! Functionality for performing equilibrium reconstructions using TokaMaker
 
 @authors Chris Hansen
-@date May 2023
+@date April 2024
 @ingroup doxy_oft_python
 '''
 from .._interface import *
@@ -365,7 +370,7 @@ class reconstruction():
         ## Plasma pressure constraints
         self._pressure_cons = []
         ## Non-axisymmetric corrections
-        self._nonax_corrs = []
+        self._nonax_corrs = None
         ## Coil current targets
         self._coil_targets = None
         ## Coil current error weights
@@ -377,6 +382,18 @@ class reconstruction():
         # Update settings
         self.settings.infile = self._tMaker_obj._oft_env.path2c(self.con_file)
         self.settings.outfile = self._tMaker_obj._oft_env.path2c(self.out_file)
+        # Fit-specific input file settings
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options'] = {
+            'ftol': '1.E-3',
+            'xtol': '1.E-3',
+            'gtol': '1.E-3',
+            'maxfev': '100',
+            'epsfcn': '1.E-3',
+            'factor': '1.0',
+            'comp_var': 'F',
+            'linearized_fit': 'F'
+        }
+        self._tMaker_obj._oft_env.update_oft_in()
     
     def __del__(self):
         '''! Destroy reconstruction object'''
@@ -388,7 +405,7 @@ class reconstruction():
         self._mirnovs = []
         self._saddles = []
         self._pressure_cons = []
-        self._nonax_corrs = []
+        self._nonax_corrs = None
     
     def set_Ip(self,Ip,err):
         '''! Set plasma current constraint
@@ -479,7 +496,7 @@ class reconstruction():
         self._pressure_cons = []
         self._coil_targets = None
         self._coil_wts = None
-        self._nonax_corrs = []
+        self._nonax_corrs = None
     
     def write_fit_in(self):
         '''! Create reconstruction input file for specified constraints'''
@@ -535,12 +552,27 @@ class reconstruction():
                 else:
                     raise ValueError("Unknown constraint type")
 
-    def reconstruct(self, vacuum=False):
+    def reconstruct(self, vacuum=False, linearized_fit=False, maxits=100, eps=1.E-3, ftol=1.E-3, xtol=1.E-3, gtol=1.E-3):
         '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.
         
-        @param vacuum Peform a vacuum reconstruction (no plasma current, pressure, etc.)
+        @param vacuum Perform vacuum reconstruction (no plasma current, pressure, etc.)
+        @param linearized_fit Use linearized solve for suitable terms
+        @param maxits Maximum number of iterations
+        @param eps Epsilong factor for finite difference derivative calculations
+        @param ftol Stopping condition: termination occurs when both the actual and predicted relative reductions in the sum of squares are at most `ftol`
+        @param xtol Stopping condition: termination occurs when the relative error between two consecutive iterates is at most `xtol`
+        @param gtol Stopping condition: termination occurs when the cosine of the angle between fvec and any column of the jacobian is at most `gtol` in absolute value
+        @result Error flag
         '''
         self.write_fit_in()
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['linearized_fit'] = 'T' if linearized_fit else 'F'
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['maxfev'] = '{0:d}'.format(maxits)
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['epsfcn'] = '{0:.5E}'.format(eps)
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['ftol'] = '{0:.5E}'.format(ftol)
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['xtol'] = '{0:.5E}'.format(xtol)
+        self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['gtol'] = '{0:.5E}'.format(gtol)
+        self._tMaker_obj._oft_env.update_oft_in()
+        #
         error_flag = c_int()
         if self._coil_targets is not None:
             self._tMaker_obj.set_coil_currents(self._coil_targets)
@@ -549,7 +581,7 @@ class reconstruction():
             nonax_corr = numpy.ascontiguousarray(self._nonax_corrs, dtype=numpy.float64)
             nonax_corr_ptr = nonax_corr.ctypes.data_as(c_double_ptr)
         if self._coil_wts is None:
-            tokamaker_recon_run(c_bool(vacuum),self.settings,c_void_p(),nonax_corr_ptr,ctypes.byref(error_flag))
+            tokamaker_recon_run(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings,c_void_p(),nonax_corr_ptr,ctypes.byref(error_flag))
         else:
             coil_wts_ptr = self._coil_wts.ctypes.data_as(c_void_p)
             tokamaker_recon_run(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings,coil_wts_ptr,nonax_corr_ptr,ctypes.byref(error_flag))
