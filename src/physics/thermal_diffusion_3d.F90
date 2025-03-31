@@ -32,7 +32,7 @@ USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
 USE oft_lu, ONLY: lapack_matinv
 !
 USE fem_base, ONLY: oft_ml_fem_type
-USE fem_composite, ONLY: oft_fem_comp_type
+USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
 USE oft_lag_basis, ONLY: oft_lag_setup, oft_scalar_fem, oft_lag_eval, oft_lag_geval, oft_3D_lagrange_cast
 IMPLICIT NONE
@@ -84,6 +84,7 @@ TYPE, public :: oft_tdiff_sim
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: Te_bc => NULL() !< Te BC flag
   INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:,:) :: jacobian_block_mask => NULL() !< Matrix block mask
   TYPE(oft_fem_comp_type), POINTER :: fe_rep => NULL() !< Finite element representation for solution field
+  TYPE(oft_ml_fem_comp_type), POINTER :: ML_fe_rep => NULL() !< Multi-level finite element container
   TYPE(xdmf_plot_file) :: xdmf_plot
   CLASS(oft_vector), POINTER :: u => NULL() !< Needs docs
   CLASS(oft_matrix), POINTER :: jacobian => NULL() !< Needs docs
@@ -852,21 +853,24 @@ CALL mesh%setup_io(self%xdmf_plot,order)
 
 !---Build composite FE definition for solution field
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating FE type'
-ALLOCATE(self%fe_rep)
-self%fe_rep%nfields=2
-ALLOCATE(self%fe_rep%fields(self%fe_rep%nfields))
-ALLOCATE(self%fe_rep%field_tags(self%fe_rep%nfields))
-self%fe_rep%fields(1)%fe=>oft_lagrange
-self%fe_rep%field_tags(1)='Ti'
-self%fe_rep%fields(2)%fe=>oft_lagrange
-self%fe_rep%field_tags(2)='Te'
+ALLOCATE(self%ML_fe_rep)
+self%ML_fe_rep%nlevels=ML_oft_lagrange%nlevels
+self%ML_fe_rep%nfields=2
+ALLOCATE(self%ML_fe_rep%ml_fields(self%ML_fe_rep%nfields))
+ALLOCATE(self%ML_fe_rep%field_tags(self%ML_fe_rep%nfields))
+self%ML_fe_rep%ml_fields(1)%ml=>ML_oft_lagrange
+self%ML_fe_rep%field_tags(1)='Ti'
+self%ML_fe_rep%ml_fields(2)%ml=>ML_oft_lagrange
+self%ML_fe_rep%field_tags(2)='Te'
+call self%ML_fe_rep%setup()
+self%fe_rep=>self%ML_fe_rep%current_level
 
 !---Create solution vector
 CALL self%fe_rep%vec_create(self%u)
 
 !---Set boundary conditions (Dirichlet for now)
-self%Ti_bc=>oft_lagrange%be
-self%Te_bc=>oft_lagrange%be
+self%Ti_bc=>oft_lagrange%global%gbe
+self%Te_bc=>oft_lagrange%global%gbe
 
 !---Create Jacobian matrix
 ALLOCATE(self%jacobian_block_mask(self%fe_rep%nfields,self%fe_rep%nfields))
