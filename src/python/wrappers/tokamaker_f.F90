@@ -22,13 +22,13 @@ USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
   oft_lag_setup
-USE oft_blag_operators, ONLY: oft_lag_brinterp
+USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, build_dels, &
+USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
-  gs_coil_mutual, gs_coil_mutual_distributed
+  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b
 #ifdef OFT_TOKAMAKER_LEGACY
 USE oft_gs, ONLY: gs_load_regions
 #endif
@@ -900,21 +900,58 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Field type
 TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to interpolation object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(oft_lag_bginterp), POINTER :: psi_grad_obj
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+CLASS(oft_vector), POINTER :: tmp1,tmp2,tmp3
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(imode==1)THEN
   ALLOCATE(b_interp_obj)
   b_interp_obj%gs=>tMaker_obj%gs
   CALL b_interp_obj%setup(tMaker_obj%gs)
   int_obj=C_LOC(b_interp_obj)
-ELSE
+ELSEIF(imode>=2.AND.imode<=4)THEN
   ALLOCATE(prof_interp_obj)
   prof_interp_obj%gs=>tMaker_obj%gs
   prof_interp_obj%mode=imode-1
   CALL prof_interp_obj%setup(tMaker_obj%gs)
   int_obj=C_LOC(prof_interp_obj)
+ELSEIF(imode==5)THEN
+  ALLOCATE(psi_grad_obj)
+  psi_grad_obj%u=>tMaker_obj%gs%psi
+  CALL psi_grad_obj%setup(tMaker_obj%gs%fe_rep)
+  int_obj=C_LOC(psi_grad_obj)
+ELSEIF(imode>=6.AND.imode<=8)THEN
+  ALLOCATE(psi_grad_obj)
+  CALL tMaker_obj%gs%psi%new(tmp1)
+  CALL tMaker_obj%gs%psi%new(tmp2)
+  CALL tMaker_obj%gs%psi%new(tmp3)
+  CALL gs_project_b(tMaker_obj%gs,tmp1,tmp2,tmp3)
+  IF(imode==6)THEN
+    psi_grad_obj%u=>tmp1
+    NULLIFY(tmp1)
+  ELSE IF(imode==7)THEN
+    psi_grad_obj%u=>tmp2
+    NULLIFY(tmp2)
+  ELSE IF(imode==8)THEN
+    psi_grad_obj%u=>tmp3
+    NULLIFY(tmp3)
+  END IF
+  IF(ASSOCIATED(tmp1))THEN
+    CALL tmp1%delete()
+    DEALLOCATE(tmp1)
+  END IF
+  IF(ASSOCIATED(tmp2))THEN
+    CALL tmp2%delete()
+    DEALLOCATE(tmp2)
+  END IF
+  IF(ASSOCIATED(tmp3))THEN
+    CALL tmp3%delete()
+    DEALLOCATE(tmp3)
+  END IF
+  CALL psi_grad_obj%setup(tMaker_obj%gs%fe_rep)
+  int_obj=C_LOC(psi_grad_obj)
 END IF
 END SUBROUTINE tokamaker_get_field_eval
 !---------------------------------------------------------------------------------
@@ -930,18 +967,26 @@ REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Tolerance for physical to logi
 INTEGER(c_int), INTENT(inout) :: cell !< Cell containing `pt` (starting guess on input)
 INTEGER(c_int), VALUE, INTENT(in) :: dim !< Dimension of field
 REAL(c_double), INTENT(out) :: field(dim) !< Field at `pt`
+TYPE(oft_lag_bginterp), POINTER :: psi_grad_obj
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
 REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))CALL oft_abort("TokaMaker object not associated","tokamaker_apply_field_eval",__FILE__)
 IF(int_type<0)THEN
-  IF(int_type==-1)THEN
+  IF(ABS(int_type)==1)THEN
     CALL c_f_pointer(int_obj, b_interp_obj)
     CALL b_interp_obj%delete
-  ELSE
-    CALL c_f_pointer(int_obj, prof_interp_obj)
-    CALL prof_interp_obj%delete
+  ELSE IF(ABS(int_type)>=2.AND.ABS(int_type)<=4)THEN
+    CALL c_f_pointer(int_obj, b_interp_obj)
+    CALL b_interp_obj%delete
+  ELSE IF(ABS(int_type)>=5)THEN
+    CALL c_f_pointer(int_obj, psi_grad_obj)
+    IF(ABS(int_type)>=6)THEN
+      CALL psi_grad_obj%u%delete
+      DEALLOCATE(psi_grad_obj%u)
+    END IF
+    CALL psi_grad_obj%delete
   END IF
   RETURN
 END IF
@@ -956,9 +1001,12 @@ CALL tMaker_obj%gs%mesh%jacobian(cell,f,goptmp,vol)
 IF(int_type==1)THEN
   CALL c_f_pointer(int_obj, b_interp_obj)
   CALL b_interp_obj%interp(cell,f,goptmp,field)
-ELSE
+ELSE IF(int_type>=2.AND.int_type<=4)THEN
   CALL c_f_pointer(int_obj, prof_interp_obj)
   CALL prof_interp_obj%interp(cell,f,goptmp,field)
+ELSE IF(int_type>=5)THEN
+  CALL c_f_pointer(int_obj, psi_grad_obj)
+  CALL psi_grad_obj%interp(cell,f,goptmp,field)
 END IF
 END SUBROUTINE tokamaker_apply_field_eval
 !---------------------------------------------------------------------------------

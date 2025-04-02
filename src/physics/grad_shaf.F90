@@ -4549,13 +4549,62 @@ end subroutine gsinv_apply
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
+subroutine gs_project_b(self,br,bt,bz,solver_in)
+class(gs_eq), target, intent(inout) :: self
+class(oft_vector), intent(inout) :: br,bt,bz
+class(oft_solver), optional, target, intent(inout) :: solver_in
+class(oft_vector), pointer :: a
+class(oft_solver), pointer :: solver
+type(gs_b_interp) :: Bfield
+integer(4) :: i,io_unit
+logical :: pm_save
+!---
+CALL self%psi%new(a)
+CALL Bfield%setup(self)
+!---Setup Solver
+IF(PRESENT(solver_in))THEN
+  solver=>solver_in
+ELSE
+  CALL create_cg_solver(solver)
+  solver%A=>self%mop
+  solver%its=-2
+  CALL create_diag_pre(solver%pre)
+END IF
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+!---Project B-field
+CALL oft_blag_vproject(self%fe_rep,Bfield,br,bt,bz)
+CALL a%add(0.d0,1.d0,br)
+CALL br%set(0.d0)
+CALL solver%apply(br,a)
+!
+CALL a%add(0.d0,1.d0,bt)
+CALL bt%set(0.d0)
+CALL solver%apply(bt,a)
+!
+CALL a%add(0.d0,1.d0,bz)
+CALL bz%set(0.d0)
+CALL solver%apply(bz,a)
+!---Clean up
+oft_env%pm=pm_save
+CALL a%delete
+DEALLOCATE(a)
+CALL Bfield%delete()
+IF(.NOT.PRESENT(solver_in))THEN
+  CALL solver%pre%delete
+  DEALLOCATE(solver%pre)
+  CALL solver%delete
+  DEALLOCATE(solver)
+END IF
+end subroutine gs_project_b
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 subroutine gs_save_fgrid(self,filename)
 class(gs_eq), target, intent(inout) :: self
 character(LEN=*), optional, intent(in) :: filename
 class(oft_vector), pointer :: a,br,bt,bz
 real(r8), pointer :: vals_tmp(:)
 class(oft_solver), pointer :: solver
-type(gs_b_interp) :: Bfield
 type(gs_prof_interp) :: field
 integer(4) :: i,io_unit
 real(8), allocatable :: Fout(:,:)
@@ -4567,10 +4616,6 @@ CALL self%psi%new(a)
 CALL self%psi%new(br)
 CALL self%psi%new(bt)
 CALL self%psi%new(bz)
-! Bfield%gs=>self
-! field%gs=>self
-CALL Bfield%setup(self)
-CALL field%setup(self)
 !---Setup Solver
 CALL create_cg_solver(solver)
 solver%A=>self%mop
@@ -4578,20 +4623,15 @@ solver%its=-2
 CALL create_diag_pre(solver%pre)
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 !---Project B-field
-CALL oft_blag_vproject(self%fe_rep,Bfield,br,bt,bz)
-CALL a%set(0.d0)
-CALL solver%apply(a,br)
-CALL a%get_local(vals_tmp)
+CALL gs_project_b(self,br,bt,bz,solver)
+CALL br%get_local(vals_tmp)
 Fout(1,:)=vals_tmp
-CALL a%set(0.d0)
-CALL solver%apply(a,bt)
-CALL a%get_local(vals_tmp)
+CALL bt%get_local(vals_tmp)
 Fout(2,:)=vals_tmp
-CALL a%set(0.d0)
-CALL solver%apply(a,bz)
-CALL a%get_local(vals_tmp)
+CALL bz%get_local(vals_tmp)
 Fout(3,:)=vals_tmp
 !---Project pressure
+CALL field%setup(self)
 field%mode=3
 CALL oft_blag_project(self%fe_rep,field,br)
 CALL a%set(0.d0)
@@ -4622,7 +4662,6 @@ CALL br%delete
 CALL bt%delete
 CALL bz%delete
 DEALLOCATE(a,br,bt,bz,Fout,vals_tmp)
-CALL Bfield%delete()
 CALL field%delete()
 CALL solver%pre%delete
 DEALLOCATE(solver%pre)

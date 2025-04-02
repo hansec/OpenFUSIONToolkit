@@ -221,7 +221,6 @@ class TokaMaker():
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, must call "reset" before loading new mesh')
-        self.update_settings()
         nregs = c_int()
         if mesh_file is not None:
             ndim = c_int(-1)
@@ -250,6 +249,7 @@ class TokaMaker():
         tokamaker_alloc(ctypes.byref(self._tMaker_ptr),self._mesh_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        self.update_settings()
         self.nregs = nregs.value
     
     def setup_regions(self,cond_dict={},coil_dict={}):
@@ -999,14 +999,14 @@ class TokaMaker():
     def get_field_eval(self,field_type):
         r'''! Create field interpolator for vector potential
 
-        @param field_type Field to interpolate, must be one of ("B", "psi", "F", or "P")
+        @param field_type Field to interpolate, must be one of ("B", "psi", "F", "P", "dPSI", "dBr", "dBt", or "dBz")
         @result Field interpolation object
         '''
         #
-        mode_map = {'B': 1, 'PSI': 2, 'F': 3, 'P': 4}
+        mode_map = {'B': 1, 'PSI': 2, 'F': 3, 'P': 4, 'DPSI': 5, 'DBR': 6, 'DBT': 7, 'DBZ': 8}
         imode = mode_map.get(field_type.upper())
         if imode is None:
-            raise ValueError('Invalid field type ("B", "psi", "F", "P")')
+            raise ValueError('Invalid field type ("B", "psi", "F", "P", "dPSI", "dBr", "dBt", "dBz")')
         #
         int_obj = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
@@ -1016,6 +1016,8 @@ class TokaMaker():
         field_dim = 1
         if imode == 1:
             field_dim = 3
+        elif imode >= 5:
+            field_dim = 2
         return TokaMaker_field_interpolator(self._tMaker_ptr,int_obj,imode,field_dim)
     
     def get_coil_currents(self):
