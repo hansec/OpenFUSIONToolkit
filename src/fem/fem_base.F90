@@ -1593,6 +1593,7 @@ IF(PRESENT(err_flag))THEN
     NULLIFY(lge)
     DEALLOCATE(infield)
     CALL hdf5_rst_destroy(rst_info)
+    DEBUG_STACK_POP
     RETURN
   END IF
 ELSE
