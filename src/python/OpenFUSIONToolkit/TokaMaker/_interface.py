@@ -233,8 +233,12 @@ class TokaMaker_field_interpolator():
         '''
         self.cell = c_int(-1)
         self.int_type = int_type
-        self.dim = dim
-        self.val = numpy.zeros((self.dim,), dtype=numpy.float64)
+        self.dim_return = dim
+        if dim == 2:
+            self.dim_eval = 3
+        else:
+            self.dim_eval = dim
+        self.val = numpy.zeros((self.dim_eval,), dtype=numpy.float64)
         self._tMaker_obj = tMaker_obj
         self._int_obj = int_obj
         self.fbary_tol = fbary_tol
@@ -242,16 +246,16 @@ class TokaMaker_field_interpolator():
     def __del__(self):
         '''Destroy underlying interpolation object'''
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
-        tokamaker_apply_field_eval(self._tMaker_obj,self._int_obj,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
+        tokamaker_apply_field_eval(self._tMaker_obj,self._int_obj,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim_eval,self.val)
 
     def eval(self,pt):
         '''! Evaluate field at a given location
 
         @param pt Location for evaluation [2]
-        @result Field at evaluation point [self.dim]
+        @result Field at evaluation point [self.dim_return]
         '''
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
         pt_eval[:2] = pt
-        tokamaker_apply_field_eval(self._tMaker_obj,self._int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim,self.val)
-        return self.val
+        tokamaker_apply_field_eval(self._tMaker_obj,self._int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim_eval,self.val)
+        return self.val[:self.dim_return]
 
