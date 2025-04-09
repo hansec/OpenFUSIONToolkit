@@ -625,7 +625,7 @@ END IF
 tmp=((rbounds(1,2)+rbounds(1,1))/2.d0-(zbounds(1,2)+zbounds(1,1))/2.d0)*2.d0/(rbounds(1,2)-rbounds(1,1))
 WRITE(*,'(2A,F8.3)')oft_indent,'Triangularity           =',tmp
 WRITE(*,'(2A,F8.3)')oft_indent,'Plasma Volume [m^3]     =',vol*2.d0*pi
-WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
+IF(.NOT.self%dipole_mode)WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
 WRITE(*,'(2A,ES11.3)')oft_indent,'Peak Pressure [Pa]      = ',pmax/mu0
 WRITE(*,'(2A,ES11.3)')oft_indent,'Stored Energy [J]       = ',pvol*2.d0*pi/mu0*3.d0/2.d0
 WRITE(*,'(2A,F8.3)')  oft_indent,'<Beta_pol> [%]          = ',1.d2*beta(1)

@@ -677,7 +677,7 @@ class TokaMaker():
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
         return psi
 
-    def get_stats(self,lcfs_pad=None,li_normalization='std',geom_type='max'):
+    def get_stats(self,lcfs_pad=None,li_normalization='std',geom_type='max',beta_Ip=None):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         See eq. 1 for `li_normalization='std'` and eq 2. for `li_normalization='iter'`
@@ -686,6 +686,7 @@ class TokaMaker():
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
         @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
+        @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         @result Dictionary of equilibrium parameters
         '''
         if lcfs_pad is None:
@@ -694,6 +695,8 @@ class TokaMaker():
                 lcfs_pad = 0.01
         _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,0.02],compute_geo=True) # Given backward so last point is LCFS (for dl)
         Ip,centroid,vol,pvol,dflux,tflux,Bp_vol = self.get_globals()
+        if beta_Ip is not None:
+            Ip = beta_Ip
         _,_,_,p,_ = self.get_profiles(numpy.r_[0.001])
         if self.diverted:
             x_points, _ = self.get_xpoints()
@@ -759,14 +762,15 @@ class TokaMaker():
             eq_stats['beta_n'] = eq_stats['beta_tor']*eq_stats['a_geo']*(self._F0/R_geo)/(Ip/1.E6)
         return eq_stats
 
-    def print_info(self,lcfs_pad=0.01,li_normalization='std',geom_type='max'):
+    def print_info(self,lcfs_pad=0.01,li_normalization='std',geom_type='max',beta_Ip=None):
         '''! Print information (Ip, q, etc.) about current G-S equilbirium
         
         @param lcfs_pad Padding at LCFS for boundary calculations
         @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
+        @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         '''
-        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,li_normalization=li_normalization,geom_type=geom_type)
+        eq_stats = self.get_stats(lcfs_pad=lcfs_pad,li_normalization=li_normalization,geom_type=geom_type,beta_Ip=beta_Ip)
         print("Equilibrium Statistics:")
         if self.diverted:
             print("  Topology                =   Diverted")
@@ -778,7 +782,8 @@ class TokaMaker():
         print("  Elongation              =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['kappa'],eq_stats['kappaU'],eq_stats['kappaL']))
         print("  Triangularity           =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['delta'],eq_stats['deltaU'],eq_stats['deltaL']))
         print("  Plasma Volume [m^3]     =   {0:6.3F}".format(eq_stats['vol']))
-        print("  q_0, q_95               =   {0:6.3F} {1:6.3F}".format(eq_stats['q_0'],eq_stats['q_95']))
+        if not self.settings.dipole_mode:
+            print("  q_0, q_95               =   {0:6.3F} {1:6.3F}".format(eq_stats['q_0'],eq_stats['q_95']))
         print("  Peak Pressure [Pa]      =   {0:11.4E}".format(eq_stats['P_ax']))
         print("  Stored Energy [J]       =   {0:11.4E}".format(eq_stats['W_MHD']))
         print("  <Beta_pol> [%]          =   {0:7.4F}".format(eq_stats['beta_pol']))

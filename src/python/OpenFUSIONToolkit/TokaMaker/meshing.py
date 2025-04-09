@@ -735,10 +735,9 @@ class Mesh:
                             segment[2] = min(segment[2],region._small_thresh)
                             local_seg_map.append(-iseg)
                             break
-                    elif (nOverlap > 1) and (iseg < seg_start): # Partial match (ignore if same region)
+                    elif (nOverlap >= 1) and (iseg < seg_start): # Partial match (ignore if same region)
                         if debug:
                             print('  Merging partially overlapping curve segments:',nOverlap,ireg,reg_seg,iseg)
-                            print(tmp_pts)
                         if len(tmp_pts) < len(segment[0]):
                             overlap_start = len(segment[0])
                             overlap_end = -1

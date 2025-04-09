@@ -3472,7 +3472,11 @@ IF(self%nx_points>0)THEN
   CALL sort_array(x_psi_sort,ind_sort,self%nx_points)
   DO i=1,self%nx_points
     self%x_points(:,i)=x_point(:,ind_sort(i))
-    self%x_vecs(:,i)=self%o_point-self%x_points(:,i)
+    IF(self%dipole_mode)THEN
+      self%x_vecs(:,i) = (self%o_point+[self%rmax,0.d0])/2.d0 - self%x_points(:,i)
+    ELSE
+      self%x_vecs(:,i)=self%o_point-self%x_points(:,i)
+    END IF
     IF(oft_debug_print(1))THEN
       WRITE(*,'(2A,5ES11.3)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i)
     END IF
