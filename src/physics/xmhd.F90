@@ -3390,7 +3390,6 @@ IF(xmhd_two_temp)THEN
 END IF
 DEBUG_STACK_POP
 end subroutine xmhd_errmatrix_apply
-<<<<<<< HEAD
 !------------------------------------------------------------------------------
 !> Compute the NL metric for solution field
 !!
@@ -4182,9 +4181,6 @@ DO i=1,mesh%nc
 END DO
 end subroutine nlfun_setup
 !------------------------------------------------------------------------------
-=======
-!------------------------------------------------------------------------------
->>>>>>> thermal_diffusion_ex
 !> Compute the mass matrix for solution field
 !!
 !! b = M(a)
