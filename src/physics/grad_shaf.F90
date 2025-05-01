@@ -2053,25 +2053,27 @@ DO i=1,self%nregularize
   err_mat(roffset+i,self%ncoils+1)=self%coil_reg_mat(i,self%ncoils+1)
   rhs(roffset+i)=-self%coil_reg_targets(i)
 END DO
+roffset=1
+IF(self%isoflux_ntargets>0)roffset=2
 !---Solve L-S system
 IF(ASSOCIATED(self%coil_bounds))THEN
-BLOCK
-INTEGER(4) :: nsetp
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: index
-REAL(8) :: rnorm
-REAL(8), ALLOCATABLE, DIMENSION(:) :: w
-ALLOCATE(w(self%ncoils+1),index(self%ncoils+1))
-  CALL bvls(ncon-1,self%ncoils+1,err_mat(2:nCon,:),rhs(2:nCon), &
+  BLOCK
+  INTEGER(4) :: nsetp
+  INTEGER(4), ALLOCATABLE, DIMENSION(:) :: index
+  REAL(8) :: rnorm
+  REAL(8), ALLOCATABLE, DIMENSION(:) :: w
+  ALLOCATE(w(self%ncoils+1),index(self%ncoils+1))
+  CALL bvls(ncon-roffset+1,self%ncoils+1,err_mat(roffset:nCon,:),rhs(roffset:nCon), &
     self%coil_bounds,currs,rnorm,nsetp,w,index,ierr)
   ! WRITE(*,*)ierr,currs
-DEALLOCATE(w,index)
-END BLOCK
+  DEALLOCATE(w,index)
+  END BLOCK
 ELSE
-  err_inv=MATMUL(TRANSPOSE(err_mat(2:nCon,:)),err_mat(2:nCon,:))
+  err_inv=MATMUL(TRANSPOSE(err_mat(roffset:nCon,:)),err_mat(roffset:nCon,:))
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
   CALL lapack_matinv(self%ncoils+1,err_inv,ierr)
   oft_env%pm=pm_save
-  currs=MATMUL(err_inv,MATMUL(TRANSPOSE(err_mat(2:nCon,:)),rhs(2:nCon)))
+  currs=MATMUL(err_inv,MATMUL(TRANSPOSE(err_mat(roffset:nCon,:)),rhs(roffset:nCon)))
 END IF
 !---Add coil/conductor fields to IC
 self%vcontrol_val=-currs(self%ncoils+1)

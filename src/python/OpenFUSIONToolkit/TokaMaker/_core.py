@@ -495,6 +495,14 @@ class TokaMaker():
                 raise IndexError('Incorrect shape of "reg_weights", should be [nregularize]')
         else:
             raise ValueError('Either "reg_terms" or "reg_mat" is required')
+        # Ensure VSC is constrained
+        if (self._virtual_coils.get('#VSC',-1) < 0) and ((abs(reg_mat[-1,:])).max() < 1.E-8):
+            new_row = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
+            new_row[-1] = 1.0
+            reg_mat = numpy.hstack((reg_mat,new_row.reshape([self.ncoils+1,1])))
+            reg_targets = numpy.append(reg_targets, 0.0)
+            reg_weights = numpy.append(reg_weights, 1.0)
+            nregularize += 1
         reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
         reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
