@@ -406,9 +406,7 @@ class gs_Domain:
         @result Meshed representation (pts[np,2], tris[nc,3], regions[nc])
         '''
         # Check for single plasma region
-        if self.reg_type_counts['plasma'] > 1:
-            raise ValueError('More than one plasma region specified')
-        elif self.reg_type_counts['plasma'] == 0:
+        if self.reg_type_counts['plasma'] == 0:
             raise ValueError('No plasma region specified')
         else:
             # Make sure a boundary exists if we have regions other than plasma

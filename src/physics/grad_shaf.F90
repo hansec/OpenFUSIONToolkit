@@ -4165,11 +4165,19 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%fe_rep%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF( psi_tmp(1) < x1)EXIT
+  IF(gseq%dipole_mode)THEN
+    IF(psi_tmp(1)>x1)EXIT
+  ELSE
+    IF(psi_tmp(1)<x1)EXIT
+  END IF
   rmax=pt(1)
 END DO
 pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
@@ -4313,11 +4321,15 @@ rmax=raxis
 cell=0
 pmin=1.d99
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%fe_rep%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF( ABS(psi_tmp(1)-psi_surf)<pmin)THEN
+  IF(ABS(psi_tmp(1)-psi_surf)<pmin)THEN
     pmin = ABS(psi_tmp(1)-psi_surf)
     rmax = pt(1)
   END IF
