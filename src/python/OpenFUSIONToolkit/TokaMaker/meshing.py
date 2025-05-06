@@ -301,7 +301,7 @@ class gs_Domain:
                 if parent_dx is None:
                     raise ValueError('Resolution for region "{0}" not defined'.format(parent_name))
                 else:
-                    dx = min(dx,parent_dx)
+                    dx_curve = min(dx,parent_dx)
         # Add region
         maxes = contour.max(axis=0)
         self.rmax = max(self.rmax,maxes[0])
@@ -462,7 +462,8 @@ class gs_Domain:
         self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
         if not setup_only:
             self._r, self._lc, self._reg = self.mesh.get_mesh()
-        return self._r, self._lc, self._reg
+            return self._r, self._lc, self._reg
+        return None, None, None
     
     def save_json(self,filename):
         '''! Create a JSON file containing a description of the mesh 
