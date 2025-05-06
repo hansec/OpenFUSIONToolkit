@@ -172,6 +172,7 @@ TYPE :: gs_eq
   REAL(r8) :: psimax = 1.d0 !< Maximum \f$ \psi \f$ value for homogeneous equilibria
   REAL(r8) :: alam = 1.d0 !< Scale factor for F*F' or F' profile (see mode)
   REAL(r8) :: pnorm = 1.d0 !< Scale factor for P' profile
+  REAL(r8) :: dipole_a = 0.d0 !< Anisotropy exponent for dipole pressure profiles
   REAL(r8) :: dt = -1.d0 !< Timestep size for time-dependent and quasi-static solves
   REAL(r8) :: dt_last = -1.d0 !< Timestep size for current LHS matrix
   REAL(r8) :: Itor_target = -1.d0 !< Toroidal current target
@@ -247,6 +248,7 @@ TYPE :: gs_eq
   CLASS(flux_func), POINTER :: P => NULL() !< Pressure flux function
   CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
   CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
+  CLASS(flux_func), POINTER :: dipole_B0 => NULL() !< Dipole minimum B profile
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
   CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Lagrange FE representation
   TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL() !< Multi-level Lagrange FE representation (only top level used)
@@ -302,10 +304,38 @@ end type gs_prof_interp
 !> Interpolate magnetic field for a G-S solution
 !------------------------------------------------------------------------------
 type, extends(gs_prof_interp) :: gs_b_interp
+  LOGICAL :: normalized = .FALSE.
 contains
   !> Evaluate magnetic field
   procedure :: interp => gs_b_interp_apply
 end type gs_b_interp
+!------------------------------------------------------------------------------
+!> Interpolate magnetic field for a G-S solution
+!------------------------------------------------------------------------------
+type, extends(gs_prof_interp) :: gs_j_interp
+  type(oft_lag_brinterp) :: bcross_kappa_fun
+contains
+  !> Needs docs
+  procedure :: setup => gs_j_interp_setup
+  !> Needs docs
+  procedure :: delete => gs_j_interp_delete
+  !> Evaluate magnetic field
+  procedure :: interp => gs_j_interp_apply
+end type gs_j_interp
+!------------------------------------------------------------------------------
+!> Interpolate magnetic field for a G-S solution
+!------------------------------------------------------------------------------
+type, extends(bfem_interp) :: gs_curvature_interp
+  type(oft_lag_brinterp), pointer :: Br_eval => NULL() !< Needs docs
+  type(oft_lag_bginterp), pointer :: Br_geval => NULL() !< Needs docs
+  type(oft_lag_brinterp), pointer :: Bt_eval => NULL() !< Needs docs
+  type(oft_lag_bginterp), pointer :: Bt_geval => NULL() !< Needs docs
+  type(oft_lag_brinterp), pointer :: Bz_eval => NULL() !< Needs docs
+  type(oft_lag_bginterp), pointer :: Bz_geval => NULL() !< Needs docs
+contains
+  !> Evaluate magnetic field
+  procedure :: interp => gs_curvature_apply
+end type gs_curvature_interp
 !------------------------------------------------------------------------------
 !> Need docs
 !------------------------------------------------------------------------------
@@ -3137,11 +3167,12 @@ CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `a
 CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `pnorm`)
 REAL(8), INTENT(out) :: itor_alam,itor_press,estore
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
+real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),ani_fac,H
 real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
 integer(4) :: j,m,l
 integer(4), allocatable :: j_lag(:)
 logical :: curved
+type(oft_lag_brinterp) :: bcross_kappa_fun
 t1=omp_get_wtime()
 !---
 NULLIFY(atmp,btmp,b2tmp,b3tmp)
@@ -3153,11 +3184,17 @@ CALL b%get_local(btmp)
 CALL b2%get_local(b2tmp)
 CALL b3%get_local(b3tmp)
 CALL a%get_local(atmp)
+IF(self%dipole_mode.AND.(self%dipole_a>0.d0))THEN
+  CALL self%dipole_B0%update(self)
+  CALL self%psi%new(bcross_kappa_fun%u)
+  CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
+  CALL bcross_kappa_fun%setup(self%fe_rep)
+END IF
 !---
 itor_alam=0.d0
 itor_press=0.d0
 estore=0.d0
-!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,vcache) &
+!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,ani_fac,H) &
 !$omp reduction(+:itor_alam) reduction(+:itor_press) reduction(+:estore)
 allocate(rhs_loc(self%fe_rep%nce,3))
 allocate(rop(self%fe_rep%nce),vcache(self%fe_rep%nce))
@@ -3194,7 +3231,21 @@ do j=1,self%fe_rep%mesh%nc
           ffp(1:2)=0.5d0*self%alam*self%I%fp(psitmp)
           itor_alam = itor_alam + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*self%fe_rep%quad%wts(m)
         END IF
-        ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
+        !---
+        IF(self%dipole_mode.AND.(self%dipole_a>0.d0))THEN
+          gpsitmp=0.d0
+          DO l=1,self%fe_rep%nce
+            CALL oft_blag_geval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),gop,goptmp)
+            gpsitmp=gpsitmp+vcache(l)*gop
+          END DO
+          H = (gpsitmp(1)/(pt(1)+gs_epsilon))**2 + (gpsitmp(2)/(pt(1)+gs_epsilon))**2
+          H = (self%dipole_b0%f(psitmp)/SQRT(H))**(2.d0*self%dipole_a)
+          CALL bcross_kappa_fun%interp(j,self%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+          ani_fac = bcross_kappa(1)*(1.d0/(1.d0+2.d0*self%dipole_a) - 1.d0)
+          ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*(self%P%fp(psitmp)*pt(1)**2 - self%P%f(psitmp)*ani_fac)*H
+        ELSE
+          ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
+        END IF
         !
         estore = estore + (self%P%F(psitmp))*v*self%fe_rep%quad%wts(m)*pt(1)
         itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*self%fe_rep%quad%wts(m)
@@ -3224,6 +3275,11 @@ CALL b%restore_local(btmp,add=.TRUE.)
 CALL b2%restore_local(b2tmp,add=.TRUE.)
 CALL b3%restore_local(b3tmp,add=.TRUE.)
 DEALLOCATE(atmp,btmp,b2tmp,b3tmp)
+IF(self%dipole_mode.AND.(self%dipole_a>0.d0))THEN
+  CALL bcross_kappa_fun%u%delete
+  DEALLOCATE(bcross_kappa_fun%u)
+  CALL bcross_kappa_fun%delete
+END IF
 estore = estore*2.d0*pi*self%psiscale
 itor_alam = itor_alam*self%psiscale
 itor_press = itor_press*self%psiscale
@@ -3407,10 +3463,10 @@ ELSE
 END IF
 IF(self%dipole_mode)THEN
   !---Check limiters
-  ilim_psi=0.d0
+  ilim_psi=1.d99
   DO i=self%nlimiter_nds+1,self%nlimiter_nds+self%ninner_limiter_nds
     j=self%limiter_nds(i)
-    IF(psi_vals(j)>ilim_psi)THEN
+    IF(psi_vals(j)<ilim_psi)THEN
       ilim_psi=psi_vals(j)
       self%o_point=self%rlimiter_nds(:,i)
     END IF
@@ -4487,7 +4543,93 @@ IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
 ELSE
   val(2)=self%gs%psiscale*self%gs%I%f_offset/(pt(1)+gs_epsilon)
 END IF
+IF(self%normalized)val(1:3)=val(1:3)/(magnitude(val(1:3))+1.d-10)
 end subroutine gs_b_interp_apply
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine gs_j_interp_setup(self,gs)
+class(gs_j_interp), intent(inout) :: self
+class(gs_eq), target, intent(inout) :: gs
+CALL gs_prof_interp_setup(self,gs)
+CALL self%gs%dipole_B0%update(self%gs)
+CALL self%gs%psi%new(self%bcross_kappa_fun%u)
+CALL gs_bcrosskappa(self%gs,self%bcross_kappa_fun%u)
+CALL self%bcross_kappa_fun%setup(self%gs%fe_rep)
+end subroutine gs_j_interp_setup
+!------------------------------------------------------------------------------
+!> Destroy temporary internal storage and nullify references
+!------------------------------------------------------------------------------
+subroutine gs_j_interp_delete(self)
+class(gs_j_interp), intent(inout) :: self
+CALL gs_prof_interp_delete(self)
+CALL self%bcross_kappa_fun%u%delete()
+DEALLOCATE(self%bcross_kappa_fun%u)
+CALL self%bcross_kappa_fun%delete
+end subroutine gs_j_interp_delete
+!------------------------------------------------------------------------------
+!> Reconstruct magnetic field from a Grad-Shafranov solution
+!------------------------------------------------------------------------------
+subroutine gs_j_interp_apply(self,cell,f,gop,val)
+class(gs_j_interp), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed field at f [3]
+real(8) :: psitmp(1),gpsitmp(3),pt(3),ani_fac,H,bcross_kappa(1)
+logical :: in_plasma
+pt=self%gs%fe_rep%mesh%log2phys(cell,f)
+in_plasma=.TRUE.
+IF(gs_test_bounds(self%gs,pt).AND.(self%gs%fe_rep%mesh%reg(cell)==1))THEN
+  in_plasma=.TRUE.
+ELSE
+  in_plasma=.FALSE.
+END IF
+! Sample fields
+CALL self%psi_eval%interp(cell,f,gop,psitmp)
+CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
+! Evaluate J_tor
+IF(in_plasma.AND.(psitmp(1)>self%gs%plasma_bounds(1)))THEN
+  IF(self%gs%mode==0)THEN
+    val(1)=(self%gs%alam**2)*self%gs%I%Fp(psitmp(1))*(self%gs%I%f(psitmp(1))+self%gs%I%f_offset/self%gs%alam)/(pt(1)+gs_epsilon)
+  ELSE
+    val(1)=0.5d0*self%gs%alam*self%gs%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
+  END IF
+  IF(self%gs%dipole_mode)THEN
+    H = (gpsitmp(1)/(pt(1)+gs_epsilon))**2 + (gpsitmp(2)/(pt(1)+gs_epsilon))**2
+    H = (self%gs%dipole_b0%f(psitmp(1))/SQRT(H))**(2.d0*self%gs%dipole_a)
+    CALL self%bcross_kappa_fun%interp(cell,f,gop,bcross_kappa)
+    ani_fac = bcross_kappa(1)*(1.d0/(1.d0+2.d0*self%gs%dipole_a) - 1.d0)
+    val(1) = val(1) + self%gs%pnorm*(self%gs%P%fp(psitmp(1))*pt(1)**2 - self%gs%P%f(psitmp(1))*ani_fac)*H
+  ELSE
+    val(1) = val(1) + self%gs%pnorm*pt(1)*self%gs%P%Fp(psitmp(1))
+  END IF
+ELSE
+  val(1)=0.d0
+END IF
+end subroutine gs_j_interp_apply
+!------------------------------------------------------------------------------
+!> Reconstruct magnetic field from a Grad-Shafranov solution
+!------------------------------------------------------------------------------
+subroutine gs_curvature_apply(self,cell,f,gop,val)
+class(gs_curvature_interp), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed field at f [3]
+real(r8) :: btmp(3),gtmp(3),pt(3)
+pt=self%Br_eval%mesh%log2phys(cell,f)
+CALL self%Br_eval%interp(cell,f,gop,btmp(1:1))
+CALL self%Bt_eval%interp(cell,f,gop,btmp(2:2))
+CALL self%Bz_eval%interp(cell,f,gop,btmp(3:3))
+!
+CALL self%Br_geval%interp(cell,f,gop,gtmp)
+val(1)=(btmp(1)*gtmp(1)+btmp(3)*gtmp(2)-btmp(2)*btmp(2)/pt(1))
+CALL self%Bt_geval%interp(cell,f,gop,gtmp)
+val(2)=(btmp(1)*gtmp(1)+btmp(3)*gtmp(2)+btmp(2)*btmp(1)/pt(1))
+CALL self%Bz_geval%interp(cell,f,gop,gtmp)
+val(3)=(btmp(1)*gtmp(1)+btmp(3)*gtmp(2))
+end subroutine gs_curvature_apply
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -4553,10 +4695,11 @@ end subroutine gsinv_apply
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-subroutine gs_project_b(self,br,bt,bz,solver_in)
+subroutine gs_project_b(self,br,bt,bz,solver_in,normalized)
 class(gs_eq), target, intent(inout) :: self
 class(oft_vector), intent(inout) :: br,bt,bz
 class(oft_solver), optional, target, intent(inout) :: solver_in
+logical, optional, intent(in) :: normalized
 class(oft_vector), pointer :: a
 class(oft_solver), pointer :: solver
 type(gs_b_interp) :: Bfield
@@ -4564,6 +4707,7 @@ integer(4) :: i,io_unit
 logical :: pm_save
 !---
 CALL self%psi%new(a)
+IF(PRESENT(normalized))Bfield%normalized=normalized
 CALL Bfield%setup(self)
 !---Setup Solver
 IF(PRESENT(solver_in))THEN
@@ -4600,6 +4744,117 @@ IF(.NOT.PRESENT(solver_in))THEN
   DEALLOCATE(solver)
 END IF
 end subroutine gs_project_b
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE gs_curvature(self,br,bt,bz,solver_in)
+class(gs_eq), target, intent(inout) :: self
+class(oft_vector), target, intent(inout) :: br,bt,bz
+class(oft_solver), optional, target, intent(inout) :: solver_in
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CLASS(oft_vector), POINTER :: vr,vt,vz
+class(oft_solver), pointer :: solver
+TYPE(gs_curvature_interp) :: curve_interp
+logical :: pm_save
+!
+CALL self%psi%new(vr)
+CALL self%psi%new(vt)
+CALL self%psi%new(vz)
+!---Setup Solver
+IF(PRESENT(solver_in))THEN
+  solver=>solver_in
+ELSE
+  CALL create_cg_solver(solver)
+  solver%A=>self%mop
+  solver%its=-2
+  CALL create_diag_pre(solver%pre)
+END IF
+CALL gs_project_b(self,br,bt,bz,solver_in=solver,normalized=.TRUE.)
+!
+curve_interp%mesh=>self%fe_rep%mesh
+ALLOCATE(curve_interp%Br_eval,curve_interp%Br_geval)
+curve_interp%Br_eval%u=>br
+CALL curve_interp%Br_eval%setup(self%fe_rep)
+CALL curve_interp%Br_geval%shared_setup(curve_interp%Br_eval)
+ALLOCATE(curve_interp%Bt_eval,curve_interp%Bt_geval)
+curve_interp%Bt_eval%u=>bt
+CALL curve_interp%Bt_eval%setup(self%fe_rep)
+CALL curve_interp%Bt_geval%shared_setup(curve_interp%Bt_eval)
+ALLOCATE(curve_interp%Bz_eval,curve_interp%Bz_geval)
+curve_interp%Bz_eval%u=>bz
+CALL curve_interp%Bz_eval%setup(self%fe_rep)
+CALL curve_interp%Bz_geval%shared_setup(curve_interp%Bz_eval)
+!
+CALL oft_blag_vproject(self%fe_rep,curve_interp,vr,vt,vz)
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+CALL br%set(0.d0)
+CALL solver%apply(br,vr)
+CALL bt%set(0.d0)
+CALL solver%apply(bt,vt)
+CALL bz%set(0.d0)
+CALL solver%apply(bz,vz)
+oft_env%pm=pm_save
+!
+CALL vr%delete()
+CALL vt%delete()
+CALL vz%delete()
+DEALLOCATE(vr,vt,vz)
+CALL curve_interp%Br_eval%delete()
+CALL curve_interp%Bt_eval%delete()
+CALL curve_interp%Bz_eval%delete()
+DEALLOCATE(curve_interp%Br_eval,curve_interp%Br_geval)
+DEALLOCATE(curve_interp%Bt_eval,curve_interp%Bt_geval)
+DEALLOCATE(curve_interp%Bz_eval,curve_interp%Bz_geval)
+IF(.NOT.PRESENT(solver_in))THEN
+  CALL solver%pre%delete
+  DEALLOCATE(solver%pre)
+  CALL solver%delete
+  DEALLOCATE(solver)
+END IF
+END SUBROUTINE gs_curvature
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE gs_bcrosskappa(self,bcross_kappa)
+class(gs_eq), target, intent(inout) :: self
+class(oft_vector), target, intent(inout) :: bcross_kappa
+INTEGER(4) :: i
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: kappa,Bfull
+CLASS(oft_vector), POINTER :: vr,vt,vz,ur,ut,uz
+!
+CALL self%psi%new(vr)
+CALL self%psi%new(vt)
+CALL self%psi%new(vz)
+CALL self%psi%new(ur)
+CALL self%psi%new(ut)
+CALL self%psi%new(uz)
+CALL gs_curvature(self,vr,vt,vz)
+CALL gs_project_b(self,ur,ut,uz)
+ALLOCATE(kappa(vr%n,2),Bfull(vr%n,2))
+vals_tmp=>kappa(:,1)
+CALL vr%get_local(vals_tmp)
+vals_tmp=>kappa(:,2)
+CALL vz%get_local(vals_tmp)
+vals_tmp=>Bfull(:,1)
+CALL ur%get_local(vals_tmp)
+vals_tmp=>Bfull(:,2)
+CALL uz%get_local(vals_tmp)
+!
+CALL bcross_kappa%set(0.d0)
+CALL bcross_kappa%get_local(vals_tmp)
+DO i=1,self%psi%n
+  vals_tmp(i) = (Bfull(i,1)*kappa(i,2)-Bfull(i,2)*kappa(i,1))/(Bfull(i,1)**2+Bfull(i,2)**2)
+END DO
+CALL bcross_kappa%restore_local(vals_tmp)
+CALL vr%delete()
+CALL vt%delete()
+CALL vz%delete()
+CALL ur%delete()
+CALL ut%delete()
+CALL uz%delete()
+DEALLOCATE(vr,vt,vz,ur,ut,uz,kappa,Bfull)
+END SUBROUTINE gs_bcrosskappa
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

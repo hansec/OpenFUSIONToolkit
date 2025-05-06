@@ -962,6 +962,18 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return curr/mu0
+    
+    def get_jtor_plasma(self):
+        r'''! Get plasma toroidal current density for current equilibrium
+ 
+        @result \f$ J_{\phi} \f$ by evalutating RHS source terms
+        '''
+        curr = numpy.zeros((self.np,), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_jtor(self._tMaker_ptr,curr,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        return curr/mu0
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
@@ -1260,6 +1272,16 @@ class TokaMaker():
         '''! Update settings after changes to values in python'''
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_settings(self._tMaker_ptr,ctypes.byref(self.settings),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+    
+    def set_dipole_a(self,a_exp):
+        r'''! Update anisotropy exponent `a` when dipole mode is used
+        
+        @param a_exp New value for `a` exponent
+        '''
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_set_dipole_a(self._tMaker_ptr,a_exp,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     

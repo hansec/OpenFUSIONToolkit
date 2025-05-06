@@ -106,6 +106,10 @@ tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
 tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
+# tokamaker_get_jtor(tMaker_ptr,jtor,error_str)
+tokamaker_get_jtor = ctypes_subroutine(oftpy_lib.tokamaker_get_jtor,
+    [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
+
 # tokamaker_area_int(tMaker_ptr,vec_vals,reg_ind,result,error_str)
 tokamaker_area_int = ctypes_subroutine(oftpy_lib.tokamaker_area_int,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_int, c_double_ptr, c_char_p])
@@ -172,6 +176,10 @@ tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
 # tokamaker_set_settings(tMaker_ptr,settings,error_str)
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
     [c_void_p, ctypes.POINTER(tokamaker_settings_struct), c_char_p])
+
+# tokamaker_set_dipole_a(tMaker_ptr,dipole_a,error_str)
+tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
+    [c_void_p, c_double, c_char_p])
 
 # tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str)
 tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,

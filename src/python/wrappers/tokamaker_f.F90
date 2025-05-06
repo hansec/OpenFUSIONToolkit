@@ -22,11 +22,11 @@ USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
   oft_lag_setup
-USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp
+USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp, oft_blag_project
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, &
-  gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_prof_interp, &
+  gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b
 #ifdef OFT_TOKAMAKER_LEGACY
@@ -36,6 +36,7 @@ USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile
   sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
+USE oft_gs_mercier, ONLY: create_dipole_b0_prof
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -300,6 +301,10 @@ tMaker_obj%gs%full_domain=full_domain
 CALL gs_setup_walls(tMaker_obj%gs)
 CALL tMaker_obj%gs%load_limiters
 CALL tMaker_obj%gs%init()
+IF(tMaker_obj%gs%dipole_mode)THEN
+  tMaker_obj%gs%dipole_a=0.d0
+  CALL create_dipole_b0_prof(tMaker_obj%gs%dipole_B0,64)
+END IF
 ncoils=tMaker_obj%gs%ncoils
 END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
@@ -633,6 +638,43 @@ CALL minv%pre%delete()
 CALL minv%delete()
 DEALLOCATE(u,v,minv)
 END SUBROUTINE tokamaker_get_dels_curr
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_jtor(tMaker_ptr,jtor,error_str) BIND(C,NAME="tokamaker_get_jtor")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: jtor !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CLASS(oft_vector), POINTER :: u,v
+CLASS(oft_solver), POINTER :: minv
+TYPE(gs_j_interp) :: j_interp
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(tMaker_obj%gs%dels_full))CALL build_dels(tMaker_obj%gs%dels_full,tMaker_obj%gs,"none")
+!
+CALL tMaker_obj%gs%psi%new(u)
+CALL tMaker_obj%gs%psi%new(v)
+!
+NULLIFY(minv)
+CALL create_cg_solver(minv)
+minv%A=>tMaker_obj%gs%mop
+minv%its=-2
+CALL create_diag_pre(minv%pre) ! Setup Preconditioner
+CALL j_interp%setup(tMaker_obj%gs)
+CALL oft_blag_project(tMaker_obj%gs%fe_rep,j_interp,v)
+CALL u%set(0.d0)
+CALL minv%apply(u,v)
+CALL c_f_pointer(jtor, vals_tmp, [tMaker_obj%gs%psi%n])
+CALL u%get_local(vals_tmp)
+!
+CALL j_interp%delete()
+CALL u%delete()
+CALL v%delete()
+CALL minv%pre%delete()
+CALL minv%delete()
+DEALLOCATE(u,v,minv)
+END SUBROUTINE tokamaker_get_jtor
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
@@ -1069,6 +1111,17 @@ tMaker_obj%gs%dipole_mode=settings%dipole_mode
 CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(limfile_c,tMaker_obj%gs%limiter_file)
 END SUBROUTINE tokamaker_set_settings
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_dipole_a(tMaker_ptr,dipole_a,error_str) BIND(C,NAME="tokamaker_set_dipole_a")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+REAL(c_double), VALUE, INTENT(in) :: dipole_a !< New value for dipole_a
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+tMaker_obj%gs%dipole_a=dipole_a
+END SUBROUTINE tokamaker_set_dipole_a
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
