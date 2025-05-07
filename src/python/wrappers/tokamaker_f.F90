@@ -820,7 +820,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 REAL(c_double), INTENT(in) :: psi_q(npsi) !< Needs docs
 REAL(c_double), INTENT(out) :: qvals(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: ravgs(npsi,2) !< Needs docs
+REAL(c_double), INTENT(out) :: ravgs(npsi,3) !< Needs docs
 REAL(c_double), INTENT(inout) :: dl !< Needs docs
 REAL(c_double), INTENT(out) :: rbounds(2,2) !< Needs docs
 REAL(c_double), INTENT(out) :: zbounds(2,2) !< Needs docs

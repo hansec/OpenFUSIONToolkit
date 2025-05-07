@@ -4147,7 +4147,7 @@ real(8), intent(out) :: prof(nr) !< q value at each sampling location
 real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
-real(8), optional, intent(out) :: ravgs(nr,2) !< Flux surface averages <R> and <1/R>
+real(8), optional, intent(out) :: ravgs(nr,3) !< Flux surface averages <R>, <1/R>, and dV/dPsi
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
@@ -4294,6 +4294,7 @@ do j=1,nr
   IF(PRESENT(ravgs))THEN
     ravgs(j,1)=active_tracer%v(4)/active_tracer%v(2)
     ravgs(j,2)=active_tracer%v(5)/active_tracer%v(2)
+    ravgs(j,3)=-2.d0*pi*active_tracer%v(2) ! First derivative of FS volume (V')
   END IF
 end do
 CALL active_tracer%delete

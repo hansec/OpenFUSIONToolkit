@@ -440,6 +440,28 @@ class TokaMaker():
         else:
             return None
         
+    def abspsi_to_normalized(self,psi_in):
+        r'''! Convert unnormalized \f$ \psi \f$ values to normalized \f$ \hat{\psi} \f$ values
+        
+        @param psi_in Input \f$ \psi \f$ values
+        @returns Normalized \f$ \hat{\psi} \f$ values
+        '''
+        if self.psi_convention == 0:
+            return (psi_in-self.psi_bounds[1])/(self.psi_bounds[0]-self.psi_bounds[1])
+        else:
+            return (psi_in-self.psi_bounds[0])/(self.psi_bounds[1]-self.psi_bounds[0])
+    
+    def psinorm_to_absolute(self,psi_in):
+        r'''! Convert normalized \f$ \hat{\psi} \f$ values to unnormalized values \f$ \psi \f$
+        
+        @param psi_in Input \f$ \hat{\psi} \f$ values
+        @returns Unnormalized \f$ \psi \f$ values
+        '''
+        if self.psi_convention == 0:
+            return psi_in*(self.psi_bounds[0]-self.psi_bounds[1]) + self.psi_bounds[1]
+        else:
+            return psi_in*(self.psi_bounds[1]-self.psi_bounds[0]) + self.psi_bounds[0]
+        
     def coil_reg_term(self,coffs,target=0.0,weight=1.0):
         r'''! Define coil current regularization term for the form \f$ target = \Sigma_i \alpha_i I_i \f$
         to be used in @ref set_coil_reg.
@@ -1110,7 +1132,7 @@ class TokaMaker():
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
-        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>]\f$, length of last surface,
+        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>,dV/dPsi]\f$, length of last surface,
         [r(R_min),r(R_max)], [r(z_min),r(z_max)]
         '''
         if psi is None:
@@ -1123,7 +1145,7 @@ class TokaMaker():
                 psi_save = numpy.copy(psi)
                 psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
-        ravgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
+        ravgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
         if compute_geo:
             dl = c_double(1.0)
         else:
