@@ -790,7 +790,7 @@ class TokaMaker():
         return eq_stats
 
     def print_info(self,lcfs_pad=0.01,li_normalization='std',geom_type='max',beta_Ip=None):
-        '''! Print information (Ip, q, etc.) about current G-S equilbirium
+        r'''! Print information (Ip, q, etc.) about current G-S equilbirium
         
         @param lcfs_pad Padding at LCFS for boundary calculations
         @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
@@ -814,7 +814,10 @@ class TokaMaker():
         print("  Plasma Volume [m^3]     =   {0:6.3F}".format(eq_stats['vol']))
         if not self.settings.dipole_mode:
             print("  q_0, q_95               =   {0:6.3F} {1:6.3F}".format(eq_stats['q_0'],eq_stats['q_95']))
-        print("  Plasma Pressure [Pa]    =   Axis: {0:11.4E}, Peak: {1:11.4E}".format(eq_stats['P_ax'], eq_stats['P_max']))
+        if self.settings.dipole_mode:
+            print("  Peak Pressure [Pa]      =   {0:11.4E}".format(eq_stats['P_max']))
+        else:
+            print("  Plasma Pressure [Pa]    =   Axis: {0:11.4E}, Peak: {1:11.4E}".format(eq_stats['P_ax'], eq_stats['P_max']))
         print("  Stored Energy [J]       =   {0:11.4E}".format(eq_stats['W_MHD']))
         print("  <Beta_pol> [%]          =   {0:7.4F}".format(eq_stats['beta_pol']))
         if 'beta_tor' in eq_stats:
@@ -1646,6 +1649,17 @@ class TokaMaker():
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_save_ifile(self._tMaker_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+    
+    def save_mug(self,filename):
+        r'''! Save current equilibrium to MUG transfer format
+
+        @param filename Filename to save equilibrium to
+        '''
+        cfilename = self._oft_env.path2c(filename)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_save_mug(self._tMaker_ptr,cfilename,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 

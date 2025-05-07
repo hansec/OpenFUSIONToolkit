@@ -15,7 +15,7 @@ MODULE oft_gs
 USE oft_base
 USE oft_sort, ONLY: sort_matrix, sort_array
 USE oft_io, ONLY: hdf5_field_exist, hdf5_read, hdf5_write, &
-  xdmf_plot_file
+  xdmf_plot_file, hdf5_create_file, hdf5_create_group
 USE oft_quadrature, ONLY: oft_quad_type
 USE oft_gauss_quadrature, ONLY: set_quad_1d
 USE oft_tet_quadrature, ONLY: set_quad_2d
@@ -4883,20 +4883,24 @@ END SUBROUTINE gs_bcrosskappa
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-subroutine gs_save_fgrid(self,filename)
+subroutine gs_save_mug(self,filename,legacy)
 class(gs_eq), target, intent(inout) :: self
 character(LEN=*), optional, intent(in) :: filename
-class(oft_vector), pointer :: a,br,bt,bz
+logical, optional, intent(in) :: legacy
+class(oft_vector), pointer :: v,br,bt,bz,press
 real(r8), pointer :: vals_tmp(:)
 class(oft_solver), pointer :: solver
 type(gs_prof_interp) :: field
 integer(4) :: i,io_unit
 real(8), allocatable :: Fout(:,:)
-logical :: pm_save
+logical :: pm_save,write_legacy
 !---
 NULLIFY(vals_tmp)
-ALLOCATE(Fout(5,self%fe_rep%ne))
-CALL self%psi%new(a)
+write_legacy=.FALSE.
+IF(PRESENT(legacy).AND.PRESENT(filename))write_legacy=legacy
+IF(write_legacy)ALLOCATE(Fout(5,self%fe_rep%ne))
+CALL self%psi%new(v)
+CALL self%psi%new(press)
 CALL self%psi%new(br)
 CALL self%psi%new(bt)
 CALL self%psi%new(bz)
@@ -4908,50 +4912,66 @@ CALL create_diag_pre(solver%pre)
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 !---Project B-field
 CALL gs_project_b(self,br,bt,bz,solver)
-CALL br%get_local(vals_tmp)
-Fout(1,:)=vals_tmp
-CALL bt%get_local(vals_tmp)
-Fout(2,:)=vals_tmp
-CALL bz%get_local(vals_tmp)
-Fout(3,:)=vals_tmp
 !---Project pressure
 CALL field%setup(self)
 field%mode=3
-CALL oft_blag_project(self%fe_rep,field,br)
-CALL a%set(0.d0)
-CALL solver%apply(a,br)
-CALL a%get_local(vals_tmp)
-Fout(4,:)=vals_tmp
-!---Get poloidal flux
-CALL self%psi%get_local(vals_tmp)
-Fout(5,:)=vals_tmp
+CALL oft_blag_project(self%fe_rep,field,v)
+CALL press%set(0.d0)
+CALL solver%apply(press,v)
 !---Output
 IF(PRESENT(filename))THEN
-  OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
-  WRITE(io_unit,*)self%fe_rep%order
-  DO i=1,self%fe_rep%ne
-    WRITE(io_unit,'(5E18.10)')Fout(:,i)
-  END DO
-  CLOSE(io_unit)
+  IF(write_legacy)THEN
+    ALLOCATE(Fout(5,self%fe_rep%ne))
+    CALL br%get_local(vals_tmp)
+    Fout(1,:)=vals_tmp
+    CALL bt%get_local(vals_tmp)
+    Fout(2,:)=vals_tmp
+    CALL bz%get_local(vals_tmp)
+    Fout(3,:)=vals_tmp
+    CALL press%get_local(vals_tmp)
+    Fout(4,:)=vals_tmp
+    CALL self%psi%get_local(vals_tmp)
+    Fout(5,:)=vals_tmp
+    OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
+    WRITE(io_unit,*)self%fe_rep%order
+    DO i=1,self%fe_rep%ne
+      WRITE(io_unit,'(5E18.10)')Fout(:,i)
+    END DO
+    CLOSE(io_unit)
+    DEALLOCATE(Fout)
+  ELSE
+    CALL hdf5_create_file(filename)
+    CALL hdf5_create_group(filename,'mesh')
+    CALL hdf5_write(self%fe_rep%mesh%r,filename,'mesh/R')
+    CALL hdf5_write(self%fe_rep%mesh%lc,filename,'mesh/LC')
+    CALL hdf5_create_group(filename,'tokamaker')
+    CALL hdf5_write(self%fe_rep%order,filename,'tokamaker/FE_ORDER')
+    CALL br%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/BR')
+    CALL bt%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/BT')
+    CALL bz%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/BZ')
+    CALL press%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/P')
+    CALL self%psi%get_local(vals_tmp)
+    CALL hdf5_write(vals_tmp,filename,'tokamaker/PSI')
+  END IF
 END IF
-!---Save fields to plot
-CALL self%fe_rep%mesh%save_vertex_scalar(Fout(1,:),self%xdmf,'Br')
-CALL self%fe_rep%mesh%save_vertex_scalar(Fout(2,:),self%xdmf,'Bt')
-CALL self%fe_rep%mesh%save_vertex_scalar(Fout(3,:),self%xdmf,'Bz')
-CALL self%fe_rep%mesh%save_vertex_scalar(Fout(4,:),self%xdmf,'P')
 !---Clean up
 oft_env%pm=pm_save
-CALL a%delete
+CALL v%delete
+CALL press%delete
 CALL br%delete
 CALL bt%delete
 CALL bz%delete
-DEALLOCATE(a,br,bt,bz,Fout,vals_tmp)
+DEALLOCATE(v,press,br,bt,bz,vals_tmp)
 CALL field%delete()
 CALL solver%pre%delete
 DEALLOCATE(solver%pre)
 CALL solver%delete
 DEALLOCATE(solver)
-end subroutine gs_save_fgrid
+end subroutine gs_save_mug
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

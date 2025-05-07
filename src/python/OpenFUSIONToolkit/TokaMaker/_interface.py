@@ -222,6 +222,10 @@ tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk,
 tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
     [c_void_p, c_char_p, c_int, c_int, c_double, c_double, c_bool, c_bool, c_char_p])
 
+# tokamaker_save_mug(tMaker_ptr,filename,error_str)
+tokamaker_save_mug = ctypes_subroutine(oftpy_lib.tokamaker_save_mug,
+    [c_void_p, c_char_p, c_char_p])
+
 # tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,error_str)
 tokamaker_set_coil_current_dist = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_current_dist,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p])

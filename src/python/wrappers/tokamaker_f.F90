@@ -28,7 +28,7 @@ USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
-  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b
+  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug
 #ifdef OFT_TOKAMAKER_LEGACY
 USE oft_gs, ONLY: gs_load_regions
 #endif
@@ -1345,6 +1345,21 @@ CALL gs_save_ifile(tMaker_obj%gs,filename_tmp,npsi,ntheta,psi_pad,lcfs_press=lcf
   pack_lcfs=LOGICAL(pack_lcfs),single_prec=LOGICAL(single_prec),error_str=error_flag)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_ifile
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_save_mug(tMaker_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_mug")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
+CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+CALL copy_string_rev(filename,filename_tmp)
+CALL gs_save_mug(tMaker_obj%gs,filename_tmp)
+CALL copy_string(TRIM(error_flag),error_str)
+END SUBROUTINE tokamaker_save_mug
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !------------------------------------------------------------------------------

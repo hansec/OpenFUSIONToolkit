@@ -1,0 +1,25 @@
+undo off
+reset
+#
+create sphere radius 1.0 zpositive xpositive
+Volume 1 scale X 1.0 Y 0.5 Z 1.0
+webcut body 1  with plane xplane offset 0 rotate 45 about y center 0 0 0
+delete volume 2
+create torus major radius 0.3 minor radius 0.075 
+rotate Volume 3  angle 90  about X include_merged
+subtract volume 3  from volume 1
+#
+nodeset 1 add surface 10
+#
+volume all scheme Tetmesh
+set tetmesher interior points on
+set tetmesher optimize level 3  overconstrained  off sliver  off
+set tetmesher boundary recovery  off
+volume all  tetmesh growth_factor 1.0
+#
+volume all size .05
+mesh volume all
+#
+block 1 volume all
+block 1 element type tetra10
+export Genesis "MUG_dipole.g" dimension 3 overwrite block all
