@@ -2349,8 +2349,20 @@ DO i=1,self%maxits
     param_rhs(2)=self%estore_target
     param_mat(2,2)=estored*3.d0/2.d0
   ELSE IF(self%pax_target>0.d0)THEN
+    IF(self%dipole_mode)THEN
+      param_mat(2,2)=-1.d99
+      param_rhs(2)=self%plasma_bounds(2)
+      DO j=1,101
+        IF(param_mat(2,2)<ABS(self%P%f((self%plasma_bounds(1)-self%plasma_bounds(2))*REAL(j-1,8)/1.d2+self%plasma_bounds(2))))THEN
+          param_mat(2,2)=ABS(self%P%f((self%plasma_bounds(1)-self%plasma_bounds(2))*REAL(j-1,8)/1.d2+self%plasma_bounds(2)))
+          param_rhs(2)=(self%plasma_bounds(1)-self%plasma_bounds(2))*REAL(j-1,8)/1.d2+self%plasma_bounds(2)
+        END IF
+      END DO
+      param_mat(2,2)=self%P%f(param_rhs(2))
+    ELSE
+      param_mat(2,2)=self%P%f(self%plasma_bounds(2))
+    END IF
     param_rhs(2)=self%pax_target
-    param_mat(2,2)=self%P%f(self%plasma_bounds(2))
   ELSE IF(self%Ip_ratio_target>-1.d98)THEN
     param_rhs(2)=0.d0
     param_mat(2,:)=[itor_alam,-itor_press*self%Ip_ratio_target,0.d0]

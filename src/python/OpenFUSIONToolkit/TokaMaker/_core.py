@@ -699,7 +699,9 @@ class TokaMaker():
         Ip,centroid,vol,pvol,dflux,tflux,Bp_vol = self.get_globals()
         if beta_Ip is not None:
             Ip = beta_Ip
-        _,_,_,p,_ = self.get_profiles(numpy.r_[0.001])
+        p_psi = numpy.linspace(0.0,1.0,100)
+        p_psi[0] = 0.001
+        _,_,_,p,_ = self.get_profiles(p_psi)
         if self.diverted:
             x_points, _ = self.get_xpoints()
             x_active = x_points[-1,:]
@@ -753,6 +755,7 @@ class TokaMaker():
             'q_0': qvals[2],
             'q_95': qvals[1],
             'P_ax': p[0],
+            'P_max': p.max(),
             'W_MHD': pvol*1.5,
             'beta_pol': 100.0*(2.0*pvol*mu0/vol)/numpy.power(Ip*mu0/dl,2),
             'dflux': dflux,
@@ -780,13 +783,16 @@ class TokaMaker():
             print("  Topology                =   Limited")
         print("  Toroidal Current [A]    =   {0:11.4E}".format(eq_stats['Ip']))
         print("  Current Centroid [m]    =   {0:6.3F} {1:6.3F}".format(*eq_stats['Ip_centroid']))
-        print("  Magnetic Axis [m]       =   {0:6.3F} {1:6.3F}".format(*self.o_point))
+        if self.settings.dipole_mode:
+            print("  Inner limiter [m]       =   {0:6.3F} {1:6.3F}".format(*self.o_point))
+        else:
+            print("  Magnetic Axis [m]       =   {0:6.3F} {1:6.3F}".format(*self.o_point))
         print("  Elongation              =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['kappa'],eq_stats['kappaU'],eq_stats['kappaL']))
         print("  Triangularity           =   {0:6.3F} (U: {1:6.3F}, L: {2:6.3F})".format(eq_stats['delta'],eq_stats['deltaU'],eq_stats['deltaL']))
         print("  Plasma Volume [m^3]     =   {0:6.3F}".format(eq_stats['vol']))
         if not self.settings.dipole_mode:
             print("  q_0, q_95               =   {0:6.3F} {1:6.3F}".format(eq_stats['q_0'],eq_stats['q_95']))
-        print("  Peak Pressure [Pa]      =   {0:11.4E}".format(eq_stats['P_ax']))
+        print("  Plasma Pressure [Pa]    =   Axis: {0:11.4E}, Peak: {1:11.4E}".format(eq_stats['P_ax'], eq_stats['P_max']))
         print("  Stored Energy [J]       =   {0:11.4E}".format(eq_stats['W_MHD']))
         print("  <Beta_pol> [%]          =   {0:7.4F}".format(eq_stats['beta_pol']))
         if 'beta_tor' in eq_stats:
