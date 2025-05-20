@@ -114,6 +114,10 @@ tokamaker_get_jtor = ctypes_subroutine(oftpy_lib.tokamaker_get_jtor,
 tokamaker_area_int = ctypes_subroutine(oftpy_lib.tokamaker_area_int,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_int, c_double_ptr, c_char_p])
 
+# tokamaker_flux_int(tMaker_ptr,psi_vals,field_vals,nvals,result,error_str)
+tokamaker_flux_int = ctypes_subroutine(oftpy_lib.tokamaker_flux_int,
+    [c_void_p, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_int, c_double_ptr, c_char_p])
+
 # tokamaker_get_coil_currents(tMaker_ptr,currents,reg_currents,error_str)
 tokamaker_get_coil_currents = ctypes_subroutine(oftpy_lib.tokamaker_get_coil_currents,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p])
@@ -185,9 +189,9 @@ tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
 tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double, c_char_p])
 
-# tokamaker_set_isoflux(tMaker_ptr,targets,weights,ntargets,grad_wt_lim,error_str)
+# tokamaker_set_isoflux(tMaker_ptr,targets,ref_points,weights,ntargets,grad_wt_lim,error_str)
 tokamaker_set_isoflux = ctypes_subroutine(oftpy_lib.tokamaker_set_isoflux,
-    [c_void_p, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), c_int, c_double, c_char_p])
+    [c_void_p, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), c_int, c_double, c_char_p])
 
 # tokamaker_set_flux(tMaker_ptr,locations,targets,weights,ntargets,grad_wt_lim,error_str)
 tokamaker_set_flux = ctypes_subroutine(oftpy_lib.tokamaker_set_flux,
