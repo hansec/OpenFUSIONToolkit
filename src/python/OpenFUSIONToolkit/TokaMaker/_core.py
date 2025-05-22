@@ -1018,7 +1018,7 @@ class TokaMaker():
     def get_jtor_plasma(self):
         r'''! Get plasma toroidal current density for current equilibrium
  
-        @result \f$ J_{\phi} \f$ by evalutating RHS source terms
+        @result \f$ J_{\phi} \f$ by evalutating RHS source terms (only valid in plasma region)
         '''
         curr = numpy.zeros((self.np,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
@@ -1026,6 +1026,21 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return curr/mu0
+
+    def get_local_shear(self):
+        r'''! Compute local magnetic shear for current equilibrium 
+
+        \f$ s_{local} = 2 \pi h \cdot \nabla \times h \f$
+        \f$ h = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|B|} \f$
+ 
+        @result \f$ s_{local} \f$ on grid points (only valid in plasma region)
+        '''
+        shear = numpy.zeros((self.np,), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_local_shear(self._tMaker_ptr,shear,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        return shear
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points

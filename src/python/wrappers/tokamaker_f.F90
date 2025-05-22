@@ -14,7 +14,7 @@ USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE multigrid, ONLY: multigrid_mesh, multigrid_reset
 !
-USE oft_la_base, ONLY: oft_vector, oft_matrix
+USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_vector_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !
@@ -22,7 +22,8 @@ USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
   oft_lag_setup
-USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp, oft_blag_project
+USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp, oft_blag_project, oft_lag_bvcinterp, &
+  oft_blag_vproject
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, &
@@ -675,6 +676,113 @@ CALL minv%pre%delete()
 CALL minv%delete()
 DEALLOCATE(u,v,minv)
 END SUBROUTINE tokamaker_get_jtor
+!---------------------------------------------------------------------------------
+!> Compute local magnetic shear for current equilibrium 
+!!
+!! \f$ s_{local} = 2 \pi h \cdot \nabla \times h \f$
+!! \f$ h = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|B|} \f$
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_local_shear(tMaker_ptr,shear,error_str) BIND(C,NAME="tokamaker_get_local_shear")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: shear !< Local shear \f$ s \f$
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+INTEGER(4) :: i
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: vec1_vals,vec2_vals
+LOGICAL :: pm_save
+CLASS(oft_vector), POINTER :: u,v,br,bt,bz
+TYPE(oft_vector_ptr) :: vec1(3),vec2(3)
+CLASS(oft_solver), POINTER :: minv
+type(gs_b_interp) :: Bfield
+TYPE(oft_lag_bginterp) :: psi_grad
+TYPE(oft_lag_bvcinterp) :: cyl_curl
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(tMaker_obj%gs%dels_full))CALL build_dels(tMaker_obj%gs%dels_full,tMaker_obj%gs,"none")
+!
+CALL tMaker_obj%gs%psi%new(u)
+CALL tMaker_obj%gs%psi%new(v)
+DO i=1,3
+  CALL tMaker_obj%gs%psi%new(vec1(i)%f)
+  CALL tMaker_obj%gs%psi%new(vec2(i)%f)
+END DO
+ALLOCATE(vec1_vals(u%n,3),vec2_vals(u%n,3))
+!
+NULLIFY(minv)
+CALL create_cg_solver(minv)
+minv%A=>tMaker_obj%gs%mop
+minv%its=-2
+CALL create_diag_pre(minv%pre) ! Setup Preconditioner
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+!---Get magnetic field
+CALL Bfield%setup(tMaker_obj%gs)
+CALL oft_blag_vproject(tMaker_obj%gs%fe_rep,Bfield,vec1(1)%f,vec1(2)%f,vec1(3)%f)
+CALL Bfield%delete
+DO i=1,3
+  CALL v%add(0.d0,1.d0,vec1(i)%f)
+  CALL vec1(i)%f%set(0.d0)
+  CALL minv%apply(vec1(i)%f,v)
+  vals_tmp=>vec1_vals(:,i)
+  CALL vec1(i)%f%get_local(vals_tmp)
+END DO
+DO i=1,u%n
+  vec1_vals(i,:)=vec1_vals(i,:)/magnitude(vec1_vals(i,:)) ! B / |B|
+END DO
+!---Get poloidal flux gradient
+psi_grad%u=>tMaker_obj%gs%psi
+CALL psi_grad%setup(tMaker_obj%gs%fe_rep)
+CALL oft_blag_vproject(tMaker_obj%gs%fe_rep,psi_grad,vec2(1)%f,vec2(2)%f,vec2(3)%f)
+CALL psi_grad%delete
+DO i=1,3
+  CALL v%add(0.d0,1.d0,vec2(i)%f)
+  CALL vec2(i)%f%set(0.d0)
+  CALL minv%apply(vec2(i)%f,v)
+  vals_tmp=>vec2_vals(:,i)
+  CALL vec2(i)%f%get_local(vals_tmp)
+END DO
+DO i=1,u%n
+  vec2_vals(i,:)=vec2_vals(i,:)/magnitude(vec2_vals(i,:))  ! grad(psi) / |grad(psi)|
+  vec1_vals(i,:)=cross_product(vec2_vals(i,:),vec1_vals(i,:)) ! h = grad(psi) / |grad(psi)| X B / |B|
+END DO
+DO i=1,3
+  vals_tmp=>vec1_vals(:,i)
+  CALL vec1(i)%f%restore_local(vals_tmp)
+END DO
+!---Get curl of "h"
+cyl_curl%ux=>vec1(1)%f
+cyl_curl%uy=>vec1(2)%f
+cyl_curl%uz=>vec1(3)%f
+cyl_curl%cylindrical=.TRUE.
+CALL cyl_curl%setup(tMaker_obj%gs%fe_rep)
+CALL oft_blag_vproject(tMaker_obj%gs%fe_rep,cyl_curl,vec2(1)%f,vec2(2)%f,vec2(3)%f)
+CALL cyl_curl%delete
+DO i=1,3
+  CALL v%add(0.d0,1.d0,vec2(i)%f)
+  CALL vec2(i)%f%set(0.d0)
+  CALL minv%apply(vec2(i)%f,v)
+  vals_tmp=>vec2_vals(:,i)
+  CALL vec2(i)%f%get_local(vals_tmp)
+END DO
+!---Compute local curvature
+CALL c_f_pointer(shear, vals_tmp, [tMaker_obj%gs%psi%n])
+DO i=1,u%n
+  vals_tmp(i)=DOT_PRODUCT(vec1_vals(i,:),vec2_vals(i,:)) ! dot(h,curl(h))
+END DO
+vals_tmp=vals_tmp*2.d0*pi
+!
+oft_env%pm=pm_save
+CALL u%delete()
+CALL v%delete()
+DO i=1,3
+  CALL vec1(i)%f%delete
+  CALL vec2(i)%f%delete
+  DEALLOCATE(vec1(i)%f,vec2(i)%f)
+END DO
+DEALLOCATE(vec1_vals,vec2_vals)
+CALL minv%pre%delete()
+CALL minv%delete()
+DEALLOCATE(u,v,minv)
+END SUBROUTINE tokamaker_get_local_shear
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------

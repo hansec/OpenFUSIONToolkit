@@ -4600,10 +4600,12 @@ subroutine gs_j_interp_setup(self,gs)
 class(gs_j_interp), intent(inout) :: self
 class(gs_eq), target, intent(inout) :: gs
 CALL gs_prof_interp_setup(self,gs)
-CALL self%gs%dipole_B0%update(self%gs)
-CALL self%gs%psi%new(self%bcross_kappa_fun%u)
-CALL gs_bcrosskappa(self%gs,self%bcross_kappa_fun%u)
-CALL self%bcross_kappa_fun%setup(self%gs%fe_rep)
+IF(self%gs%dipole_mode)THEN
+  CALL self%gs%dipole_B0%update(self%gs)
+  CALL self%gs%psi%new(self%bcross_kappa_fun%u)
+  CALL gs_bcrosskappa(self%gs,self%bcross_kappa_fun%u)
+  CALL self%bcross_kappa_fun%setup(self%gs%fe_rep)
+END IF
 end subroutine gs_j_interp_setup
 !------------------------------------------------------------------------------
 !> Destroy temporary internal storage and nullify references
@@ -4611,9 +4613,11 @@ end subroutine gs_j_interp_setup
 subroutine gs_j_interp_delete(self)
 class(gs_j_interp), intent(inout) :: self
 CALL gs_prof_interp_delete(self)
-CALL self%bcross_kappa_fun%u%delete()
-DEALLOCATE(self%bcross_kappa_fun%u)
-CALL self%bcross_kappa_fun%delete
+IF(self%gs%dipole_mode)THEN
+  CALL self%bcross_kappa_fun%u%delete()
+  DEALLOCATE(self%bcross_kappa_fun%u)
+  CALL self%bcross_kappa_fun%delete
+END IF
 end subroutine gs_j_interp_delete
 !------------------------------------------------------------------------------
 !> Reconstruct magnetic field from a Grad-Shafranov solution
