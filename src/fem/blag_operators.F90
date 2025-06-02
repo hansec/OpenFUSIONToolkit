@@ -349,6 +349,7 @@ IF(self%cylindrical)THEN
   do jc=1,self%lag_rep%nce
     call oft_blag_eval(self%lag_rep,cell,jc,f,fop)
     call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
+    rop(3) = rop(2); rop(2) = 0.d0 ! Shuffle 2D gradient to 3D cylindrical
     val(1) = val(1) + (self%vals(3,j(jc))*rop(2)/pt(1) - self%vals(2,j(jc))*rop(3))
     val(2) = val(2) + (self%vals(1,j(jc))*rop(3) - self%vals(3,j(jc))*rop(1))
     val(3) = val(3) + (pt(1)*self%vals(2,j(jc))*rop(1) + self%vals(2,j(jc))*fop - self%vals(1,j(jc))*rop(2))/pt(1)

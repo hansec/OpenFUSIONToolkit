@@ -679,12 +679,12 @@ END SUBROUTINE tokamaker_get_jtor
 !---------------------------------------------------------------------------------
 !> Compute local magnetic shear for current equilibrium 
 !!
-!! \f$ s_{local} = 2 \pi h \cdot \nabla \times h \f$
-!! \f$ h = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|B|} \f$
+!! \f$ S = -s \cdot \nabla \times s \f$
+!! \f$ s = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|\nabla \psi|} \f$
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_local_shear(tMaker_ptr,shear,error_str) BIND(C,NAME="tokamaker_get_local_shear")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: shear !< Local shear \f$ s \f$
+TYPE(c_ptr), VALUE, INTENT(in) :: shear !< Local shear \f$ S \f$
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
@@ -725,9 +725,6 @@ DO i=1,3
   vals_tmp=>vec1_vals(:,i)
   CALL vec1(i)%f%get_local(vals_tmp)
 END DO
-DO i=1,u%n
-  vec1_vals(i,:)=vec1_vals(i,:)/magnitude(vec1_vals(i,:)) ! B / |B|
-END DO
 !---Get poloidal flux gradient
 psi_grad%u=>tMaker_obj%gs%psi
 CALL psi_grad%setup(tMaker_obj%gs%fe_rep)
@@ -740,15 +737,19 @@ DO i=1,3
   vals_tmp=>vec2_vals(:,i)
   CALL vec2(i)%f%get_local(vals_tmp)
 END DO
+!---Shuffle 2D gradient to 3D cylindrical
+vec2_vals(:,3)=vec2_vals(:,2)
+vec2_vals(:,2)=0.d0
 DO i=1,u%n
-  vec2_vals(i,:)=vec2_vals(i,:)/magnitude(vec2_vals(i,:))  ! grad(psi) / |grad(psi)|
-  vec1_vals(i,:)=cross_product(vec2_vals(i,:),vec1_vals(i,:)) ! h = grad(psi) / |grad(psi)| X B / |B|
+  vec1_vals(i,:)=vec1_vals(i,:)/magnitude(vec2_vals(i,:))     ! B / |grad(psi)|
+  vec2_vals(i,:)=vec2_vals(i,:)/magnitude(vec2_vals(i,:))     ! grad(psi) / |grad(psi)|
+  vec1_vals(i,:)=cross_product(vec2_vals(i,:),vec1_vals(i,:)) ! s = grad(psi) X B / |grad(psi)|^2
 END DO
 DO i=1,3
   vals_tmp=>vec1_vals(:,i)
   CALL vec1(i)%f%restore_local(vals_tmp)
 END DO
-!---Get curl of "h"
+!---Get curl of "s"
 cyl_curl%ux=>vec1(1)%f
 cyl_curl%uy=>vec1(2)%f
 cyl_curl%uz=>vec1(3)%f
@@ -766,9 +767,8 @@ END DO
 !---Compute local curvature
 CALL c_f_pointer(shear, vals_tmp, [tMaker_obj%gs%psi%n])
 DO i=1,u%n
-  vals_tmp(i)=DOT_PRODUCT(vec1_vals(i,:),vec2_vals(i,:)) ! dot(h,curl(h))
+  vals_tmp(i)=-DOT_PRODUCT(vec1_vals(i,:),vec2_vals(i,:)) ! -dot(s,curl(s))
 END DO
-vals_tmp=vals_tmp*2.d0*pi
 !
 oft_env%pm=pm_save
 CALL u%delete()

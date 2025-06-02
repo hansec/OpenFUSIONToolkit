@@ -1028,12 +1028,14 @@ class TokaMaker():
         return curr/mu0
 
     def get_local_shear(self):
-        r'''! Compute local magnetic shear for current equilibrium 
+        r'''! Compute local magnetic shear for current equilibrium
 
-        \f$ s_{local} = 2 \pi h \cdot \nabla \times h \f$
-        \f$ h = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|B|} \f$
+        \f$ S = - s \cdot \nabla \times s \f$
+        \f$ s = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|\nabla \psi|} \f$
+
+        [R. Dewar et al. (1983)]
  
-        @result \f$ s_{local} \f$ on grid points (only valid in plasma region)
+        @result \f$ S \f$ on grid points (only valid in plasma region)
         '''
         shear = numpy.zeros((self.np,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
