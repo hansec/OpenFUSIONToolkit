@@ -1,0 +1,3 @@
+[submodule "jamfit"]
+	path = jamfit
+	url = https://gitlab.com/jamxia/jamfit.git
