@@ -625,7 +625,7 @@ END IF
 tmp=((rbounds(1,2)+rbounds(1,1))/2.d0-(zbounds(1,2)+zbounds(1,1))/2.d0)*2.d0/(rbounds(1,2)-rbounds(1,1))
 WRITE(*,'(2A,F8.3)')oft_indent,'Triangularity           =',tmp
 WRITE(*,'(2A,F8.3)')oft_indent,'Plasma Volume [m^3]     =',vol*2.d0*pi
-WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
+IF(.NOT.self%dipole_mode)WRITE(*,'(2A,3F8.3)') oft_indent,'q_0, q_95, q_a          =',prof(1),q95,prof(npsi)
 WRITE(*,'(2A,ES11.3)')oft_indent,'Peak Pressure [Pa]      = ',pmax/mu0
 WRITE(*,'(2A,ES11.3)')oft_indent,'Stored Energy [J]       = ',pvol*2.d0*pi/mu0*3.d0/2.d0
 WRITE(*,'(2A,F8.3)')  oft_indent,'<Beta_pol> [%]          = ',1.d2*beta(1)
@@ -865,11 +865,19 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
-  IF( psi_surf(1) < x1)EXIT
+  IF(gseq%dipole_mode)THEN
+    IF(psi_surf(1)>x1)EXIT
+  ELSE
+    IF(psi_surf(1)<x1)EXIT
+  END IF
   rmax=pt(1)
 END DO
 pt_last=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
@@ -1045,7 +1053,7 @@ end subroutine gs_save_ifile
 !------------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
-subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,error_str)
+subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,cocos,error_str)
 class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
@@ -1058,6 +1066,7 @@ REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: rcentr_in !< Value to use for RCENTR (otherwise geometric center is used)
 LOGICAL, OPTIONAL, INTENT(in) :: trunc_eq !< Truncate equilibrium at psi_pad
 REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
+INTEGER, OPTIONAL, INTENT(in) :: cocos
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 !
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,xr,psi_trace
@@ -1104,11 +1113,19 @@ CALL psi_int%setup(gseq%fe_rep)
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  IF(gseq%dipole_mode)THEN
+    pt=[raxis*j/REAL(100,8),0.d0,0.d0]
+  ELSE
+    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  END IF
   CALL bmesh_findcell(gseq%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF( psi_tmp(1) < x1)EXIT
+  IF(gseq%dipole_mode)THEN
+    IF(psi_tmp(1)>x1)EXIT
+  ELSE
+    IF(psi_tmp(1)<x1)EXIT
+  END IF
   rmax=pt(1)
 END DO
 pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
@@ -1316,6 +1333,22 @@ ELSE
     READ(io_unit,*)rlim(i),zlim(i)
   END DO
   CLOSE(io_unit)
+END IF
+! COCOS transform
+IF(PRESENT(cocos))THEN
+  IF(cocos == 2)THEN
+    WRITE(*,*) 'Using COCOS=2...'
+    ffprim = -ffprim
+    pprime = -pprime
+    psirz = -psirz
+    ! fpol = -fpol
+    ! bcentr = -bcentr
+    ! itor = -itor
+    x1 = -x1
+    x2 = -x2
+  ELSE IF(cocos /= 7)THEN
+    CALL oft_abort('Invalid COCOS version.','gs_save_eqdsk',__FILE__)
+  END IF
 END IF
 ! Write out gEQDSK file
 2000 format(a48,3i4)

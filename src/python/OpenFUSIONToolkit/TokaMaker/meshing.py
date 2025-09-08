@@ -9,10 +9,12 @@
 @date May 2023
 @ingroup doxy_oft_python
 '''
+import sys
 import json
 import math
 import numpy
 from .._interface import *
+from ..util import oft_warning, run_shell_command
 
 ## @cond
 class triangle_struct(c_struct):
@@ -80,6 +82,131 @@ def run_triangle(alpha):
     return {'vertices': vertices, 'triangles': triangles, 'triangle_attributes': triangle_attributes}
 
 
+def run_cubit(cubit_path):
+    '''! Run Cubit to generate 2D mesh
+
+    @param region_list List of @ref oftpy.Region objects that define mesh
+    @result `r[np,2]` Mesh vertices, `lc[nc,3]` Cell list, `reg[nc]` Region IDs
+    '''
+    jou_template = """#!python
+cubit.cmd('reset')
+cubit.cmd('undo off')
+import json
+import numpy as np
+
+with open('tMaker_cubit.json','r') as fid:
+    mesh_dict = json.load(fid)
+mesh_geom = mesh_dict['regions']
+
+pts_offset = 0
+reg_pts = []
+for i,  region in enumerate(mesh_geom):
+    pts_tmp = 0
+    for j,  pt in enumerate(region['points']):
+        cubit.cmd("create vertex location {0} {1} 0.0".format(pt[0],pt[1]))
+        pts_tmp += 1
+    reg_segments = []
+    for j,  segment in enumerate(region['segments']):
+        reg_segments.append([pts_offset+1+vertex for vertex in segment])
+    print(reg_segments)
+    reg_pts.append(reg_segments)
+    pts_offset += pts_tmp
+
+ed_offset = 0
+reg_ed = []
+for i,  pts in enumerate(reg_pts):
+    for j, segment in enumerate(pts):
+        if len(segment) > 2:
+            cubit.cmd("create Curve spline vertex {0} delete".format(' '.join([str(vertex) for vertex in segment])))
+        else:
+            cubit.cmd("create Curve polyline vertex {0} {1}".format(*segment))
+    reg_ed.append([ed_offset+1,ed_offset+len(pts)])
+    ed_offset += len(pts)
+
+surf_pts = []
+for i,  eds in enumerate(reg_ed):
+    cubit.cmd("create surface curve {0} to {1}".format(*eds))
+    surf_last = cubit.surface(cubit.get_last_id("surface"))
+    surf_pts.append(np.asarray(surf_last.position_from_u_v(0.0,0.0)))
+
+cubit.cmd('imprint all')
+cubit.cmd('merge all')
+
+cubit.cmd("set trimesher coarse off")
+cubit.cmd("set trimesher geometry sizing off")
+cubit.cmd('set trimesher surface gradation {0}'.format(mesh_dict['tri_gradation']))
+cubit.cmd("surface all scheme trimesh")
+
+
+cubit.cmd("set duplicate block elements off")
+nblocks = 0
+matches = [-1 for _ in cubit.get_entities( "surface" )]
+for sid in cubit.get_entities( "surface" ):
+    surf_test = cubit.surface(sid)
+    for i, surf_pt in enumerate(surf_pts):
+        proj_pt = np.asarray(surf_test.closest_point_trimmed(surf_pt))
+        if np.linalg.norm(proj_pt-surf_pt) < 1.E-10:
+            if matches[i] != -1:
+                raise ValueError('Multiple matches')
+            matches[i] = sid
+            cubit.cmd("surface {0} size {1}".format(sid,mesh_geom[i]['dx_vol']*4.0))
+            cubit.cmd("block {0} add surface {1}".format(mesh_geom[i]['id'],sid))
+            break
+    nblocks += 1
+
+cubit.cmd("mesh surface all")
+
+cubit.cmd("set large exodus file on")
+cubit.cmd('export Genesis "tMaker_cubit.g" overwrite block all')
+"""
+    # Generate mesh using Cubit with standardized script
+    print('Generating mesh with Cubit:')
+    oft_warning("CUBIT python wrapper is experimental, please use with care and report bugs.")
+    with open('tMaker_cubit.jou', 'w+') as jou_file:
+        jou_file.write(jou_template)
+    try:
+        os.remove('tMaker_cubit.g')
+    except FileNotFoundError:
+        pass
+    result, _ = run_shell_command(cubit_path + ' -nographics -nojournal -input tMaker_cubit.jou', timeout=60)
+    result_lines = result.splitlines()
+    if not os.path.isfile('tMaker_cubit.g'):
+        nlines = min(10,len(result_lines))
+        print('\n'.join(result_lines[-nlines:]))
+        raise RuntimeError('Cubit grid generation failed')
+    info = False
+    for line in result_lines:
+        if line.lower().find('executive exodus summary') >= 0:
+            info = True
+        if info:
+            print('    '+line)
+            if line.strip() == '':
+                info = False
+    # Convert to native mesh format
+    print('Converting mesh to native format:')
+    try:
+        os.remove('tMaker_cubit.h5')
+    except FileNotFoundError:
+        pass
+    convert_cubit_path = os.path.join(root_path,'..','convert_cubit.py')
+    result, _ = run_shell_command(' '.join([sys.executable, convert_cubit_path, '--in_file=tMaker_cubit.g']), timeout=10)
+    result_lines = result.splitlines()
+    if not os.path.isfile('tMaker_cubit.h5'):
+        nlines = min(10,len(result_lines))
+        print('\n'.join(result_lines[-nlines:]))
+        raise RuntimeError('Failed to convert Cubit file to native format')
+    for line in result_lines:
+        if line.strip() != '':
+            print('    '+line)
+    # Read mesh from file
+    import h5py
+    with h5py.File('tMaker_cubit.h5','r') as h5_file:
+        r = numpy.asarray(h5_file['mesh']['R'])
+        lc = numpy.asarray(h5_file['mesh']['LC'])-1
+        reg = numpy.asarray(h5_file['mesh']['REG'])
+    return r, lc, reg
+
+
 class gs_Domain:
     '''! Grad-Sharvanov domain definitions for TokaMaker with Triangle library meshing'''
     def __init__(self,rextent=None,zextents=[None,None],rpad=1.2,zpad=[1.2,1.2],json_filename=None):
@@ -133,7 +260,7 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
     
-    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None,allow_xpoints=False):
+    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None,allow_xpoints=False,inner_limiter=False):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -142,6 +269,7 @@ class gs_Domain:
         @param eta Resistivity for "conductor" regions (raises error if region is other type)
         @param nTurns Number of turns for "coil" regions (raises error if region is other type)
         @param allow_xpoints Allow X-points in this region (for non-plasma regions only)
+        @param inner_limiter This region forms the inner limiter (valid for non-plasma regions in Dipole mode only)
         '''
         if (dx is None) or (dx < 0.0):
             raise ValueError('"dx" must have a non-negative value')
@@ -172,6 +300,11 @@ class gs_Domain:
             'type': reg_type,
             'allow_xpoints': allow_xpoints
         }
+        if inner_limiter:
+            if reg_type == 'plasma':
+                raise ValueError('The plasma region cannot be used as the inner limiter')
+            else:
+                self.region_info[name]['inner_limiter'] = inner_limiter
         if eta is not None:
             if reg_type != 'conductor':
                 raise ValueError('Resistivity specification only valid for "conductor" regions')
@@ -295,7 +428,7 @@ class gs_Domain:
                 if parent_dx is None:
                     raise ValueError('Resolution for region "{0}" not defined'.format(parent_name))
                 else:
-                    dx = min(dx,parent_dx)
+                    dx_curve = min(dx,parent_dx)
         # Add region
         maxes = contour.max(axis=0)
         self.rmax = max(self.rmax,maxes[0])
@@ -380,6 +513,8 @@ class gs_Domain:
                     'noncontinuous': self.region_info[key].get('noncontinuous',False),
                     'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
+                if 'inner_limiter' in self.region_info[key]:
+                    cond_list[key]['inner_limiter'] = self.region_info[key]['inner_limiter']
                 cond_id += 1
             elif self.region_info[key]['type'] in ('vacuum','boundary'):
                 cond_list[key] = {
@@ -387,51 +522,52 @@ class gs_Domain:
                     'vac_id': vac_id,
                     'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
+                if 'inner_limiter' in self.region_info[key]:
+                    cond_list[key]['inner_limiter'] = self.region_info[key]['inner_limiter']
                 vac_id += 1
         return cond_list
     
-    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False):
+    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None):
         '''! Build mesh for specified domains
 
         @result Meshed representation (pts[np,2], tris[nc,3], regions[nc])
         '''
         # Check for single plasma region
-        if self.reg_type_counts['plasma'] > 1:
-            raise ValueError('More than one plasma region specified')
-        elif self.reg_type_counts['plasma'] == 0:
+        if self.reg_type_counts['plasma'] == 0:
             raise ValueError('No plasma region specified')
         else:
             # Make sure a boundary exists if we have regions other than plasma
             if ((self.reg_type_counts['vacuum'] > 0) or (self.reg_type_counts['coil'] > 0) or (self.reg_type_counts['conductor'] > 0)) and require_boundary:
                 if self.boundary_reg is None:
                     raise ValueError('No boundary region specified')
-                # Check or set extents
-                if self.rextent is None:
-                    self.rextent = self.rpad*self.rmax
-                else:
-                    if self.rmax > self.rextent:
-                        raise ValueError('User specified "rextent" does not enclose all regions')
-                if self.zextents[0] is None:
-                    self.zextents[0] = self.zpad[0]*self.zmin
-                else:
-                    if self.zmin < self.zextents[0]:
-                        raise ValueError('User specified "zextents[0]" does not enclose all regions')
-                if self.zextents[1] is None:
-                    self.zextents[1] = self.zpad[1]*self.zmax
-                    if self.zmax > self.zextents[1]:
-                        raise ValueError('User specified "zextents[1]" does not enclose all regions')
-                # Create boundary region
-                vac_dx = self.region_info[self.boundary_reg]['dx']
-                if vac_dx is None:
-                    raise ValueError('Resolution for region "vacuum" not defined')
-                vac_contour = numpy.asarray([
-                    [0.0,           self.zextents[0]],
-                    [self.rextent, self.zextents[0]],
-                    [self.rextent, self.zextents[1]],
-                    [0.0,           self.zextents[1]]
-                ])
-                self.regions.append(Region(vac_contour,vac_dx,vac_dx,id=self.region_info[self.boundary_reg]['id']))
-                self.region_info[self.boundary_reg]['count'] += 1
+                if self.region_info[self.boundary_reg].get('count',0) == 0:
+                    # Check or set extents
+                    if self.rextent is None:
+                        self.rextent = self.rpad*self.rmax
+                    else:
+                        if self.rmax > self.rextent:
+                            raise ValueError('User specified "rextent" does not enclose all regions')
+                    if self.zextents[0] is None:
+                        self.zextents[0] = self.zpad[0]*self.zmin
+                    else:
+                        if self.zmin < self.zextents[0]:
+                            raise ValueError('User specified "zextents[0]" does not enclose all regions')
+                    if self.zextents[1] is None:
+                        self.zextents[1] = self.zpad[1]*self.zmax
+                        if self.zmax > self.zextents[1]:
+                            raise ValueError('User specified "zextents[1]" does not enclose all regions')
+                    # Create boundary region
+                    vac_dx = self.region_info[self.boundary_reg]['dx']
+                    if vac_dx is None:
+                        raise ValueError('Resolution for region "vacuum" not defined')
+                    vac_contour = numpy.asarray([
+                        [0.0,           self.zextents[0]],
+                        [self.rextent, self.zextents[0]],
+                        [self.rextent, self.zextents[1]],
+                        [0.0,           self.zextents[1]]
+                    ])
+                    self.regions.append(Region(vac_contour,vac_dx,vac_dx,id=self.region_info[self.boundary_reg]['id']))
+                    self.region_info[self.boundary_reg]['count'] += 1
         # Check for undefined regions
         for key in self.region_info:
             if self.region_info[key]['count'] == 0:
@@ -451,10 +587,31 @@ class gs_Domain:
         for point_def in self._extra_reg_defs:
             point_def[2] = reg_reorder[point_def[2]-1]
         # Generate mesh
-        self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
-        if not setup_only:
-            self._r, self._lc, self._reg = self.mesh.get_mesh()
-        return self._r, self._lc, self._reg
+        if cubit_path is not None:
+            regions_full = []
+            for region in self.regions:
+                json_tmp = region.get_json()
+                for field in json_tmp:
+                    try: 
+                        json_tmp[field] = json_tmp[field].tolist()
+                    except:
+                        pass
+                regions_full.append(json_tmp)
+            with open('tMaker_cubit.json', 'w') as json_file:
+                json.dump({'regions': regions_full, 'tri_gradation': 1.05}, json_file)
+            if not setup_only:
+                self._r, self._lc, self._reg = run_cubit(cubit_path)
+                if self._reg.min() <= 0:
+                    raise ValueError('Meshing error: unclaimed region detected!')
+                return self._r, self._lc, self._reg
+        else:
+            self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
+            if not setup_only:
+                self._r, self._lc, self._reg = self.mesh.get_mesh()
+                if self._reg.min() <= 0:
+                    raise ValueError('Meshing error: unclaimed region detected!')
+                return self._r, self._lc, self._reg
+        return None, None, None
     
     def save_json(self,filename):
         '''! Create a JSON file containing a description of the mesh 
@@ -675,7 +832,7 @@ class Mesh:
             reg_pt_map = [i+len(self._unique_points) for i in range(region._points.shape[0])]
             ilocal = len(self._unique_points)-1
             seg_start = len(self._segments)
-            for tmp_pts in region._segments:
+            for reg_seg, tmp_pts in enumerate(region._segments):
                 tmp_pt_map = [reg_pt_map[i] for i in tmp_pts]
                 for ipt, reg_id in enumerate(tmp_pts):
                     reg_pt = region._points[reg_id,:]
@@ -694,10 +851,15 @@ class Mesh:
                             self._unique_points.append(reg_pt)
                 for iseg, segment in enumerate(self._segments):
                     nOverlap = 0
-                    for test_pt in segment[0]:
-                        if test_pt in tmp_pt_map:
-                            nOverlap += 1
-                    if (nOverlap > 1) and (len(tmp_pts) == len(segment[0])): # Full overlap
+                    for i in range(len(segment[0])):
+                        test_pt = segment[0][i-1]
+                        matches = [j for j,x in enumerate(tmp_pt_map) if x==test_pt]
+                        if len(matches) > 0:
+                            test_pt2 = segment[0][i]
+                            for match in [j for j,x in enumerate(tmp_pt_map) if x==test_pt2]:
+                                if (match-1 in matches) or (match+1 in matches):
+                                    nOverlap += 1
+                    if (nOverlap == len(tmp_pts)-1) and (len(tmp_pts) == len(segment[0])): # Full overlap
                         # Look forward
                         for i,test_pt in enumerate(segment[0]):
                             if tmp_pt_map[i] != test_pt:
@@ -720,9 +882,9 @@ class Mesh:
                             segment[2] = min(segment[2],region._small_thresh)
                             local_seg_map.append(-iseg)
                             break
-                    elif  (nOverlap > 1) and (iseg < seg_start): # Partial match (ignore if same region)
+                    elif (nOverlap >= 1) and (iseg < seg_start): # Partial match (ignore if same region)
                         if debug:
-                            print('  Merging partially overlapping curve segments:',ireg,iseg)
+                            print('  Merging partially overlapping curve segments:',nOverlap,ireg,reg_seg,iseg)
                         if len(tmp_pts) < len(segment[0]):
                             overlap_start = len(segment[0])
                             overlap_end = -1
@@ -818,7 +980,7 @@ class Mesh:
                     ])
                     seg_tmp.append(len(pts_out)-1)
             elif dl[-1] < segment[2]:
-                print("  Warning: small feature (dl={0:.2E}) detected at point {1} ({2}, {3})".format(dl[-1], segment[0][0], *pts_tmp[0,:]))
+                oft_warning("Small feature (dl={0:.2E}) detected at point {1} ({2}, {3})".format(dl[-1], segment[0][0], *pts_tmp[0,:]))
             seg_tmp.append(segment[0][-1])
             self._resampled_segments.append(seg_tmp)
         # Reindex points
@@ -876,7 +1038,7 @@ class Mesh:
 
         @result pts[np,2], tris[nc,3], regions[nc] 
         '''
-        print('Generating mesh:')
+        print('Generating mesh with Triangle:')
         resampled_flat = []
         for segment in self._resampled_segments:
             resampled_flat += [[segment[i], segment[i+1]] for i in range(len(segment)-1)]
@@ -934,7 +1096,7 @@ class Region:
                     tang = self._points[i+1,:] - self._points[i,:]
                 tang_norm = numpy.linalg.norm(tang)
                 if tang_norm < self._dx_curve/1.E3:
-                    print("  Warning: repeated points detected at point {0} ({1}, {2})".format(i, *self._points[i,:]))
+                    oft_warning("Repeated points detected at point {0} ({1}, {2})".format(i, *self._points[i,:]))
                     continue
                 tang /= tang_norm
                 if i > 0:
@@ -942,7 +1104,7 @@ class Region:
                     if angle < keep_tol:
                         keep_points.append(i)
                         if angle < sliver_tol:
-                            print("  Warning: sliver (angle={0:.1F}) detected at point {1} ({2}, {3})".format(180.-numpy.arccos(angle)*180./numpy.pi, i, *self._points[i,:]))
+                            oft_warning("Sliver (angle={0:.1F}) detected at point {1} ({2}, {3})".format(180.-numpy.arccos(angle)*180./numpy.pi, i, *self._points[i,:]))
                 tangp = tang
             keep_points.append(nv+1)
             # Index segments
@@ -984,7 +1146,7 @@ class Region:
                             numpy.interp(dl_samp,dl,pts_tmp[:,1])
                         ])
                 elif dl[-1] < self._small_thresh:
-                    print("  Warning: small feature (dl={0:.2E}) detected at point {1} ({2}, {3})".format(dl[-1], segment[0], *pts_tmp[0,:]))
+                    oft_warning("Small feature (dl={0:.2E}) detected at point {1} ({2}, {3})".format(dl[-1], segment[0], *pts_tmp[0,:]))
             self._resampled_points = numpy.asarray(pts_out)
         return self._resampled_points
 
