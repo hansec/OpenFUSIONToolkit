@@ -28,7 +28,7 @@ USE oft_sort, ONLY: sort_array
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 !---
 USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_matrix_ptr, &
-  oft_graph, oft_graph_ptr
+  oft_graph, oft_graph_ptr, oft_local_mat
 USE oft_deriv_matrices, ONLY: oft_diagmatrix, create_diagmatrix
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc
 USE oft_la_utils, ONLY: create_matrix, combine_matrices
@@ -44,7 +44,8 @@ USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, &
   oft_lag_nodes, oft_blag_eval, &
   oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem, &
-  oft_3D_lagrange_cast
+  oft_3D_lagrange_cast, lagrange_vector_unpack, lagrange_vector_repack, lagrange_vector_packcols, &
+  lagrange_vector_packrows
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
@@ -349,6 +350,7 @@ ELSE
   vtmp=>self%vals(3,:)
   CALL self%u%get_local(vtmp,3)
   IF(.NOT.oft_3D_lagrange_cast(self%lag_rep,lag_rep))CALL oft_abort("Incorrect FE type","lag_vrinterp_setup",__FILE__)
+  CALL lagrange_vector_unpack(self%lag_rep,self%vals)
   self%mesh=>self%lag_rep%mesh
   IF(.NOT.ASSOCIATED(self%cache_cell))THEN
     ALLOCATE(self%cache_cell(0:oft_env%nthreads-1))
@@ -603,34 +605,41 @@ subroutine vzeron_apply(self,a)
 class(oft_vlag_zeron), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
-real(r8), pointer, dimension(:) :: x,y,z
+real(r8), pointer, dimension(:,:) :: vectmp
+real(r8), pointer, dimension(:) :: vtmp
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_vlag_rep%current_level%fields(1)%fe))CALL oft_abort("Incorrect FE type","vzeron_apply",__FILE__)
 !---Cast to vector type
-NULLIFY(x,y,z)
-CALL a%get_local(x,1)
-CALL a%get_local(y,2)
-CALL a%get_local(z,3)
+ALLOCATE(vectmp(3,lag_rep%ne))
+vtmp=>vectmp(1,:)
+CALL a%get_local(vtmp,1)
+vtmp=>vectmp(2,:)
+CALL a%get_local(vtmp,2)
+vtmp=>vectmp(3,:)
+CALL a%get_local(vtmp,3)
+CALL lagrange_vector_unpack(lag_rep,vectmp)
 !---Zero boundary values
 !$omp parallel do private(j,vec,nn)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
   if(lag_rep%global%gbe(j))then
-    CALL lag_vbc_tensor(lag_rep,j,1,nn)
-    vec=(/x(j),y(j),z(j)/)
+    CALL lag_vbc_tensor(lag_rep,j,2,nn)
+    vec=vectmp(:,j)
     vec=MATMUL(nn,vec)
-    x(j)=vec(1)
-    y(j)=vec(2)
-    z(j)=vec(3)
+    vectmp(:,j)=vec
   end if
 end do
 !---
-CALL a%restore_local(x,1,wait=.TRUE.)
-CALL a%restore_local(y,2,wait=.TRUE.)
-CALL a%restore_local(z,3)
-DEALLOCATE(x,y,z)
+CALL lagrange_vector_repack(lag_rep,vectmp)
+vtmp=>vectmp(1,:)
+CALL a%restore_local(vtmp,1,wait=.TRUE.)
+vtmp=>vectmp(2,:)
+CALL a%restore_local(vtmp,2,wait=.TRUE.)
+vtmp=>vectmp(3,:)
+CALL a%restore_local(vtmp,3)
+DEALLOCATE(vectmp)
 DEBUG_STACK_POP
 end subroutine vzeron_apply
 !------------------------------------------------------------------------------
@@ -640,34 +649,41 @@ subroutine vzerot_apply(self,a)
 class(oft_vlag_zerot), intent(inout) :: self
 class(oft_vector), intent(inout) :: a !< Field to be zeroed
 real(r8) :: vec(3),nn(3,3)
-real(r8), pointer, dimension(:) :: x,y,z
+real(r8), pointer, dimension(:,:) :: vectmp
+real(r8), pointer, dimension(:) :: vtmp
 integer(i4) :: i,j
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,self%ML_vlag_rep%current_level%fields(1)%fe))CALL oft_abort("Incorrect FE type","vzerot_apply",__FILE__)
 !---Cast to vector type
-NULLIFY(x,y,z)
-CALL a%get_local(x,1)
-CALL a%get_local(y,2)
-CALL a%get_local(z,3)
+ALLOCATE(vectmp(3,lag_rep%ne))
+vtmp=>vectmp(1,:)
+CALL a%get_local(vtmp,1)
+vtmp=>vectmp(2,:)
+CALL a%get_local(vtmp,2)
+vtmp=>vectmp(3,:)
+CALL a%get_local(vtmp,3)
+CALL lagrange_vector_unpack(lag_rep,vectmp)
 !---Zero boundary values
 !$omp parallel do private(j,vec,nn)
 do i=1,lag_rep%nbe
   j=lag_rep%lbe(i)
   if(lag_rep%global%gbe(j))then
-    CALL lag_vbc_tensor(lag_rep,j,2,nn)
-    vec=(/x(j),y(j),z(j)/)
+    CALL lag_vbc_tensor(lag_rep,j,3,nn)
+    vec=vectmp(:,j)
     vec=MATMUL(nn,vec)
-    x(j)=vec(1)
-    y(j)=vec(2)
-    z(j)=vec(3)
+    vectmp(:,j)=vec
   end if
 end do
 !---
-CALL a%restore_local(x,1,wait=.TRUE.)
-CALL a%restore_local(y,2,wait=.TRUE.)
-CALL a%restore_local(z,3)
-DEALLOCATE(x,y,z)
+CALL lagrange_vector_repack(lag_rep,vectmp)
+vtmp=>vectmp(1,:)
+CALL a%restore_local(vtmp,1,wait=.TRUE.)
+vtmp=>vectmp(2,:)
+CALL a%restore_local(vtmp,2,wait=.TRUE.)
+vtmp=>vectmp(3,:)
+CALL a%restore_local(vtmp,3)
+DEALLOCATE(vectmp)
 DEBUG_STACK_POP
 end subroutine vzerot_apply
 !------------------------------------------------------------------------------
@@ -682,7 +698,7 @@ integer(i4) :: i,j
 DEBUG_STACK_PUSH
 IF(lag_rep%global%gbe(j_lag))THEN
   SELECT CASE(bc_type)
-    CASE(1) ! Zero normal component
+    CASE(2) ! Zero normal component
       IF(lag_rep%bc(j_lag)==3)THEN ! On face
         nn(:,1) = (/1.d0,0.d0,0.d0/) &
           - lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
@@ -697,7 +713,7 @@ IF(lag_rep%global%gbe(j_lag))THEN
       ELSE ! At vertex
         nn=0.d0
       END IF
-    CASE(2) ! Zero tangential components
+    CASE(3) ! Zero tangential components
       IF(lag_rep%bc(j_lag)==3)THEN ! On face
         nn(:,1) = lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
         nn(:,2) = lag_rep%sn(:,j_lag)*lag_rep%sn(2,j_lag)
@@ -725,7 +741,7 @@ real(r8), intent(out) :: nn(3,3) !< Diagonal entries (3,3)
 integer(i4) :: i,j
 DEBUG_STACK_PUSH
 SELECT CASE(bc_type)
-  CASE(1) ! Get normal projections
+  CASE(2) ! Get normal projections
     !---Set diagonal entries for boundary terms
     IF(lag_rep%bc(j_lag)==3)THEN
       nn(:,1) = lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
@@ -743,7 +759,7 @@ SELECT CASE(bc_type)
       nn(:,2)=(/0.d0,1.d0,0.d0/)
       nn(:,3)=(/0.d0,0.d0,1.d0/)
     END IF
-  CASE(2) ! Get tangential projections
+  CASE(3) ! Get tangential projections
     IF(lag_rep%bc(j_lag)==3)THEN ! On face
       nn(:,1) = (/1.d0,0.d0,0.d0/) &
         - lag_rep%sn(:,j_lag)*lag_rep%sn(1,j_lag)
@@ -1229,10 +1245,7 @@ subroutine oft_lag_vgetmop(vlag_rep,mat,bc)
 class(oft_fem_comp_type), target, intent(inout) :: vlag_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-type :: block_mat
-  real(r8), pointer, dimension(:,:) :: m => NULL()
-end type block_mat
-type(block_mat) :: mtmp(3,3)
+type(oft_local_mat) :: mtmp(3,3)
 integer(i4) :: i,m,jr,jc,jp,jn,vbc_type
 integer(i4), allocatable :: j(:)
 real(r8) :: u,vol,det,goptmp(3,4),mloc(3,3),nn(3,3),elapsed_time
@@ -1251,13 +1264,13 @@ IF(.NOT.oft_3D_lagrange_cast(lag_rep,vlag_rep%fields(1)%fe))CALL oft_abort("Inco
 !---Set BC flag
 SELECT CASE(TRIM(bc))
   CASE("none")
-    vbc_type=-1
-  CASE("all")
     vbc_type=0
-  CASE("norm")
+  CASE("all")
     vbc_type=1
-  CASE("tang")
+  CASE("norm")
     vbc_type=2
+  CASE("tang")
+    vbc_type=3
   CASE DEFAULT
     CALL oft_abort("Unknown BC requested","oft_lag_vgetmop",__FILE__)
 END SELECT
@@ -1290,7 +1303,7 @@ DO i=1,lag_rep%mesh%nc
   !---Compute local matrix contributions
   DO jp=1,3
     DO jn=1,3
-      IF(vbc_type<=0.AND.jp/=jn)CYCLE
+      ! IF(vbc_type<=0.AND.jp/=jn)CYCLE
       mtmp(jp,jn)%m = 0.d0
     END DO
   END DO
@@ -1312,11 +1325,11 @@ DO i=1,lag_rep%mesh%nc
   !---Compute BC projection matrices
   DO jr=1,lag_rep%nce
     IF(lag_rep%global%gbe(j(jr)))THEN
-      IF(vbc_type==0)THEN
+      IF(vbc_type==1)THEN
         DO jp=1,3
           mtmp(jp,jp)%m(jr,:)=0.d0
         END DO
-      ELSE IF(vbc_type>0)THEN
+      ELSE IF(vbc_type>1)THEN
         DO jc=1,lag_rep%nce
           mloc=0.d0
           u=mtmp(1,1)%m(jr,jc)
@@ -1335,11 +1348,18 @@ DO i=1,lag_rep%mesh%nc
     END IF
   END DO
   ! !$omp critical
+  !---Handle periodicity
+  CALL lagrange_vector_packrows(lag_rep,mtmp(1,:),j)
+  CALL lagrange_vector_packrows(lag_rep,mtmp(2,:),j)
+  CALL lagrange_vector_packrows(lag_rep,mtmp(3,:),j)
+  CALL lagrange_vector_packcols(lag_rep,mtmp(:,1),j)
+  CALL lagrange_vector_packcols(lag_rep,mtmp(:,2),j)
+  CALL lagrange_vector_packcols(lag_rep,mtmp(:,3),j)
   !---Add local values to global matrix
   lcache(1,1)=0
   DO jp=1,3
     DO jn=1,3
-      IF(vbc_type<=0.AND.jp/=jn)CYCLE
+      ! IF(vbc_type<=0.AND.jp/=jn)CYCLE
       CALL mat%atomic_add_values(j,j,mtmp(jp,jn)%m,lag_rep%nce,lag_rep%nce,jp,jn,lcache)
     END DO
   END DO
@@ -1355,7 +1375,7 @@ deallocate(j,rop,lcache)
 !$omp end parallel
 ALLOCATE(j(1),rop(1))
 !---Set diagonal entries for dirichlet rows
-IF(vbc_type==0)THEN
+IF(vbc_type==1)THEN
   rop=1.d0
   DO i=1,lag_rep%nbe
     IF(.NOT.lag_rep%linkage%leo(i))CYCLE
@@ -1366,7 +1386,7 @@ IF(vbc_type==0)THEN
     CALL mat%add_values(j,j,rop,1,1,2,2)
     CALL mat%add_values(j,j,rop,1,1,3,3)
   END DO
-ELSE IF(vbc_type>0)THEN
+ELSE IF(vbc_type>1)THEN
   DO i=1,lag_rep%nbe
     IF(.NOT.lag_rep%linkage%leo(i))CYCLE
     jr=lag_rep%lbe(i)
@@ -1404,7 +1424,8 @@ class(fem_interp), intent(inout) :: field !< Vector field for projection
 class(oft_vector), intent(inout) :: x !< Field projected onto Lagrange basis
 !---
 real(r8) :: bcc(3),det,goptmp(3,4),vol
-real(r8), pointer, dimension(:) :: xloc,yloc,zloc
+real(r8), pointer, dimension(:,:) :: vectmp
+real(r8), pointer, dimension(:) :: vtmp
 real(r8), allocatable :: rop(:)
 integer(i4) :: i,jc,m
 integer(i4), allocatable :: j(:)
@@ -1413,11 +1434,14 @@ CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_vproject",__FILE__)
 !---Initialize vectors to zero
-NULLIFY(xloc,yloc,zloc)
+ALLOCATE(vectmp(3,lag_rep%ne))
 call x%set(0.d0)
-call x%get_local(xloc,1)
-call x%get_local(yloc,2)
-call x%get_local(zloc,3)
+vtmp=>vectmp(1,:)
+CALL x%get_local(vtmp,1)
+vtmp=>vectmp(2,:)
+CALL x%get_local(vtmp,2)
+vtmp=>vectmp(3,:)
+CALL x%get_local(vtmp,3)
 !---Integerate over the volume
 !$omp parallel private(j,rop,curved,m,goptmp,vol,det,bcc,jc)
 !---Allocate cell DOF arrays
@@ -1433,20 +1457,24 @@ do i=1,lag_rep%mesh%nc ! Loop over cells
     call oft_lag_eval_all(lag_rep,i,lag_rep%quad%pts(:,m),rop)
     do jc=1,lag_rep%nce
       !$omp atomic
-      xloc(j(jc))=xloc(j(jc))+rop(jc)*bcc(1)*det
+      vectmp(1,j(jc))=vectmp(1,j(jc))+rop(jc)*bcc(1)*det
       !$omp atomic
-      yloc(j(jc))=yloc(j(jc))+rop(jc)*bcc(2)*det
+      vectmp(2,j(jc))=vectmp(2,j(jc))+rop(jc)*bcc(2)*det
       !$omp atomic
-      zloc(j(jc))=zloc(j(jc))+rop(jc)*bcc(3)*det
+      vectmp(3,j(jc))=vectmp(3,j(jc))+rop(jc)*bcc(3)*det
     end do
   end do
 end do
 deallocate(j,rop)
 !$omp end parallel
-call x%restore_local(xloc,1,add=.TRUE.,wait=.TRUE.)
-call x%restore_local(yloc,2,add=.TRUE.,wait=.TRUE.)
-call x%restore_local(zloc,3,add=.TRUE.)
-deallocate(xloc,yloc,zloc)
+CALL lagrange_vector_repack(lag_rep,vectmp)
+vtmp=>vectmp(1,:)
+CALL x%restore_local(vtmp,1,add=.TRUE.,wait=.TRUE.)
+vtmp=>vectmp(2,:)
+CALL x%restore_local(vtmp,2,add=.TRUE.,wait=.TRUE.)
+vtmp=>vectmp(3,:)
+CALL x%restore_local(vtmp,3,add=.TRUE.)
+deallocate(vectmp)
 DEBUG_STACK_POP
 end subroutine oft_lag_vproject
 !------------------------------------------------------------------------------

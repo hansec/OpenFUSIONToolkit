@@ -440,9 +440,9 @@ IF(ASSOCIATED(oft_abort_cb))CALL oft_abort_cb
 errcode=99
 #ifdef HAVE_MPI
 CALL MPI_ABORT(oft_env%comm,errcode,ierr)
-#else
-ERROR STOP errcode
+ierr=oft_sleep(1)
 #endif
+ERROR STOP errcode
 END SUBROUTINE oft_abort
 !------------------------------------------------------------------------------
 !> Graceful warning printing for Open FUSION Toolkit

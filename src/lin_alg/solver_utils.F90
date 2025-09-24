@@ -530,6 +530,13 @@ SELECT CASE(TRIM(solver_type))
       CALL create_native_solver(solver,"sjacobi")
       native_solver=.TRUE.
     END IF
+  CASE("block_jacobi")
+    IF(use_petsc)THEN
+      CALL create_petsc_pre(solver,"block_jacobi")
+    ELSE
+      CALL create_native_pre(solver,"block_jacobi")
+      native_solver=.TRUE.
+    END IF
   CASE("lu")
     IF(use_petsc)THEN
       CALL create_petsc_solver(solver,"lu")

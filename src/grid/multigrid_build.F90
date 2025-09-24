@@ -28,7 +28,8 @@ use multigrid, only: multigrid_mesh, multigrid_refine, multigrid_hybrid_base, &
   multigrid_level, trimesh_mg_globals, quadmesh_mg_globals, multigrid_reffix_ho, &
   multigrid_reffix_ho_surf
 use oft_mesh_native, only: native_load_vmesh, native_load_smesh, mesh_native_id, &
-  native_hobase, native_set_periodic, native_bset_periodic, native_finalize_setup
+  native_hobase, native_set_periodic, native_bset_periodic, native_cadlink, native_finalize_setup, &
+  native_reffix, native_add_quad
 use oft_mesh_t3d, only: mesh_t3d_load, mesh_t3d_cadsync, mesh_t3d_cadlink, &
   mesh_t3d_add_quad, mesh_t3d_reffix, mesh_t3d_add_quad, &
   mesh_t3d_set_periodic, smesh_t3d_load, mesh_t3d_id
@@ -75,6 +76,7 @@ select case(cad_type)
   case(mesh_native_id) ! Native Mesh
     CALL native_load_vmesh(mg_mesh)
     CALL mesh_global_init(mg_mesh%mesh)
+    CALL native_cadlink(mg_mesh%mesh)
     CALL native_hobase(mg_mesh%mesh)
     CALL native_set_periodic(mg_mesh%mesh)
   case(mesh_t3d_id) ! T3D Mesh
@@ -132,7 +134,7 @@ CALL multigrid_reffix_ho(mg_mesh)
 !---Select mesh type and adjust boundary
 select case(mesh%cad_type)
   case(mesh_native_id)
-    ! Do nothing
+    call native_reffix(mg_mesh)
   case(mesh_t3d_id)
     call mesh_t3d_reffix(mg_mesh)
   case(mesh_cubit_id)
@@ -201,7 +203,7 @@ CALL mesh_global_set_curved(mesh,1)
 !---Select mesh type and adjust boundary
 select case(mesh%cad_type)
   case(mesh_native_id)
-    ! Do nothing CALL mesh_cube_add_quad
+    call native_add_quad(mg_mesh)
   case(mesh_t3d_id)
     call mesh_t3d_add_quad(mg_mesh)
   case(mesh_cubit_id)
@@ -455,7 +457,8 @@ DEBUG_STACK_PUSH
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,mesh_options,IOSTAT=ierr)
 CLOSE(io_unit)
-IF(ierr<0)CALL oft_abort('No mesh options found in input file.','multigrid_construct',__FILE__)
+IF(ierr<0)CALL oft_abort('No "mesh_options" found in input file.','multigrid_construct',__FILE__)
+IF(ierr>0)CALL oft_abort('Error parsing "mesh_options" in input file.','multigrid_construct',__FILE__)
 !---
 if(nlevels<=0)call oft_abort('Invalid number of MG levels','multigrid_construct',__FILE__)
 if(nbase<=0.OR.nbase>nlevels)call oft_abort('Invalid number of MG base levels','multigrid_construct',__FILE__)
@@ -602,6 +605,8 @@ fmesh=>mg_mesh%meshes(mg_mesh%level+1) ! Get new mesh
 !---Replicate mesh to next level
 fmesh%cad_type=cmesh%cad_type
 fmesh%periodic%nper=cmesh%periodic%nper
+fmesh%periodic%vmap_mats=cmesh%periodic%vmap_mats
+fmesh%periodic%revolved=cmesh%periodic%revolved
 fmesh%nreg=cmesh%nreg
 fmesh%meshname=cmesh%meshname
 fmesh%np=cmesh%np
@@ -962,9 +967,10 @@ DEBUG_STACK_PUSH
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,mesh_options,IOSTAT=ierr)
 CLOSE(io_unit)
-IF(ierr<0)CALL oft_abort('No mesh options found in input file.','multigrid_construct_surf',__FILE__)
+IF(ierr<0)CALL oft_abort('No "mesh_options" found in input file.','multigrid_construct_surf',__FILE__)
+IF(ierr>0)CALL oft_abort('Error parsing "mesh_options" in input file.','multigrid_construct_surf',__FILE__)
 !---
-if(nlevels<=0)call oft_abort('Invalid number of MG levels','multigrid_construct',__FILE__)
+if(nlevels<=0)call oft_abort('Invalid number of MG levels','multigrid_construct_surf',__FILE__)
 if(nbase<=0.OR.nbase>nlevels)call oft_abort('Invalid number of MG base levels', &
   'multigrid_construct_surf',__FILE__)
 !---Setup basic mesh structure and runtime
@@ -1076,6 +1082,8 @@ fmesh=>mg_mesh%smeshes(mg_mesh%level+1) ! Get new mesh
 !---Replicate mesh to next level
 fmesh%cad_type=cmesh%cad_type
 fmesh%periodic%nper=cmesh%periodic%nper
+fmesh%periodic%vmap_mats=cmesh%periodic%vmap_mats
+fmesh%periodic%revolved=cmesh%periodic%revolved
 fmesh%nreg=cmesh%nreg
 fmesh%meshname=cmesh%meshname
 fmesh%dim=cmesh%dim
