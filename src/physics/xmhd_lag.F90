@@ -500,9 +500,9 @@ IF(m_ion<0.d0)CALL oft_abort('Invalid Ion mass','xmhd_read_settings',__FILE__)
 IF(vbc(1:3)/='all')xmhd_vbcdir=.TRUE.
 SELECT CASE(TRIM(vbc))
   CASE("norm")
-    vbc_type=1
-  CASE("tang")
     vbc_type=2
+  CASE("tang")
+    vbc_type=3
 END SELECT
 !---Check viscosity type
 SELECT CASE(visc_type)
@@ -2160,7 +2160,7 @@ do ii=1,mesh%tloc_c(ip)%n
   IF(xmhd_adv_b)THEN
     DO jr=1,oft_lagrange%nce
       IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
-        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),1,umat)
+        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),2,umat)
         DO m=1,xmhd_rep%nfields
           IF(ASSOCIATED(mtmp(1,m)%m))THEN
             DO jc=1,oft_lagrange%nce
@@ -2248,7 +2248,7 @@ IF(xmhd_adv_b)THEN
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
     jtmp=j
-    CALL lag_vbc_diag(oft_lagrange,j,1,umat)
+    CALL lag_vbc_diag(oft_lagrange,j,2,umat)
     DO jr=1,3
       DO jc=1,3
         CALL Jac%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr,jc)
@@ -3193,10 +3193,10 @@ IF(xmhd_adv_b)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(oft_lagrange,j,1,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,2,mloc)
     bout(:,j)=MATMUL(mloc,bout(:,j))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(oft_lagrange,j,1,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,2,mloc)
     bout(:,j)=bout(:,j)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -3475,10 +3475,10 @@ IF(xmhd_adv_b)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(oft_lagrange,j,1,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,2,mloc)
     bout(:,j)=MATMUL(mloc,bout(:,j))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(oft_lagrange,j,1,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,2,mloc)
     bout(:,j)=bout(:,j)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -4290,7 +4290,7 @@ IF(xmhd_adv_b)THEN
   do i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     if(oft_lagrange%global%gbe(j))then
-      CALL lag_vbc_tensor(oft_lagrange,j,1,nn)
+      CALL lag_vbc_tensor(oft_lagrange,j,2,nn)
       v3tmp(:,j)=MATMUL(nn, v3tmp(:,j))
     end if
   end do
@@ -4373,7 +4373,7 @@ IF(xmhd_adv_b)THEN
   do i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     if(oft_lagrange%global%gbe(j))then
-      CALL lag_vbc_tensor(oft_lagrange,j,1,nn)
+      CALL lag_vbc_tensor(oft_lagrange,j,2,nn)
       v3tmp(:,j)=MATMUL(nn, v3tmp(:,j))
     end if
   end do

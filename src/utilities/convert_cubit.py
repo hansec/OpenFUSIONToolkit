@@ -227,8 +227,13 @@ r, lc, reg, node_sets, side_sets, ho_info = read_mesh(options.in_file)
 
 periodic_info = None
 if options.periodic_nodeset is not None:
-    if options.periodic_nodeset > len(node_sets):
-        raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(options.periodic_nodeset, len(node_sets)))
+    num_nodesets = len(node_sets)
+    if options.periodic_nodeset < 0:
+        if options.periodic_nodeset < -num_nodesets:
+            parser.exit(-1, '"--periodic_nodeset" exceeds the number of available nodesets')
+        options.periodic_nodeset = num_nodesets + 1 + options.periodic_nodeset
+    if options.periodic_nodeset > num_nodesets:
+        parser.exit(-1, '"--periodic_nodeset" ({0}) is out of bounds ({1})'.format(options.periodic_nodeset, num_nodesets))
     periodic_info = node_sets.pop(options.periodic_nodeset-1)
 
 write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, periodic_info)

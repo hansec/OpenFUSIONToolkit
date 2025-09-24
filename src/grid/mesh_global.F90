@@ -299,7 +299,7 @@ end subroutine mesh_global_sync
 !! Supported partition methods are:
 !! - `part_meth==1`: Partition using METIS library
 !! - `2 <= part_meth <= 4`: Axial spatial partitioning along coordinate `part_meth-1`
-!! - `part_meth==5`: Cylindrical spatial partitioning in azimuthal direction
+!! - `5 <= part_meth <= 7`: Cylindrical spatial partitioning in azimuthal direction (axis of rotation is `part_meth-4`)
 !---------------------------------------------------------------------------------
 subroutine mesh_global_partition(self,meshpart,part_meth)
 class(oft_amesh), intent(inout) :: self !< Mesh object
@@ -321,32 +321,49 @@ if(oft_env%rank==0)then
   if(part_meth==1)THEN ! Metis partitioning
     CALL oft_metis_partMesh(self%nc,self%np,self%cell_np,self%lc,oft_env%nnodes,cpart,ierr)
     IF(ierr<0)CALL oft_abort('Mesh partitioning failed','mesh_global_partition',__FILE__)
-  elseif((part_meth>1).AND.(part_meth<5))THEN ! Axial spatial partitioning
+  elseif((part_meth>=2).AND.(part_meth<=4))THEN ! Axial spatial partitioning
     zmin = MINVAL(self%r(part_meth-1,:))
     zmax = MAXVAL(self%r(part_meth-1,:))
     zrange = (zmax-zmin)/REAL(oft_env%nnodes,8)
     ! IF(MOD(mesh%nc,oft_env%nnodes)/=0)CALL oft_abort( &
     !   "Partition count invalid for spatial partitioning",'mesh_global_partition',__FILE__)
-    ALLOCATE(pflag(self%np),part_sort(self%np),isort(self%np))
+    ALLOCATE(pflag(self%nc),part_sort(self%nc),isort(self%nc))
     pflag=oft_env%nnodes+1
-    isort=[(i,i=1,self%np)]
-    part_sort=self%r(part_meth-1,:)
-    CALL sort_array(part_sort,isort,self%np)
-    k=1
-    DO i=1,self%np
-      IF(i>REAL(k*self%np,8)/REAL(oft_env%nnodes,8))THEN
-        k=k+1
-      END IF
-      pflag(isort(i))=k
-    END DO
+    isort=[(i,i=1,self%nc)]
+    !$omp parallel do private(k)
     DO i=1,self%nc
-      cpart(i)=oft_env%nnodes+1
+      part_sort(i)=0.d0
       DO k=1,self%cell_np
-        cpart(i)=MIN(cpart(i),pflag(self%lc(k,i)))
+        part_sort(i)=part_sort(i)+self%r(part_meth-1,self%lc(k,i))
       END DO
-      IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
+      part_sort(i)=part_sort(i)/REAL(self%cell_np,8)
     END DO
-  elseif(part_meth==5)THEN ! Toroidal spatial partitioning
+    CALL sort_array(part_sort,isort,self%nc)
+    k=1
+    DO i=1,self%nc
+      IF(i>REAL(self%nc,8)*REAL(k,8)/REAL(oft_env%nnodes,8))k=k+1
+      cpart(isort(i))=k
+    END DO
+    !
+    ! ALLOCATE(pflag(self%np),part_sort(self%np),isort(self%np))
+    ! pflag=oft_env%nnodes+1
+    ! isort=[(i,i=1,self%np)]
+    ! part_sort=self%r(part_meth-1,:)
+    ! CALL sort_array(part_sort,isort,self%np)
+    ! k=1
+    ! DO i=1,self%np
+    !   IF(i>REAL(self%np,8)*REAL(k,8)/REAL(oft_env%nnodes,8))k=k+1
+    !   pflag(isort(i))=k
+    ! END DO
+    ! DO i=1,self%nc
+    !   cpart(i)=oft_env%nnodes+1
+    !   DO k=1,self%cell_np
+    !     cpart(i)=MIN(cpart(i),pflag(self%lc(k,i)))
+    !   END DO
+    !   IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
+    ! END DO
+    DEALLOCATE(pflag,part_sort,isort)
+  elseif((part_meth>=5).AND.(part_meth<=7))THEN ! Toroidal spatial partitioning
     zmin = -pi
     zmax = pi
     zrange = (zmax-zmin)/REAL(oft_env%nnodes,8)
@@ -355,7 +372,13 @@ if(oft_env%rank==0)then
     ALLOCATE(pflag(self%np),part_sort(self%np),isort(self%np))
     pflag=oft_env%nnodes+1
     isort=[(i,i=1,self%np)]
-    part_sort=ATAN2(self%r(2,:),self%r(1,:))
+    IF(part_meth==5)THEN ! X-axis rotation
+      part_sort=ATAN2(self%r(3,:),self%r(2,:))
+    ELSE IF(part_meth==6)THEN ! Y-axis rotation
+      part_sort=ATAN2(self%r(1,:),self%r(3,:))
+    ELSE IF(part_meth==7)THEN ! Z-axis rotation
+      part_sort=ATAN2(self%r(2,:),self%r(1,:))
+    END IF
     CALL sort_array(part_sort,isort,self%np)
     k=1
     DO i=1,self%np
@@ -972,7 +995,7 @@ DO i=1,self%nbe
     DO j=1,2
       etest=etest.AND.ANY(self%pstitch%lle(1,js:jn)==ll(j))
     END DO
-    IF(etest)echeck(m,i)=.TRUE.
+    IF(etest.OR.self%periodic%revolved)echeck(m,i)=.TRUE.
   END DO
 END DO
 DEALLOCATE(bpi)
@@ -1286,7 +1309,7 @@ DO i=1,self%nbf
     DO j=1,self%face_np
       ftest=ftest.AND.ANY(self%pstitch%lle(1,js:jn)==ll(j))
     END DO
-    IF(ftest)fcheck(m,i)=.TRUE.
+    IF(ftest.OR.self%periodic%revolved)fcheck(m,i)=.TRUE.
   END DO
 END DO
 DEALLOCATE(bpi)
