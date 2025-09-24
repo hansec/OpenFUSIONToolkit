@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-'''! Python interface for TokaMaker Grad-Shafranov functionality
+'''! Core definitions for TokaMaker Grad-Shafranov functionality
 
 @authors Chris Hansen
 @date May 2023
@@ -48,7 +48,7 @@ def create_prof_file(self, filename, profile_dict, name):
     file_lines = [profile_dict['type']]
     if profile_dict['type'] == 'flat':
         pass
-    elif profile_dict['type'] == 'linterp':
+    elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp'):
         x = profile_dict.get('x',None)
         if x is None:
             raise KeyError('No array "x" for piecewise linear profile.')
@@ -78,7 +78,7 @@ def create_prof_file(self, filename, profile_dict, name):
             "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
         ]
     else:
-        raise KeyError('Invalid profile type ("flat", "linterp")')
+        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
 
@@ -158,6 +158,8 @@ class TokaMaker():
         self.nvac = 0
         ## Limiting contour
         self.lim_contour = None
+        ## Limiting contours (if multiple)
+        self.lim_contours = None
     
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
@@ -204,6 +206,7 @@ class TokaMaker():
         self.reg = None
         self.nvac = 0
         self.lim_contour = None
+        self.lim_contours = None
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
         '''! Setup mesh for static and time-dependent G-S calculations
@@ -241,6 +244,8 @@ class TokaMaker():
             if reg is None:
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
             else:
+                if reg.min() <= 0:
+                    raise ValueError('Invalid "reg" array, values must be >= 0')
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
             oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         else:
@@ -357,7 +362,9 @@ class TokaMaker():
         self._alam = numpy.ctypeslib.as_array(alam_loc,shape=(1,))
         self._pnorm = numpy.ctypeslib.as_array(pnorm_loc,shape=(1,))
         # Set default targets
+        ## F*F' normalization value
         self.alam = 0.1
+        ## P' normalization value
         self.pnorm = 0.1
         default_prof={
             'type': 'linterp',
@@ -375,10 +382,10 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         loop_ptr = numpy.ctypeslib.as_array(loop_ptr,shape=(nloops.value+1,))
-        self.lim_pts = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
+        lim_pts = numpy.ctypeslib.as_array(r_loc,shape=(npts.value, 2))
         self.lim_contours = []
         for i in range(nloops.value):
-            lim_contour = numpy.vstack((self.lim_pts[loop_ptr[i]-1:loop_ptr[i+1]-1,:],self.lim_pts[loop_ptr[i]-1,:]))
+            lim_contour = numpy.vstack((lim_pts[loop_ptr[i]-1:loop_ptr[i+1]-1,:],lim_pts[loop_ptr[i]-1,:]))
             self.lim_contours.append(lim_contour)
         self.lim_contour = numpy.zeros((0,2))
         for lim_countour in self.lim_contours:
@@ -405,8 +412,10 @@ class TokaMaker():
         ## Mesh regions [nc] 
         self.reg = numpy.ctypeslib.as_array(reg_loc,shape=(self.nc,))
 
+    ## @cond
     @property
     def alam(self):
+        r'''F*F' normalization value'''
         if self._alam is not None:
             return self._alam[0]
         else:
@@ -421,6 +430,7 @@ class TokaMaker():
     
     @property
     def pnorm(self):
+        r'''Pressure normalization value'''
         if self._pnorm is not None:
             return self._pnorm[0]
         else:
@@ -432,9 +442,11 @@ class TokaMaker():
             self._pnorm[0] = value
         else:
             raise ValueError('Class must be initialized to set "pnorm"')
+    ## @endcond
     
     @property
     def diverted(self):
+        r'''! Diverted flag (limited if `False`)'''
         if self._diverted is not None:
             return self._diverted[0]
         else:
@@ -548,7 +560,8 @@ class TokaMaker():
         @param coil_bounds Minimum and maximum allowable coil currents [ncoils+1,2]
         '''
         bounds_array = numpy.zeros((self.ncoils+1,2), dtype=numpy.float64)
-        bounds_array[:,0] = -1.E98; bounds_array[:,1] = 1.E98
+        bounds_array[:,0] = -1.E98
+        bounds_array[:,1] = 1.E98
         if coil_bounds is not None:
             for coil_key, coil_bound in coil_bounds.items():
                 if coil_key in self.coil_sets:
@@ -677,17 +690,20 @@ class TokaMaker():
         self.load_profiles(ffp_file,None,pp_file,eta_file,ffp_NI_file)
 
     def solve(self, vacuum=False):
-        '''! Solve G-S equation with specified constraints, profiles, etc.'''
-        if vacuum:
-            raise ValueError('"vacuum=True" no longer supported, use "vac_solve()"')
+        '''! Solve G-S equation with specified constraints, profiles, etc.
+        
+        @param vacuum Perform vacuum solve? Plasma-related targets (eg. `Ip`) will be ignored.
+        '''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_solve(self._tMaker_ptr,error_string)
+        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
     
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
         and optional other currents
+
+        @note If isoflux, flux, or saddle constraints are desired use @ref solve instead.
         
         @param psi Boundary values for vacuum solve
         @param rhs_source Current source (optional)
@@ -859,7 +875,8 @@ class TokaMaker():
         else:
             if ref_points is None:
                 ref_points = numpy.zeros((isoflux.shape[0]-1,2), dtype=numpy.float64)
-                ref_points[:,0] = isoflux[0,0]; ref_points[:,1] = isoflux[0,1]
+                ref_points[:,0] = isoflux[0,0]
+                ref_points[:,1] = isoflux[0,1]
                 isoflux = isoflux[1:,:]
                 if weights is not None:
                     weights = weights[1:]
@@ -1046,16 +1063,17 @@ class TokaMaker():
                 psi = 1.0 - psi
         return psi
 
-    def set_psi(self,psi):
+    def set_psi(self,psi,update_bounds=False):
         '''! Set poloidal flux values on node points
 
         @param psi Poloidal flux values (should not be normalized!)
+        @param update_bounds Update plasma bounds by determining new limiting points
         '''
         if psi.shape[0] != self.np:
             raise IndexError('Incorrect shape of "psi", should be [np]')
         psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_psi(self._tMaker_ptr,psi,error_string)
+        tokamaker_set_psi(self._tMaker_ptr,psi,c_bool(update_bounds),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1407,10 +1425,10 @@ class TokaMaker():
             # Adjust current in coils with non-uniform distribution
             if len(self.dist_coils)>0:
                 for _, coil_obj in self.coil_sets.items():
-                    if (coil_id:=coil_obj["id"]) in self.dist_coils.keys():
+                    if coil_obj["id"] in self.dist_coils.keys():
                         for sub_coil in coil_obj["sub_coils"]:
                             mask = (self.reg==sub_coil["reg_id"])
-                            face_currents = numpy.mean(self.dist_coils[coil_id][self.lc],axis=1)
+                            face_currents = numpy.mean(self.dist_coils[coil_obj["id"]][self.lc],axis=1)
                             mesh_currents[mask] *= face_currents[mask]
             mask = (abs(mesh_currents) > 0.0)
             if mask.sum() > 0.0:
@@ -1522,10 +1540,13 @@ class TokaMaker():
 
         # Plot saddle points
         if xpoint_color is not None:
-            x_points, _ = self.get_xpoints()
+            x_points, diverted = self.get_xpoints()
             if x_points is not None:
-                ax.plot(x_points[-1,0], x_points[-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none')
-                ax.plot(x_points[:-1,0], x_points[:-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
+                if diverted:
+                    ax.plot(x_points[-1,0], x_points[-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none')
+                    ax.plot(x_points[:-1,0], x_points[:-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
+                else:
+                    ax.plot(x_points[:,0], x_points[:,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
         if (opoint_color is not None) and (self.o_point[0] > 0.0):
             ax.plot(self.o_point[0], self.o_point[1], color=opoint_color, marker=opoint_marker)
         # Make 1:1 aspect ratio
@@ -1641,7 +1662,7 @@ class TokaMaker():
         return numpy.ctypeslib.as_array(pts_loc,shape=(npts.value, 2)), \
             numpy.ctypeslib.as_array(flux_loc,shape=(npts.value,))
 
-    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None,truncate_eq=True,limiter_file='',lcfs_pressure=0.0):
+    def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None,truncate_eq=True,limiter_file='',lcfs_pressure=0.0, cocos=7):
         r'''! Save current equilibrium to gEQDSK format
 
         @param filename Filename to save equilibrium to
@@ -1655,6 +1676,7 @@ class TokaMaker():
         @param truncate_eq Truncate equilibrium at `lcfs_pad`, if `False` \f$ q(\hat{\psi} > 1-pad) = q(1-pad) \f$
         @param limiter_file File containing limiter contour to use instead of TokaMaker limiter
         @param lcfs_pressure Plasma pressure on the LCFS (zero by default)
+        @param cocos COCOS version. (Only 2 or 7 supported. COCOS=7 is the default.)
         '''
         cfilename = self._oft_env.path2c(filename)
         lim_filename = self._oft_env.path2c(limiter_file)
@@ -1671,8 +1693,10 @@ class TokaMaker():
             zbounds += numpy.r_[-1.0,1.0]*dr*0.05
         if rcentr is None:
             rcentr = -1.0
+        if cocos not in [2, 7]:
+            raise Exception('Unsupported COCOS version. Only supported versions are 2 or 7.')
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_eqdsk(self._tMaker_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,error_string)
+        tokamaker_save_eqdsk(self._tMaker_ptr,cfilename,c_int(nr),c_int(nz),rbounds,zbounds,crun_info,c_double(lcfs_pad),c_double(rcentr),c_bool(truncate_eq),lim_filename,lcfs_pressure,cocos,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     

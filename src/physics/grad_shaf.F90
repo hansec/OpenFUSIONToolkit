@@ -1482,7 +1482,7 @@ call lmdif(circ_error,ncons,ncofs,coord_tmp,gpsitmp, &
 deallocate(diag,fjac,qtf,wa1,wa2)
 deallocate(wa3,wa4,ipvt)
 !
-lam=self%a*10.d0
+lam=self%a/5.d0
 val=(1.d0-TANH((coord_tmp(1)-self%a)/lam))/2.d0
 CONTAINS
 !---
@@ -2317,14 +2317,17 @@ DO i=1,self%maxits
 
   param_mat=0.d0
   param_rhs=0.d0
-  IF(self%Itor_target>0.d0)THEN
-    ! itor_alam=self%itor(psi_alam)
-    ! itor_press=self%itor(psi_press)
-    param_mat(1,:)=[itor_alam,itor_press,0.d0]
-    param_rhs(1)=self%Itor_target
-  ELSE
+  IF(self%dipole_mode)THEN
     param_mat(1,1)=1.d0
-    param_rhs(1)=self%alam
+    param_rhs(1)=1.E-8
+  ELSE
+    IF(self%Itor_target>0.d0)THEN
+      param_mat(1,:)=[itor_alam,itor_press,0.d0]
+      param_rhs(1)=self%Itor_target
+    ELSE
+      param_mat(1,1)=1.d0
+      param_rhs(1)=self%alam
+    END IF
   END IF
 
   !---Get desired O-point location for linear fit
@@ -2336,28 +2339,8 @@ DO i=1,self%maxits
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
 
   !---Add row for radial control (beta)
-  IF(self%R0_target>0.d0)THEN
-    !
-    psi_geval%u=>psi_vac
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-    param_rhs(2)=-gpsi0(1)
-    !
-    psi_geval%u=>psi_vcont
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-    psi_geval%u=>psi_alam
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi1)
-    psi_geval%u=>psi_press
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-    param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
-  ELSE IF(self%estore_target>0.d0)THEN
-    param_rhs(2)=self%estore_target
-    param_mat(2,2)=estored*3.d0/2.d0
-  ELSE IF(self%pax_target>0.d0)THEN
-    IF(self%dipole_mode)THEN
+  IF(self%dipole_mode)THEN
+    IF(self%pax_target>0.d0)THEN
       param_mat(2,2)=-1.d99
       param_rhs(2)=self%plasma_bounds(2)
       DO j=1,101
@@ -2367,16 +2350,42 @@ DO i=1,self%maxits
         END IF
       END DO
       param_mat(2,2)=self%P%f(param_rhs(2))
+      param_rhs(2)=self%pax_target
     ELSE
-      param_mat(2,2)=self%P%f(self%plasma_bounds(2))
+      param_mat(2,2)=1.d0
+      param_rhs(2)=self%pnorm
     END IF
-    param_rhs(2)=self%pax_target
-  ELSE IF(self%Ip_ratio_target>-1.d98)THEN
-    param_rhs(2)=0.d0
-    param_mat(2,:)=[itor_alam,-itor_press*self%Ip_ratio_target,0.d0]
   ELSE
-    param_mat(2,2)=1.d0
-    param_rhs(2)=self%pnorm
+    IF(self%R0_target>0.d0)THEN
+      !
+      psi_geval%u=>psi_vac
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+      param_rhs(2)=-gpsi0(1)
+      !
+      psi_geval%u=>psi_vcont
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+      psi_geval%u=>psi_alam
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi1)
+      psi_geval%u=>psi_press
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi2)
+      param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
+    ELSE IF(self%estore_target>0.d0)THEN
+      param_rhs(2)=self%estore_target
+      param_mat(2,2)=estored*3.d0/2.d0
+    ELSE IF(self%pax_target>0.d0)THEN
+      param_mat(2,2)=self%P%f(self%plasma_bounds(2))
+      param_rhs(2)=self%pax_target
+    ELSE IF(self%Ip_ratio_target>-1.d98)THEN
+      param_rhs(2)=0.d0
+      param_mat(2,:)=[itor_alam,-itor_press*self%Ip_ratio_target,0.d0]
+    ELSE
+      param_mat(2,2)=1.d0
+      param_rhs(2)=self%pnorm
+    END IF
   END IF
 
   !---Add row for vertical control
@@ -3493,8 +3502,6 @@ IF(self%dipole_mode)THEN
   END DO
   self%plasma_bounds(2)=ilim_psi
   pttmp=self%o_point
-ELSE
-  self%plasma_bounds(2)=-1.d99
 END IF
 CALL gs_analyze_saddles(self, self%o_point, self%plasma_bounds(2), x_point, x_psi)
 IF(self%dipole_mode)self%o_point=pttmp ! TODO: Handle this better!
@@ -3567,7 +3574,7 @@ IF(self%nx_points>0)THEN
       x_masked(i)=x_masked(i).AND.(DOT_PRODUCT(self%x_points(:,i)-self%x_points(:,j),self%x_vecs(:,j))>0.d0)
     END DO
     IF(oft_debug_print(1))THEN
-      WRITE(*,'(2A,5ES11.3,L)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i),.NOT.x_masked(i)
+      WRITE(*,'(2A,5ES11.3,L1)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i),.NOT.x_masked(i)
     END IF
   END DO
   j=0
@@ -3674,7 +3681,11 @@ END IF
 self%timing(4)=self%timing(4)+(omp_get_wtime()-t1)
 end subroutine gs_update_bounds
 !------------------------------------------------------------------------------
-!> Needs Docs
+!> Analyze psi and location stationary points where \f$ | \nabla \psi | = 0 \f$
+!!
+!! The location of the plasma axis is found as the O-point with the maximum
+!! value of \f$ \psi \f$. A list of unique X-points is also returned for use
+!! in determining the limiting surface (LCFS).
 !------------------------------------------------------------------------------
 subroutine gs_analyze_saddles(self, o_point, o_psi, x_point, x_psi)
 class(gs_eq), intent(inout) :: self
@@ -3686,6 +3697,7 @@ integer(4) :: i,j,m,n_unique,stype,stypes(max_unique),cell,nx_points
 integer(4), allocatable :: ncuts(:)
 real(8) :: saddle_loc(2),saddle_psi,unique_saddles(3,max_unique),ptmp(2),f(3),loc_vals(3),psi_scale_len
 real(8) :: region(2,2) = RESHAPE([-1.d99,1.d99,-1.d99,1.d99], [2,2])
+character(len=20) :: loc_str,loc_str2
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
 type(oft_lag_bg2interp), target :: psi_g2eval
@@ -3727,7 +3739,7 @@ END DO
 !
 psi_scale_len = ABS(self%plasma_bounds(2)-self%plasma_bounds(1))*5.d0/(SQRT(self%lim_area))
 unique_saddles=-1.d99
-! o_psi=-1.d99
+IF(.NOT.self%dipole_mode)o_psi=-1.d99
 n_unique=0
 !
 DO i=1,smesh%np
@@ -3738,17 +3750,34 @@ DO i=1,smesh%np
       saddle_loc=smesh%r(1:2,i)
     END IF
     ! IF(ALL(smesh%reg(smesh%lpc(smesh%kpc(i):smesh%kpc(i+1)-1))/=1))CYCLE
+    IF(ncuts(i)==0)stype=1
+    IF(ncuts(i)>3)stype=3
     IF(self%fe_rep%order>1)THEN
       CALL gs_find_saddle(self,psi_scale_len,saddle_psi,saddle_loc,stype)
     ELSE
       saddle_psi=psi_eval%vals(i)
-      IF(ncuts(i)==0)stype=1
-      IF(ncuts(i)>3)stype=3
     END IF
-    IF(stype<0)CYCLE
+    IF(stype<0)THEN
+      IF(oft_debug_print(1))THEN
+        WRITE(loc_str,'(2ES10.2)')smesh%r(1:2,i)
+        CALL oft_warn("Failed to refine candidate stationary point at "//loc_str)
+      END IF
+      CYCLE
+    END IF
     IF(saddle_psi>-1.d98)THEN
       DO m=1,n_unique
-        IF(SQRT(SUM((saddle_loc-unique_saddles(1:2,m))**2))<2.d-2)EXIT
+        IF(SQRT(SUM((saddle_loc-unique_saddles(1:2,m))**2))<2.d-2)THEN
+          IF(stype/=stypes(m))THEN
+            IF(stype==1)THEN
+              o_psi = MAX(o_psi,saddle_psi)
+              stypes(m)=1
+            END IF
+            WRITE(loc_str,'(2ES10.2)')saddle_loc
+            WRITE(loc_str2,'(2ES10.2)')unique_saddles(1:2,m)
+            CALL oft_warn("Candidate X-point and O-point converged to the same location "//loc_str//" "//loc_str2)
+          END IF
+          EXIT
+        END IF
       END DO
       IF(m>n_unique.AND.n_unique<max_unique)THEN
         n_unique = n_unique + 1
@@ -3759,7 +3788,7 @@ DO i=1,smesh%np
         cell=0
         CALL bmesh_findcell(smesh,cell,saddle_loc,f)
         IF(smesh%reg(cell)/=1)CYCLE
-        o_psi = MAX(o_psi,saddle_psi)
+        IF(stype==1)o_psi = MAX(o_psi,saddle_psi)
       END IF
     END IF
   END IF
@@ -3781,7 +3810,7 @@ DO m=1,n_unique
   CALL bmesh_findcell(smesh,cell,unique_saddles(1:2,m),f)
   IF(oft_debug_print(2))WRITE(*,*)stypes(m),unique_saddles(:,m),smesh%reg(cell)
   IF(self%saddle_rmask(smesh%reg(cell)))CYCLE
-  IF(ABS(o_psi-unique_saddles(3,m))<1.d-8)THEN
+  IF((stypes(m)==1).AND.(ABS(o_psi-unique_saddles(3,m))<1.d-8))THEN
     IF(smesh%reg(cell)/=1)CYCLE
     o_point=unique_saddles(1:2,m)
     CYCLE
@@ -3802,7 +3831,7 @@ class(gs_eq), intent(inout) :: self
 real(8), intent(in) :: psi_scale_len
 real(8), intent(inout) :: psi_x
 real(8), intent(inout) :: pt(2)
-integer(4), intent(out) :: stype
+integer(4), intent(inout) :: stype
 integer(4) :: i
 real(8) :: ptmp(2),gpsitmp(2),f(3),goptmp(3,3),v,mag_min,psi_circ(36),pt_circ(2)
 !---MINPACK variables
@@ -3814,7 +3843,7 @@ integer(4), allocatable, dimension(:) :: ipvt
 !---Determine initial guess from cell search
 ! psi_eval%u=>self%psi
 ! psi_geval%u=>self%psi
-stype=-1
+stype=stype
 f=1.d0/3.d0
 mag_min=1.d99
 psi_x=-1.d99
@@ -3858,7 +3887,7 @@ IF(SQRT(SUM(gpsitmp**2))>psi_scale_len)RETURN
 call psi_eval_active%interp(cell_active,f,goptmp,gpsitmp(1:1))
 psi_x=gpsitmp(1)
 pt=ptmp
-stype=1
+stype=ABS(stype)
 end subroutine gs_find_saddle
 !------------------------------------------------------------------------------
 !> Test whether a point is inside the LCFS
@@ -3881,8 +3910,8 @@ end function gs_test_bounds
 !------------------------------------------------------------------------------
 subroutine gs_save_fields(self,pts,npts,filename)
 class(gs_eq), intent(inout) :: self !< G-S object
-real(8), intent(in) :: pts(2,npts) !< Sampling locations [2,npts]
 integer(4), intent(in) :: npts !< Number of points to sample
+real(8), intent(in) :: pts(2,npts) !< Sampling locations [2,npts]
 character(LEN=*), intent(in) :: filename !< Output file for field data
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
@@ -4228,7 +4257,7 @@ active_tracer%maxsteps=8e4
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
-ALLOCATE(ptout(3,active_tracer%maxsteps+1))
+IF(PRESENT(dl))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
   !------------------------------------------------------------------------------
@@ -4248,7 +4277,7 @@ do j=1,nr
   CALL gs_psi2r(gseq,psi_surf,pt,psi_int)
   !!$omp end critical
   pt_last=pt
-  IF(j==1)THEN
+  IF(j==1.AND.PRESENT(dl))THEN
     CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2),ptout)
   ELSE
     CALL tracinginv_fs(gseq%fe_rep%mesh,pt(1:2))
@@ -4306,7 +4335,7 @@ do j=1,nr
   END IF
 end do
 CALL active_tracer%delete
-DEALLOCATE(ptout)
+IF(PRESENT(dl))DEALLOCATE(ptout)
 CALL field%delete()
 DEALLOCATE(field)
 !$omp end parallel
@@ -4593,20 +4622,24 @@ subroutine gs_j_interp_setup(self,gs)
 class(gs_j_interp), intent(inout) :: self
 class(gs_eq), target, intent(inout) :: gs
 CALL gs_prof_interp_setup(self,gs)
-CALL self%gs%dipole_B0%update(self%gs)
-CALL self%gs%psi%new(self%bcross_kappa_fun%u)
-CALL gs_bcrosskappa(self%gs,self%bcross_kappa_fun%u)
-CALL self%bcross_kappa_fun%setup(self%gs%fe_rep)
+IF(self%gs%dipole_mode)THEN
+  CALL self%gs%dipole_B0%update(self%gs)
+  CALL self%gs%psi%new(self%bcross_kappa_fun%u)
+  CALL gs_bcrosskappa(self%gs,self%bcross_kappa_fun%u)
+  CALL self%bcross_kappa_fun%setup(self%gs%fe_rep)
+END IF
 end subroutine gs_j_interp_setup
 !------------------------------------------------------------------------------
 !> Destroy temporary internal storage and nullify references
 !------------------------------------------------------------------------------
 subroutine gs_j_interp_delete(self)
 class(gs_j_interp), intent(inout) :: self
+IF(ASSOCIATED(self%bcross_kappa_fun%u))THEN
+  CALL self%bcross_kappa_fun%u%delete()
+  DEALLOCATE(self%bcross_kappa_fun%u)
+  CALL self%bcross_kappa_fun%delete
+END IF
 CALL gs_prof_interp_delete(self)
-CALL self%bcross_kappa_fun%u%delete()
-DEALLOCATE(self%bcross_kappa_fun%u)
-CALL self%bcross_kappa_fun%delete
 end subroutine gs_j_interp_delete
 !------------------------------------------------------------------------------
 !> Reconstruct magnetic field from a Grad-Shafranov solution

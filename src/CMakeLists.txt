@@ -3,7 +3,7 @@
 ########################
 cmake_minimum_required( VERSION 3.12 )
 project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
-set( OFT_VER_SUFFIX "-beta5" CACHE INTERNAL "Version suffix" )
+set( OFT_VER_SUFFIX "-beta6" CACHE INTERNAL "Version suffix" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
 
 option(OFT_BUILD_TESTS "Build tests?" OFF)
@@ -205,6 +205,9 @@ if( HDF5_IS_PARALLEL )
   else()
     message( FATAL_ERROR "Parallel HDF5 found, but MPI not available" )
   endif()
+endif()
+if( HDF5_VERSION VERSION_GREATER_EQUAL "1.10.0" )
+  add_definitions( -DOFT_HDF5_FS_TRACK )
 endif()
 # PETSc
 if( OFT_PETSc_ROOT ) # Only search if PETSc root is specified

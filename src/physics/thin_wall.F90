@@ -229,7 +229,13 @@ WRITE(*,'(2A,I12)')oft_indent,'# of cells     = ',self%mesh%nc
 WRITE(*,'(2A,I12)')oft_indent,'# of holes     = ',self%nholes
 WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',self%n_vcoils
 WRITE(*,'(2A,I12)')oft_indent,'# of closures  = ',self%nclosures
-IF(oft_debug_print(1))WRITE(*,*)oft_indent,'  Closures: ',self%closures
+IF(oft_debug_print(1))THEN
+  CALL oft_increase_indent
+  DO i=1,self%nclosures
+    WRITE(*,'(A,I8,3Es14.5)')oft_indent,self%closures(i),self%mesh%r(:,self%closures(i))
+  END DO
+  CALL oft_decrease_indent
+END IF
 WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',self%n_icoils
 !---Analyze mesh to construct holes
 WRITE(*,*)
@@ -451,9 +457,9 @@ END SUBROUTINE get_hole_pseq
 !> Reorder hole vertices into a sequential chain
 !---------------------------------------------------------------------------------
 SUBROUTINE order_hole_list(list_in,list_out,n)
+INTEGER(4), INTENT(in) :: n !< Number of points in list
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered list
-INTEGER(4), INTENT(in) :: n !< Number of points in list
 INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
 INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
 !---Find loop points and edges
@@ -559,6 +565,16 @@ DO i=1,self%nholes
 END DO
 CALL tw_save_hole_debug(self)
 DEALLOCATE(normals)
+!--Save jumper info
+ALLOCATE(normals(self%mesh%np,1))
+DO i=1,SIZE(self%jumper_nsets)
+  normals=0.d0
+  DO j=1,self%jumper_nsets(i)%n
+    normals(self%jumper_nsets(i)%v(j),1)=1.d0
+  END DO
+  WRITE(plt_tag,'(I4.4)')i
+  CALL self%mesh%save_vertex_scalar(normals(:,1),self%xdmf,'Jumper_'//plt_tag)
+END DO
 END SUBROUTINE tw_save_debug
 !---------------------------------------------------------------------------------
 !> Compute element to driver (Icoils) coupling matrix
@@ -1934,35 +1950,11 @@ REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 REAL(8), PARAMETER :: B_dx = 1.d-6
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,hash_tmp(4),file_counts(4)
-LOGICAL :: is_neighbor,exists
+INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
+LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
-IF(TRIM(save_file)/='none')THEN
-  INQUIRE(FILE=TRIM(save_file),EXIST=exists)
-  IF(exists)THEN
-    hash_tmp(1) = self%nelems
-    hash_tmp(2) = self%mesh%nc
-    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
-    hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
-    WRITE(*,*)'  Loading B-field operator from file: ',TRIM(save_file)
-    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
-    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
-      ALLOCATE(self%Bel(self%nelems,self%mesh%np,3))
-      CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
-      IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
-      IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
-      IF(exists)THEN
-        ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
-        CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
-        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_X',success=exists)
-        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_X',success=exists)
-      END IF
-    END IF
-  END IF
-  IF(exists)RETURN
-  DEALLOCATE(self%Bel,self%Bdr)
-END IF
+IF(PRESENT(save_file))CALL load_from_file()
 !
 bmesh=>self%mesh
 ALLOCATE(quads(18))
@@ -2130,6 +2122,42 @@ DO i=1,bmesh%np
 END DO
 self%Bdr=self%Bdr*mu0/(4.d0*pi)
 !
+IF(PRESENT(save_file))CALL load_from_file()
+CONTAINS
+SUBROUTINE load_from_file()
+INTEGER(4) :: hash_tmp(4),file_counts(4)
+LOGICAL :: exists
+IF(TRIM(save_file)/='none')THEN
+  INQUIRE(FILE=TRIM(save_file),EXIST=exists)
+  IF(exists)THEN
+    hash_tmp(1) = self%nelems
+    hash_tmp(2) = self%mesh%nc
+    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+    WRITE(*,*)'  Loading B-field operator from file: ',TRIM(save_file)
+    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
+    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
+      ALLOCATE(self%Bel(self%nelems,self%mesh%np,3))
+      CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
+      IF(exists)THEN
+        ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
+        CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_X',success=exists)
+      END IF
+    END IF
+    IF(exists)RETURN
+    IF(ASSOCIATED(self%Bel))DEALLOCATE(self%Bel)
+    IF(ASSOCIATED(self%Bdr))DEALLOCATE(self%Bdr)
+  END IF
+END IF
+END SUBROUTINE load_from_file
+!
+SUBROUTINE save_to_file()
+INTEGER(4) :: hash_tmp(4),file_counts(4)
+LOGICAL :: exists
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems
   hash_tmp(2) = self%mesh%nc
@@ -2149,6 +2177,7 @@ IF(TRIM(save_file)/='none')THEN
     END IF
   END IF
 END IF
+END SUBROUTINE save_to_file
 END SUBROUTINE tw_compute_Bops
 !---------------------------------------------------------------------------------
 !> Setup hole definition for ordered chain of vertices
@@ -2332,7 +2361,7 @@ DO i=1,ncoils
   !---Get sensor flag
   IF(xml_hasAttribute(coil_set,"sens_mask"))THEN
     CALL xml_extractDataAttribute(coil_set,"sens_mask",coil_tmp%sens_mask,num=nread,iostat=ierr)
-    IF(coil_tmp%sens_mask)WRITE(*,'(2A,I4,A)')oft_indent,'Masking coil ',i,' from sensors'
+    IF(coil_tmp%sens_mask)WRITE(*,'(2A,I6,A)')oft_indent,'Masking coil ',i,' from sensors'
   END IF
   ALLOCATE(coil_tmp%coils(coil_tmp%ncoils))
   DO j=1,coil_tmp%ncoils
@@ -2341,21 +2370,21 @@ DO i=1,ncoils
     IF(xml_hasAttribute(coil,"path"))THEN
       CALL xml_extractDataAttribute(coil,"path",coil_path,num=nread,iostat=ierr)
       IF(ierr/=0)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
       ipath=INDEX(coil_path,":")
       IF(ipath==0)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Misformatted "path" attribute in coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
       CALL hdf5_field_get_sizes(coil_path(1:ipath-1),coil_path(ipath+1:OFT_PATH_SLEN),ndims,dim_sizes)
       IF(ndims<0)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Failed to read HDF5 data sizes for coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
       IF(dim_sizes(1)/=3)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Incorrect first dimension of HDF5 dataset for coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
       coil_tmp%coils(j)%npts=dim_sizes(2)
@@ -2363,7 +2392,7 @@ DO i=1,ncoils
       ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
       CALL hdf5_read(coil_tmp%coils(j)%pts,coil_path(1:ipath-1),coil_path(ipath+1:OFT_PATH_SLEN),success=success)
       IF(.NOT.success)THEN
-        WRITE(coil_ind,'(I4,2X,I4)')i,j
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Failed to read HDF5 data for coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
     ELSE
@@ -2378,7 +2407,7 @@ DO i=1,ncoils
         CASE(1)
           CALL xml_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
           IF(ierr/=0)THEN
-            WRITE(coil_ind,'(I4,2X,I4)')i,j
+            WRITE(coil_ind,'(I6,2X,I6)')i,j
             CALL oft_abort('Error reading circular coil '//coil_ind,'tw_load_coils',__FILE__)
           END IF
           IF(coil_tmp%coils(j)%npts==0)coil_tmp%coils(j)%npts=181
@@ -2391,7 +2420,7 @@ DO i=1,ncoils
           ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
           CALL xml_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
           IF(ierr/=0)THEN
-            WRITE(coil_ind,'(I4,2X,I4)')i,j
+            WRITE(coil_ind,'(I6,2X,I6)')i,j
             CALL oft_abort('Error reading coil '//coil_ind,'tw_load_coils',__FILE__)
           END IF
       END SELECT
@@ -2492,7 +2521,10 @@ IF(ASSOCIATED(self%jumper_nsets))THEN
     hole_facs=0.d0
     DO j=1,sensors%jumpers(i)%np-1
       id=mesh_local_findedge(self%mesh,[sensors%jumpers(i)%points(j),sensors%jumpers(i)%points(j+1)])
-      IF(id==0)CALL oft_abort("No matching edge for jumper points","tw_load_sensors",__FILE__)
+      IF(id==0)THEN
+        WRITE(*,*)"No Edge matching points: ",sensors%jumpers(i)%points(j),sensors%jumpers(i)%points(j+1),' on jumper ',i
+        CALL oft_abort("No matching edge for jumper points","tw_load_sensors",__FILE__)
+      END IF
       cell=self%mesh%lec(self%mesh%kec(ABS(id)))
       DO k=self%kfh(cell),self%kfh(cell+1)-1
         vert=self%mesh%lc(self%lfh(2,k),cell)
@@ -2536,42 +2568,94 @@ CONTAINS
 !> Order jumper list into sequential chain
 !---------------------------------------------------------------------------------
 SUBROUTINE order_jumper_list(list_in,list_out,n)
+INTEGER(4), INTENT(in) :: n !< Number of vertices in jumper definition
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered vertex list
-INTEGER(4), INTENT(in) :: n !< Number of vertices in jumper definition
-!---
-INTEGER(4) :: ii,jj,k,ipt,eprev,ed,ptp
-INTEGER(4), ALLOCATABLE :: lloop_tmp(:)
+INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
+INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
 !---Find loop points and edges
-ALLOCATE(lloop_tmp(n))
+ALLOCATE(lloop_tmp(n),flag_list(n))
+flag_list=0
 lloop_tmp=list_in
 CALL sort_array(lloop_tmp, n)
-!
+!---Find suitable starting point
+i0=1
 DO jj=1,n
-  IF(self%mesh%bp(lloop_tmp(jj)))THEN
-    ipt=lloop_tmp(jj)
+  k=0
+  DO ii=self%mesh%kpe(lloop_tmp(jj)),self%mesh%kpe(lloop_tmp(jj)+1)-1
+    ed = self%mesh%lpe(ii)
+    ptp = SUM(self%mesh%le(:,ed))-lloop_tmp(jj)
+    IF(search_array(ptp, lloop_tmp, n)==0)CYCLE
+    k=k+1
+    IF(k>1)EXIT
+  END DO
+  IF(k==1)THEN
+    i0=jj
     EXIT
   END IF
-  ! ipt=lloop_tmp(1)
 END DO
+!---Create oriented list of points
+flag_list(i0)=1
+ipt=lloop_tmp(i0)
 k=1
 list_out(k)=ipt
 eprev=0
 DO jj=1,n
+  IF(jj==n-2)flag_list(i0)=0 ! Unflag first point for last link (needs to be 2 offset for link count check below)
+  last_item=-1
   DO ii=self%mesh%kpe(ipt),self%mesh%kpe(ipt+1)-1
     ed = self%mesh%lpe(ii)
     IF(ed==eprev)CYCLE
     ptp = SUM(self%mesh%le(:,ed))-ipt
-    IF(search_array(ptp, lloop_tmp, n)==0)CYCLE
+    candidate=search_array(ptp, lloop_tmp, n)
+    IF(candidate==0)THEN
+      CYCLE
+    ELSE
+      IF(flag_list(candidate)==1)CYCLE
+      nlinks=0
+      DO l=self%mesh%kpe(ptp),self%mesh%kpe(ptp+1)-1
+        ed2 = self%mesh%lpe(l)
+        ptp2 = SUM(self%mesh%le(:,ed2))-ptp
+        candidate2=search_array(ptp2, lloop_tmp, n)
+        IF(candidate2==0)CYCLE
+        IF(flag_list(candidate2)==1)CYCLE
+        nlinks=nlinks+1
+      END DO
+      last_item=[ptp,candidate,ed]
+      IF(nlinks>1)CYCLE
+      last_item=-1
+    END IF
+    flag_list(candidate)=1
     ipt=ptp
-    IF(jj==n)EXIT
-    k=k+1
-    list_out(k)=ipt
-    eprev=ed
+    IF(jj<n)THEN
+      k=k+1
+      list_out(k)=ipt
+      eprev=ed
+    END IF
     EXIT
   END DO
+  IF(last_item(1)>0)THEN
+    flag_list(last_item(2))=1
+    ipt=last_item(1)
+    IF(jj<n)THEN
+      k=k+1
+      list_out(k)=ipt
+      eprev=last_item(3)
+    END IF
+  END IF
 END DO
-DEALLOCATE(lloop_tmp)
+flag_list(i0)=1 ! Ok to not be a full loop
+IF(ANY(flag_list==0))THEN
+  WRITE(*,'(2A)')oft_indent,"No matching edges for following points:"
+  CALL oft_increase_indent
+  DO jj=1,n
+    IF(flag_list(jj)==0)WRITE(*,'(A,I8,3Es14.5)')oft_indent,lloop_tmp(jj),self%mesh%r(:,lloop_tmp(jj))
+  END DO
+  CALL oft_decrease_indent
+  CALL oft_abort('Error building jumper mesh, unmatched points exist', &
+    'tw_load_sensors::order_jumper_list', __FILE__)
+END IF
+DEALLOCATE(lloop_tmp,flag_list)
 END SUBROUTINE order_jumper_list
 end subroutine tw_load_sensors
 !------------------------------------------------------------------------------
@@ -2612,7 +2696,7 @@ IF(ierr==0)THEN
   CALL xml_extractDataContent(sens_node,self%sens_mask,num=nread,iostat=ierr)
   IF(nread/=nreg_mesh)CALL oft_abort('Sensor mask size mismatch','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
-    WRITE(*,'(A,I4,L)')oft_indent,i,self%sens_mask(i)
+    WRITE(*,'(A,I4,L1)')oft_indent,i,self%sens_mask(i)
   END DO
   ! WRITE(*,*)'  Sens mask = ',self%sens_mask
 END IF
