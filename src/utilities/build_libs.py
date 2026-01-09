@@ -2005,6 +2005,106 @@ class PETSC(package):
         self.run_build(build_lines, self.config_dict)
 
 
+class GINKGO(package):
+    def __init__(self, debug=False, version=1.11, comp_wrapper=False, shared_libs=None):
+        self.name = "GINKGO"
+        self.display_name = "Ginkgo"
+        self.version = version
+        if self.version == '1.10':
+            self.url = "https://github.com/ginkgo-project/ginkgo/archive/refs/tags/v1.10.0.tar.gz"
+        elif self.version == '1.11':
+            self.url = "https://github.com/ginkgo-project/ginkgo/archive/refs/tags/v1.11.0.tar.gz"
+        else:
+            error_exit('Invalid Ginkgo version requested (1.10 <= version <= 1.11)')
+        self.debug = debug
+        self.comp_wrapper = comp_wrapper
+        self.with_cuda = False
+        self.with_hip = False
+        self.shared_libs = shared_libs
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        if self.comp_wrapper:
+            self.skip = True
+            print("Ginkgo provided by compiler wrappers: Skipping build")
+            return self.config_dict
+        self.setup_root_struct()
+        self.config_dict['GINKGO_LIBS'] = "-lumfpack -lamd -lsuitesparseconfig"
+        # Installation check files
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['GINKGO_LIB'], 'libumfpack'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['GINKGO_LIB'], 'libumfpack.a')]
+        #
+        return self.config_dict
+
+    def build(self):
+        # if ver_lt(self.config_dict.get('CMAKE_VERSION','0.0'),"3.22"):
+        #     error_exit('CMAKE >= 3.22 required for UMFPACK', ('Update or retry with "--build_cmake=1" to build a compatible version',))
+        CMAKE_options = [
+            "-DCMAKE_INSTALL_PREFIX={GINKGO_ROOT}",
+            "-DGINKGO_DEVEL_TOOLS=OFF",
+            "-DGINKGO_BUILD_OMP=ON",
+            
+            "-DGINKGO_BUILD_DPCPP=OFF",
+            "-DGINKGO_BUILD_SYCL=OFF",
+            "-DGINKGO_BUILD_TESTS=OFF",
+            "-DGINKGO_BUILD_BENCHMARKS=OFF",
+            "-DGINKGO_BUILD_EXAMPLES=ON",
+            "-DGINKGO_BUILD_REFERENCE=OFF",
+            ""
+        ]
+        if self.shared_libs:
+            CMAKE_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=ON',
+                '-DBUILD_STATIC_LIBS:BOOL=OFF'
+            ]
+        else:
+            CMAKE_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=OFF',
+                '-DBUILD_STATIC_LIBS:BOOL=ON'
+            ]
+        #
+        if self.with_cuda:
+            CMAKE_options += [
+                "-DGINKGO_MIXED_PRECISION=OFF",
+                "-DGINKGO_BUILD_CUDA=ON",
+            ]
+        else:
+            CMAKE_options += ["-DGINKGO_BUILD_CUDA=OFF"]
+        #
+        if self.with_hip:
+            CMAKE_options += [
+                "-DGINKGO_BUILD_HIP=ON",
+            ]
+        else:
+            CMAKE_options += ["-DGINKGO_BUILD_HIP=OFF"]
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            CMAKE_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+        #
+        build_lines = [
+            "export CC={CC}",
+            "export CX={CXX}",
+            "export FC={FC}"
+        ]
+        if 'CMAKE_BIN' in self.config_dict:
+            build_lines += ["export PATH={0}:$PATH".format(self.config_dict['CMAKE_BIN'])]
+        build_lines = [
+            "rm -rf build",
+            "mkdir build",
+            "cd build",
+            "export CC={CC}",
+            "export CXX={CXX}",
+            "export FC={FC}",
+            "{CMAKE} " + " ".join(CMAKE_options) + " ..",
+            "make -j{MAKE_THREADS}",
+            "make install"
+        ]
+        self.run_build(build_lines, self.config_dict)
+
+
 # Start of main script
 parser = argparse.ArgumentParser()
 parser.description = "Third-party library build script for the Open FUSION Toolkit"
@@ -2098,6 +2198,13 @@ group.add_argument("--petsc_umfpack", default=1, type=int, choices=(0,1), help="
 group.add_argument("--petsc_version", default="3.20", type=str,
     help="Use different version of PETSc [3.18,3.19,3.20,3.21,3.22] (default: 3.20)")
 group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
+#
+group = parser.add_argument_group("Ginkgo", "Ginkgo package options")
+group.add_argument("--build_ginkgo", default=0, type=int, choices=(0,1), help="Build Ginkgo library? (default: 0)")
+group.add_argument("--ginkgo_debug", default=0, type=int, choices=(0,1), help="Build Ginkgo with debugging information (default: 0)")
+group.add_argument("--ginkgo_version", default="1.11", type=str,
+    help="Use different version of Ginkgo [1.10,1.11] (default: 1.11)")
+group.add_argument("--ginkgo_wrapper", action="store_true", default=False, help="Ginkgo included in compilers")
 #
 options = parser.parse_args()
 fetch_progress = options.no_dl_progress
@@ -2208,6 +2315,9 @@ else:
         packages.append(SUPERLU_DIST(options.superlu_dist_threads, options.superlu_dist_wrapper))
     if (options.build_umfpack == 1) or options.umfpack_wrapper:
         packages.append(UMFPACK(options.umfpack_wrapper))
+# Are we building Ginkgo?
+if (options.build_ginkgo == 1) or options.ginkgo_wrapper:
+    packages.append(GINKGO(debug=options.ginkgo_debug, version=options.ginkgo_version, comp_wrapper=options.ginkgo_wrapper))
 #
 for package in packages:
     config_dict = package.install(config_dict)
