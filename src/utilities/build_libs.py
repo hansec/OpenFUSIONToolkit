@@ -269,6 +269,8 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
     fc_vendor = 'unknown'
     if line.find('GNU') >= 0:
         fc_vendor = 'gnu'
+    elif line.find('flang') >= 0:
+        fc_vendor = 'llvm'
     elif (line.find('ifort') >= 0) or (line.find('ifx') >= 0):
         fc_vendor = 'intel'
         if line.find('ifx') >= 0:
@@ -297,6 +299,8 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
         except:
             print('Unable to determine GCC version, assuming version 12+')
             cc_version = '12.0.0'
+    elif line.find('clang') >= 0:
+        cc_vendor = 'llvm'
     elif (line.find('icc') >= 0) or (line.find('oneAPI') >= 0):
         cc_vendor = 'intel'
     # Make sure we are using compaitble C and Fortran compilers
@@ -313,6 +317,11 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
         config_dict['DEBUG_FLAGS'] = "-g"
         config_dict['CHK_FLAGS'] = "-O0 -fcheck=all"
         config_dict['OPT_FLAGS'] = "-O2"
+    elif cc_vendor = 'clang':
+        config_dict['OMP_FLAGS'] = "-mp"
+        config_dict['DEBUG_FLAGS'] = "-g"
+        config_dict['CHK_FLAGS'] = "-O0"
+        config_dict['OPT_FLAGS'] = ""
     elif cc_vendor == 'intel':
         config_dict['OMP_FLAGS'] = "-qopenmp"
         config_dict['DEBUG_FLAGS'] = "-g"
@@ -974,6 +983,7 @@ class HDF5(package):
     def __init__(self, parallel=False, cmake_build=False, build_hl=False, shared_libs=True):
         self.name = "HDF5"
         self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.6/hdf5-1.14.6.tar.gz"
+        #self.url = "https://github.com/HDFGroup/hdf5/releases/download/2.0.0/hdf5-2.0.0.tar.gz"
         self.parallel = parallel
         self.cmake_build = cmake_build
         self.build_hl = build_hl
@@ -1327,10 +1337,15 @@ int main(int argc, char** argv) {
             make_thread = ['NO_PARALLEL_MAKE=1']
         else:
             make_thread = ['MAKE_NB_JOBS={MAKE_THREADS}']
+        fopt = ["-fPIC"]
+        #if config_dict['CC_VENDOR'] == 'gnu':
+        #    fopt.append("-frecursive")
         if self.threaded:
-            oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1', 'FCOMMON_OPT="-frecursive {OMP_FLAGS} -fPIC"']
+            fopt.append("{OMP_FLAGS}")
+            oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1']
         else:
-            oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1', 'FCOMMON_OPT="-frecursive -fPIC"']
+            oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1']
+        oblas_options += ['FCOMMON_OPT="{0}"'.format(fopt)]
         if self.no_avx:
             oblas_options += ['NO_AVX=1', 'NO_AVX2=1']
         else:

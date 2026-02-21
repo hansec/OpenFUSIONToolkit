@@ -620,7 +620,7 @@ do i=1,mesh%ne
   r2=mesh%r(:,mesh%le(2,i))-hcpc(:)
   r1dv=DOT_PRODUCT(r1,hcpv(:))
   r2dv=DOT_PRODUCT(r2,hcpv(:))
-  if (XOR(ABS(r1dv)<tol,ABS(r2dv)<tol)) then
+  if ((ABS(r1dv)<tol).NEQV.(ABS(r2dv)<tol)) then
     if (ABS(r2dv)<tol) r1=r2
     r1cv=SUM(cross_product(r1,hcpv)**2)
     if(r1cv<1.d0)acurl(i)=1.d0*SIGN(.5d0,r2dv-r1dv)*SIGN(INT(1,8),mesh%global%le(i))
@@ -1141,7 +1141,7 @@ call x%set(0.d0)
 call x%get_local(xcurl,1)
 call x%get_local(xgrad,2)
 !---Integerate over the volume
-!$omp parallel default(firstprivate) shared(xcurl,xgrad) private(curved,det)
+!$omp parallel default(firstprivate) shared(xcurl,xgrad,field) private(curved,det)
 allocate(j_hcurl(hcurl_rep%nce),rop_curl(3,hcurl_rep%nce))
 allocate(j_hgrad(hgrad_rep%nce),rop_grad(3,hgrad_rep%nce))
 !$omp do schedule(guided)
@@ -1203,7 +1203,7 @@ call x%set(0.d0)
 call x%get_local(xcurl,1)
 call x%get_local(xgrad,2)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(xcurl,xgrad) private(det)
+!$omp parallel default(firstprivate) shared(xcurl,xgrad,field) private(det)
 allocate(j_hcurl(hcurl_rep%nce),rop_curl(3,hcurl_rep%nce))
 allocate(j_hgrad(hgrad_rep%nce),rop_grad(3,hgrad_rep%nce))
 !$omp do schedule(guided)

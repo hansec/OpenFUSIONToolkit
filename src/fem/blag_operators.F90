@@ -756,7 +756,7 @@ NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc) private(det)
+!$omp parallel default(firstprivate) shared(field,xloc,vmesh) private(det)
 allocate(j(lag_rep%nce))
 !$omp do schedule(guided)
 do i=1,lag_rep%mesh%nc
