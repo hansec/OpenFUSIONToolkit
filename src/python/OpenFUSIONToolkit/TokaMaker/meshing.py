@@ -82,6 +82,97 @@ def run_triangle(alpha):
     return {'vertices': vertices, 'triangles': triangles, 'triangle_attributes': triangle_attributes}
 
 
+def run_gmsh(mesh_geom):
+    '''! Run Cubit to generate 2D mesh
+
+    @param region_list List of @ref oftpy.Region objects that define mesh
+    @result `r[np,2]` Mesh vertices, `lc[nc,3]` Cell list, `reg[nc]` Region IDs
+    '''
+    try:
+        import gmsh
+    except ImportError:
+        print('Meshing requires "gmsh" python library')
+        return None
+    # Generate mesh using Cubit with standardized script
+    print('Generating mesh with GMSH:')
+    oft_warning("GMSH python wrapper is experimental, please use with care and report bugs.")
+    gmsh.initialize()
+    gmsh.model.add("tMaker_mesh")
+    gmsh.option.setNumber("Mesh.SaveAll", 1)
+    gmsh.option.setNumber("General.Verbosity", 2)
+    #
+    reg_pts = []
+    for i,  region in enumerate(mesh_geom):
+        pts_tmp = []
+        for j,  pt in enumerate(region['points']):
+            pts_tmp.append(gmsh.model.occ.addPoint(pt[0],pt[1],0.0,region['dx_curve']))
+        reg_segments = []
+        for j,  segment in enumerate(region['segments']):
+            reg_segments.append([pts_tmp[vertex] for vertex in segment])
+        reg_pts.append(reg_segments)
+
+    #
+    reg_list = []
+    reg_ed = []
+    for i,  pts in enumerate(reg_pts):
+        ed_tmp = []
+        for _, segment in enumerate(pts):
+            if len(segment) > 2:
+                # for i in range(len(segment)-1):
+                #     ed_tmp.append(gmsh.model.occ.addLine(segment[i],segment[i+1]))
+                ed_tmp.append(gmsh.model.occ.addSpline(segment))
+            else:
+                ed_tmp.append(gmsh.model.occ.addLine(segment[0],segment[1]))
+        reg_ed.append(gmsh.model.occ.addCurveLoop(ed_tmp))
+        reg_list.append(gmsh.model.occ.addPlaneSurface([reg_ed[-1],]))
+    
+    nreg = len(reg_ed)
+    ov, ovv = gmsh.model.occ.fragment([(2,nreg)], [(2,i+1) for i in range(nreg-1)])
+
+    gmsh.model.occ.synchronize()
+    # for i, item in enumerate(ov):
+    #     if i == 0:
+    #         reg_ind = nreg
+    #     else:
+    #         reg_ind = i
+    #     print(item,ovv[i])
+    #     gmsh.model.mesh.setSize([(2,item[1]),],mesh_geom[i]['dx_vol'])
+    gmsh.model.mesh.generate(2)
+    # gmsh.write("tMaker_mesh.msh")
+
+    _, pts, _ = gmsh.model.mesh.getNodes()
+    # print(len(ov),len(ovv),pts.shape)
+    r = pts.reshape((pts.shape[0]//3, 3))[:,:2]
+    lc = []
+    reg = []
+    for i, item in enumerate(ov):
+        if i == 0:
+            reg_ind = nreg
+        else:
+            reg_ind = i
+        # print(item,ovv[i])
+        _, _, lc_tmp = gmsh.model.mesh.getElements(2,item[1])
+        lc.append(lc_tmp[0].reshape((lc_tmp[0].shape[0]//3,3)))
+        reg.append(mesh_geom[reg_ind-1]['id']*numpy.ones_like(lc[-1][:,0]))
+    lc = numpy.concatenate(lc, axis=0)
+    reg = numpy.concatenate(reg, axis=0).astype(numpy.int32)
+    print('    # of vertices =  {0}'.format(r.shape[0]))
+    print('    # of triangles = {0}'.format(lc.shape[0]))
+    print('    # of regions =   {0}'.format(reg.max()))
+    #
+    reindex_flag = numpy.zeros((r.shape[0]+1,), dtype=numpy.int32)
+    reindex_flag[lc.flatten()] = 1
+    r_new = r[reindex_flag[1:] == 1]
+    rindexed_pts = numpy.cumsum(reindex_flag)-1
+    lc_new = rindexed_pts[lc]
+    # print(r.shape, lc.shape, reg.shape)
+    # print(lc.min(axis=None), lc.max(axis=None), reg.min(axis=None), reg.max(axis=None))
+    # gmsh.fltk.run()
+    gmsh.finalize()
+    # print(r.shape,np_unique)
+    return r_new, lc_new, reg
+
+
 def run_cubit(cubit_path):
     '''! Run Cubit to generate 2D mesh
 
@@ -102,7 +193,7 @@ pts_offset = 0
 reg_pts = []
 for i,  region in enumerate(mesh_geom):
     pts_tmp = 0
-    for j,  pt in enumerate(region['points']):
+    for j, pt in enumerate(region['points']):
         cubit.cmd("create vertex location {0} {1} 0.0".format(pt[0],pt[1]))
         pts_tmp += 1
     reg_segments = []
@@ -113,7 +204,7 @@ for i,  region in enumerate(mesh_geom):
 
 ed_offset = 0
 reg_ed = []
-for i,  pts in enumerate(reg_pts):
+for i, pts in enumerate(reg_pts):
     for j, segment in enumerate(pts):
         if len(segment) > 2:
             cubit.cmd("create Curve spline vertex {0} delete".format(' '.join([str(vertex) for vertex in segment])))
@@ -123,7 +214,7 @@ for i,  pts in enumerate(reg_pts):
     ed_offset += len(pts)
 
 surf_pts = []
-for i,  eds in enumerate(reg_ed):
+for i, eds in enumerate(reg_ed):
     cubit.cmd("create surface curve {0} to {1}".format(*eds))
     surf_last = cubit.surface(cubit.get_last_id("surface"))
     U_range = surf_last.get_param_range_U()
@@ -133,14 +224,15 @@ for i,  eds in enumerate(reg_ed):
         U_tmp = U_range[0]*U_ratio + U_range[1]*(1.0-U_ratio)
         for V_ratio in (0.025,0.975):
             V_tmp = V_range[0]*V_ratio + V_range[1]*(1.0-V_ratio)
-            surf_corners.append(surf_last.position_from_u_v(U_tmp,V_tmp))
+            surf_corners.append(list(surf_last.position_from_u_v(U_tmp,V_tmp)) + [U_tmp, V_tmp])
+            #surf_corners.append(surf_last.position_from_u_v(U_tmp,V_tmp))
     surf_pts.append(np.asarray(surf_corners))
     # surf_pts.append(np.asarray(surf_last.position_from_u_v(0.0,0.0)))
 
 cubit.cmd('imprint all')
 cubit.cmd('merge all')
 
-cubit.cmd("set trimesher coarse off")
+#cubit.cmd("set trimesher coarse off")
 cubit.cmd("set trimesher geometry sizing off")
 cubit.cmd('set trimesher surface gradation {0}'.format(mesh_dict['tri_gradation']))
 cubit.cmd("surface all scheme trimesh")
@@ -156,16 +248,25 @@ for sid in cubit.get_entities( "surface" ):
     for i, surf_corners in enumerate(surf_pts):
         ncount = 0
         for surf_pt in surf_corners:
-            proj_pt = np.asarray(surf_test.closest_point_trimmed(surf_pt))
-            if np.linalg.norm(proj_pt-surf_pt) < 1.E-10:
+            uv_test = np.asarray(surf_test.u_v_from_position(surf_pt[:3]))
+            uv_tmp = surf_pt[3:]
+            # print(sid,i,uv_test,uv_tmp)
+            if np.linalg.norm(uv_test-uv_tmp) < 1.E-10:
                 ncount += 1
-        if ncount > nmax:
-            nmax = ncount
+        #for surf_pt in surf_corners:
+        #    proj_pt = np.asarray(surf_test.closest_point_trimmed(surf_pt))
+        #    if np.linalg.norm(proj_pt-surf_pt) < 1.E-10:
+        #        ncount += 1
+        if ncount == 4:
             imax = i
+            break
+        #if ncount > nmax:
+        #    nmax = ncount
+        #    imax = i
     if imax < 0:
         raise ValueError('No matches')
-    if matches[imax] != -1:
-        raise ValueError('Multiple matches')
+    #if matches[imax] != -1:
+    #    raise ValueError('Multiple matches')
     matches[imax] = sid
     cubit.cmd("surface {0} size {1}".format(sid,mesh_geom[imax]['dx_vol']))
     cubit.cmd("block {0} add surface {1}".format(mesh_geom[imax]['id'],sid))
@@ -543,7 +644,7 @@ class gs_Domain:
                 vac_id += 1
         return cond_list
     
-    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None,cubit_gradation=1.05):
+    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None,cubit_gradation=1.05,use_gmsh=False):
         '''! Build mesh for specified domains
 
         @result Meshed representation (pts[np,2], tris[nc,3], regions[nc])
@@ -603,7 +704,7 @@ class gs_Domain:
         for point_def in self._extra_reg_defs:
             point_def[2] = reg_reorder[point_def[2]-1]
         # Generate mesh
-        if cubit_path is not None:
+        if use_gmsh or (cubit_path is not None):
             regions_full = []
             for region in self.regions:
                 json_tmp = region.get_json()
@@ -613,19 +714,26 @@ class gs_Domain:
                     except:
                         pass
                 regions_full.append(json_tmp)
-            with open('tMaker_cubit.json', 'w') as json_file:
-                json.dump({'regions': regions_full, 'tri_gradation': cubit_gradation}, json_file)
-            if not setup_only:
-                self._r, self._lc, self._reg = run_cubit(cubit_path)
-                if self._reg.min() <= 0:
-                    raise ValueError('Meshing error: unclaimed region detected!')
-                return self._r, self._lc, self._reg
+            if cubit_path is not None:
+                with open('tMaker_cubit.json', 'w') as json_file:
+                    json.dump({'regions': regions_full, 'tri_gradation': cubit_gradation}, json_file)
+                if not setup_only:
+                    self._r, self._lc, self._reg = run_cubit(cubit_path)
+                    if self._reg.min() <= 0:
+                        raise ValueError('CUBIT meshing error: unclaimed region detected!')
+                    return self._r, self._lc, self._reg
+            else:
+                if not setup_only:
+                    self._r, self._lc, self._reg = run_gmsh(regions_full)
+                    if self._reg.min() <= 0:
+                        raise ValueError('GMSH meshing error: unclaimed region detected!')
+                    return self._r, self._lc, self._reg
         else:
             self.mesh = Mesh(self.regions,debug=debug,extra_reg_defs=self._extra_reg_defs,merge_thresh=merge_thresh)
             if not setup_only:
                 self._r, self._lc, self._reg = self.mesh.get_mesh()
                 if self._reg.min() <= 0:
-                    raise ValueError('Meshing error: unclaimed region detected!')
+                    raise ValueError('Triangle meshing error: unclaimed region detected!')
                 return self._r, self._lc, self._reg
         return None, None, None
     
@@ -1121,30 +1229,40 @@ class Region:
             sliver_tol = numpy.cos(numpy.pi*sliver_tol/180)
             keep_points = [0]
             tangp = self._points[1,:] - self._points[0,:]
-            tangp /= numpy.linalg.norm(tangp)
-            for i in range(nv):
+            tangp_norm = numpy.linalg.norm(tangp)
+            tangp /= tangp_norm
+            pt_last = self._points[1,:]
+            remove_pts = []
+            for i in range(1,nv):
                 if (i == nv-1):
-                    tang = self._points[0,:] - self._points[i,:]
+                    tang = self._points[0,:] - pt_last
                 else:
-                    tang = self._points[i+1,:] - self._points[i,:]
+                    tang = self._points[i+1,:] - pt_last
                 tang_norm = numpy.linalg.norm(tang)
-                if tang_norm < self._dx_curve/1.E3:
-                    oft_warning("Repeated points detected at point {0} ({1}, {2})".format(i, *self._points[i,:]))
+                if tang_norm < self._dx_curve/1.E1:
+                    oft_warning("Repeated points detected at point {0} ({1}, {2})".format(i, *pt_last))
+                    remove_pts.append(i)
                     continue
                 tang /= tang_norm
                 if i > 0:
                     angle = numpy.dot(tang,tangp)
                     if angle < keep_tol:
-                        keep_points.append(i)
+                        keep_points.append(i-len(remove_pts))
                         if angle < sliver_tol:
-                            oft_warning("Sliver (angle={0:.1F}) detected at point {1} ({2}, {3})".format(180.-numpy.arccos(angle)*180./numpy.pi, i, *self._points[i,:]))
+                            oft_warning("Sliver (angle={0:.1F}) detected at point {1} ({2}, {3})".format(180.-numpy.arccos(angle)*180./numpy.pi, i, *pt_last))
+                    elif (tang_norm > self._dx_curve*2.0) or (tangp_norm > self._dx_curve*2.0):
+                        keep_points.append(i-len(remove_pts))
+                if i < nv-1:
+                    pt_last = self._points[i+1,:]
                 tangp = tang
-            keep_points.append(nv+1)
+                tangp_norm = tang_norm
+            keep_points.append(nv+1-len(remove_pts))
+            self._points = numpy.delete(self._points, remove_pts, axis=0)
             # Index segments
             k=1
             self._segments = []
             seg_tmp = []
-            for i in range(nv):
+            for i in range(nv-len(remove_pts)):
                 if i >= keep_points[k]:
                     self._segments.append(seg_tmp + [i,])
                     seg_tmp = [i,]
