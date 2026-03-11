@@ -317,7 +317,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
         config_dict['DEBUG_FLAGS'] = "-g"
         config_dict['CHK_FLAGS'] = "-O0 -fcheck=all"
         config_dict['OPT_FLAGS'] = "-O2"
-    elif cc_vendor = 'clang':
+    elif cc_vendor == 'clang':
         config_dict['OMP_FLAGS'] = "-mp"
         config_dict['DEBUG_FLAGS'] = "-g"
         config_dict['CHK_FLAGS'] = "-O0"
@@ -1339,15 +1339,15 @@ int main(int argc, char** argv) {
             make_thread = ['NO_PARALLEL_MAKE=1']
         else:
             make_thread = ['MAKE_NB_JOBS={MAKE_THREADS}']
-        fopt = ["-fPIC"]
+        # fopt = ["-fPIC"]
         #if config_dict['CC_VENDOR'] == 'gnu':
         #    fopt.append("-frecursive")
         if self.threaded:
-            fopt.append("{OMP_FLAGS}")
+            # fopt.append("{OMP_FLAGS}")
             oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1']
         else:
             oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1']
-        oblas_options += ['FCOMMON_OPT="{0}"'.format(fopt)]
+        # oblas_options += ['FCOMMON_OPT="{0}"'.format(' '.join(fopt))]
         if self.no_avx:
             oblas_options += ['NO_AVX=1', 'NO_AVX2=1']
         else:
