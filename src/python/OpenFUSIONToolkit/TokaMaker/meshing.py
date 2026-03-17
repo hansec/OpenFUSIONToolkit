@@ -82,10 +82,11 @@ def run_triangle(alpha):
     return {'vertices': vertices, 'triangles': triangles, 'triangle_attributes': triangle_attributes}
 
 
-def run_gmsh(mesh_geom):
-    '''! Run Cubit to generate 2D mesh
+def run_gmsh(mesh_geom, gmsh_options={}):
+    '''! Generate 2D mesh via gmsh Python API
 
-    @param region_list List of @ref oftpy.Region objects that define mesh
+    @param mesh_geom Dictionary containing mesh geometry and resolution information (see @ref Region for details)
+    @param gmsh_options Dictionary of GMSH options
     @result `r[np,2]` Mesh vertices, `lc[nc,3]` Cell list, `reg[nc]` Region IDs
     '''
     try:
@@ -93,43 +94,45 @@ def run_gmsh(mesh_geom):
     except ImportError:
         print('Meshing requires "gmsh" python library')
         return None
-    # Generate mesh using Cubit with standardized script
     print('Generating mesh with GMSH:')
     oft_warning("GMSH python wrapper is experimental, please use with care and report bugs.")
+    # Setup GMSH
     gmsh.initialize()
     gmsh.model.add("tMaker_mesh")
-    gmsh.option.setNumber("Mesh.SaveAll", 1)
-    gmsh.option.setNumber("General.Verbosity", 2)
-    #
+    gmsh.option.setNumber("General.Verbosity", gmsh_options.get('verbosity', 2))
+    use_splines = gmsh_options.get('use_splines', True)
+    # Create vertices and line/curve segments (edges) for each region
     reg_pts = []
-    for i,  region in enumerate(mesh_geom):
+    for region in mesh_geom:
         pts_tmp = []
-        for j,  pt in enumerate(region['points']):
+        for pt in region['points']:
             pts_tmp.append(gmsh.model.occ.addPoint(pt[0],pt[1],0.0,region['dx_curve']))
         reg_segments = []
-        for j,  segment in enumerate(region['segments']):
+        for segment in region['segments']:
             reg_segments.append([pts_tmp[vertex] for vertex in segment])
         reg_pts.append(reg_segments)
-
-    #
+    # Create line/curve loops and surfaces for each region
     reg_list = []
     reg_ed = []
     for i,  pts in enumerate(reg_pts):
         ed_tmp = []
         for _, segment in enumerate(pts):
             if len(segment) > 2:
-                # for i in range(len(segment)-1):
-                #     ed_tmp.append(gmsh.model.occ.addLine(segment[i],segment[i+1]))
-                ed_tmp.append(gmsh.model.occ.addSpline(segment))
+                if use_splines:
+                    ed_tmp.append(gmsh.model.occ.addSpline(segment))
+                else:
+                    for i in range(len(segment)-1):
+                        ed_tmp.append(gmsh.model.occ.addLine(segment[i],segment[i+1]))
             else:
                 ed_tmp.append(gmsh.model.occ.addLine(segment[0],segment[1]))
         reg_ed.append(gmsh.model.occ.addCurveLoop(ed_tmp))
         reg_list.append(gmsh.model.occ.addPlaneSurface([reg_ed[-1],]))
-    
+    # Intersect/union surfaces to get unique regions
     nreg = len(reg_ed)
     ov, ovv = gmsh.model.occ.fragment([(2,nreg)], [(2,i+1) for i in range(nreg-1)])
-
+    # Update model prior to meshing
     gmsh.model.occ.synchronize()
+    # Set mesh sizes in each region (not presently supported by GMSH)
     # for i, item in enumerate(ov):
     #     if i == 0:
     #         reg_ind = nreg
@@ -137,11 +140,10 @@ def run_gmsh(mesh_geom):
     #         reg_ind = i
     #     print(item,ovv[i])
     #     gmsh.model.mesh.setSize([(2,item[1]),],mesh_geom[i]['dx_vol'])
+    # Generate mesh
     gmsh.model.mesh.generate(2)
-    # gmsh.write("tMaker_mesh.msh")
-
+    # Get mesh data in OFT format
     _, pts, _ = gmsh.model.mesh.getNodes()
-    # print(len(ov),len(ovv),pts.shape)
     r = pts.reshape((pts.shape[0]//3, 3))[:,:2]
     lc = []
     reg = []
@@ -159,26 +161,26 @@ def run_gmsh(mesh_geom):
     print('    # of vertices =  {0}'.format(r.shape[0]))
     print('    # of triangles = {0}'.format(lc.shape[0]))
     print('    # of regions =   {0}'.format(reg.max()))
-    #
+    # Re-index vertices to remove unused points
     reindex_flag = numpy.zeros((r.shape[0]+1,), dtype=numpy.int32)
     reindex_flag[lc.flatten()] = 1
     r_new = r[reindex_flag[1:] == 1]
     rindexed_pts = numpy.cumsum(reindex_flag)-1
     lc_new = rindexed_pts[lc]
-    # print(r.shape, lc.shape, reg.shape)
-    # print(lc.min(axis=None), lc.max(axis=None), reg.min(axis=None), reg.max(axis=None))
-    # gmsh.fltk.run()
+    # Display GUI if requested
+    if gmsh_options.get('show_gui', False):
+        gmsh.fltk.run()
     gmsh.finalize()
-    # print(r.shape,np_unique)
     return r_new, lc_new, reg
 
 
 def run_cubit(cubit_path):
     '''! Run Cubit to generate 2D mesh
 
-    @param region_list List of @ref oftpy.Region objects that define mesh
+    @param cubit_path Path to Cubit executable
     @result `r[np,2]` Mesh vertices, `lc[nc,3]` Cell list, `reg[nc]` Region IDs
     '''
+    import h5py
     jou_template = """#!python
 cubit.cmd('reset')
 cubit.cmd('undo off')
@@ -316,7 +318,6 @@ cubit.cmd('export Genesis "tMaker_cubit.g" overwrite block all')
         if line.strip() != '':
             print('    '+line)
     # Read mesh from file
-    import h5py
     with h5py.File('tMaker_cubit.h5','r') as h5_file:
         r = numpy.asarray(h5_file['mesh']['R'])
         lc = numpy.asarray(h5_file['mesh']['LC'])-1
@@ -644,11 +645,22 @@ class gs_Domain:
                 vac_id += 1
         return cond_list
     
-    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None,cubit_gradation=1.05,use_gmsh=False):
+    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None,cubit_options={},use_gmsh=False,gmsh_options={}):
         '''! Build mesh for specified domains
 
+        @param debug Print debugging information during mesh generation?
+        @param merge_thresh Distance threshold for merging nearby points (only used for `triangle`-based meshing)
+        @param require_boundary Raise error if boundary region is required but not yet defined and create geometry if needed
+        @param setup_only Only perform setup and checks, do not generate mesh
+        @param cubit_path Path to Cubit executable, if set Cubit will be used to generate mesh
+        @param cubit_options Dictionary of options for Cubit meshing (only used if `cubit_path` is not `None`)
+        @param use_gmsh Use GMSH to generate mesh (requires `gmsh` Python library)
+        @param gmsh_options Dictionary of options for GMSH meshing (only used if `use_gmsh` is `True`)
         @result Meshed representation (pts[np,2], tris[nc,3], regions[nc])
         '''
+        # Check meshing selection
+        if use_gmsh and (cubit_path is not None):
+            raise ValueError('Both Cubit and GMSH requested simultaneously, please select only one meshing option')
         # Check for single plasma region
         if self.reg_type_counts['plasma'] == 0:
             raise ValueError('No plasma region specified')
@@ -716,7 +728,10 @@ class gs_Domain:
                 regions_full.append(json_tmp)
             if cubit_path is not None:
                 with open('tMaker_cubit.json', 'w') as json_file:
-                    json.dump({'regions': regions_full, 'tri_gradation': cubit_gradation}, json_file)
+                    json.dump({
+                        'regions': regions_full,
+                        'tri_gradation': cubit_options.get('tri_gradation', 1.05)
+                    }, json_file)
                 if not setup_only:
                     self._r, self._lc, self._reg = run_cubit(cubit_path)
                     if self._reg.min() <= 0:
@@ -724,7 +739,7 @@ class gs_Domain:
                     return self._r, self._lc, self._reg
             else:
                 if not setup_only:
-                    self._r, self._lc, self._reg = run_gmsh(regions_full)
+                    self._r, self._lc, self._reg = run_gmsh(regions_full,gmsh_options=gmsh_options)
                     if self._reg.min() <= 0:
                         raise ValueError('GMSH meshing error: unclaimed region detected!')
                     return self._r, self._lc, self._reg
