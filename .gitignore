@@ -1,7 +1,10 @@
 # Non-Source directories
 /build*
 /install*
+/libs*
+/oft_venv*
 /src/docs/generated
+compiler_id.txt
 
 # FORTRAN compile objects
 *.o
