@@ -1025,7 +1025,9 @@ class HDF5(package):
                 '-DHDF5_BUILD_FORTRAN:BOOL=ON',
                 '-DHDF5_BUILD_CPP_LIB=OFF',
                 '-DBUILD_TESTING=OFF',
-                '-DHDF5_BUILD_EXAMPLES=OFF'
+                '-DHDF5_BUILD_EXAMPLES=OFF',
+                '-DHDF5_BUILD_HL_LIB=OFF',
+                '-DHDF5_ENABLE_SZIP_SUPPORT=OFF'
             ]
             if self.shared_libs:
                 cmake_options += [
