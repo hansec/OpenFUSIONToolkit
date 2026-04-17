@@ -4,10 +4,16 @@ on:
     types:
       - closed
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull request number to clean up caches for'
+        required: true
+        type: string
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     permissions:
       # `actions:write` permission is required to delete caches
       #   See also: https://docs.github.com/en/rest/actions/cache?apiVersion=2022-11-28#delete-a-github-actions-cache-for-a-repository-using-a-cache-id
@@ -20,6 +26,8 @@ jobs:
       - name: Cleanup cache
         run: |
           gh extension install actions/gh-actions-cache
+
+          BRANCH="refs/pull/${PR_NUMBER}/merge"
 
           echo "Fetching list of cache key"
           cacheKeysForPR=$(gh actions-cache list -R $REPO -B $BRANCH -L 100 | cut -f 1 )
@@ -35,4 +43,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          BRANCH: refs/pull/${{ github.event.pull_request.number }}/merge
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
