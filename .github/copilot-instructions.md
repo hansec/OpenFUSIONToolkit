@@ -54,9 +54,8 @@ OFT uses a two-stage build process:
 mkdir builds && cd builds
 source ../setup_env.sh  # activates Python venv
 python ../src/utilities/build_libs.py \
-  --nthread=4 --oblas_dynamic_arch \
-  --build_umfpack=1 --build_superlu=1 \
-  --build_arpack=1 --oft_build_tests=1
+  --nthread=4 --build_umfpack=1 --build_superlu=1 \
+  --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 ```
 
 This downloads and compiles dependencies (OpenBLAS, HDF5, METIS, etc.) and generates `config_cmake.sh` — a shell script containing the full CMake invocation with all paths.
@@ -115,6 +114,7 @@ Or run individual test files:
 ```bash
 cd builds/build_release/tests
 ../../run_test.sh physics/test_TokaMaker.py -k "test_name"
+../../run_test.sh physics/test_TokaMaker.py --collect-only
 ```
 
 ### Test conventions
