@@ -84,11 +84,9 @@ myOFT = OFT_env(nthreads=2)
 mygs = TokaMaker(myOFT)
 mygs.settings.maxits = 200
 
-mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('163303/DIIID_mesh.h5')
-mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
 g1 = read_eqdsk(eqdsks[0])
-mygs.setup(order=2,F0=g1['rcentr']*g1['bcentr'])
+mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('163303/DIIID_mesh.h5')
+mygs.setup_full(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=2, F0=g1['rcentr']*g1['bcentr'])
 
 coil_bounds = {key: [-5.0E6, 5.0E6] for key in mygs.coil_sets}
 mygs.set_coil_bounds(coil_bounds)

@@ -78,9 +78,8 @@ def run_all(dummy,mp_q):
         gs_mesh.add_rectangle(0.5,0.5,1.0,1.0,'plasma')
         mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
         mygs = TokaMaker(myOFT)
-        mygs.setup_mesh(mesh_pts,mesh_lc)
         mygs.settings.free_boundary = False
-        mygs.setup(order=2)
+        mygs.setup_full(mesh_pts, mesh_lc, order=2)
         mygs.p_scale=0.0
         ffp_prof={
             'type': 'linterp',

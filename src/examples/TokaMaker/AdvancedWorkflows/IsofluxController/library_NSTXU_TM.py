@@ -30,9 +30,7 @@ def create_mygs_NSTXU(mygs):
     
     # Set up NSTX-U mesh
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('NSTXU_mesh.h5')
-    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=2,F0=1.0*0.85)
+    mygs.setup_full(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=2, F0=1.0*0.85)
     
     # Create vertical stability coil
     mygs.set_coil_vsc({'PF3U': 1.0, 'PF3L': -1.0})
