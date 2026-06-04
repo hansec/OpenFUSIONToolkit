@@ -832,7 +832,7 @@ IF(PRESENT(parent))THEN
       fc=INT(self%parent%lp(self%lc(:,i)),4)
       self%parent%lf(i)=ABS(mesh_local_findface(parent,fc))
       IF(self%parent%lf(i)==0)THEN
-        WRITE(*,*)i,fc
+        WRITE(oft_ounit,*)i,fc
         CALL oft_abort("Bad face link", "", __FILE__)
       END IF
     END DO
@@ -965,7 +965,7 @@ class(oft_bmesh), INTENT(inout) :: self !< Mesh object
 integer(i4) :: i,max_depth=1
 logical, ALLOCATABLE, DIMENSION(:) :: oriented
 IF(self%nc==0)RETURN
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Ensuring surface normal orientations'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Ensuring surface normal orientations'
 CALL oft_increase_indent
 ALLOCATE(oriented(self%nc))
 oriented=.FALSE.
@@ -973,10 +973,10 @@ do i=1,self%nc ! loop over cells
   IF(.NOT.oriented(i))THEN
     oriented(i)=.TRUE.
     CALL orient_neighbors(i,1)
-    IF(oft_debug_print(2))WRITE(*,'(2A,I8,I8)')oft_indent,'Chunk oriented',i,COUNT(oriented)
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2A,I8,I8)')oft_indent,'Chunk oriented',i,COUNT(oriented)
   END IF
 enddo
-IF(oft_debug_print(1))WRITE(*,'(2A,I8)')oft_indent,'Orientation depth =',max_depth
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A,I8)')oft_indent,'Orientation depth =',max_depth
 CALL oft_decrease_indent
 IF(COUNT(oriented)/=self%nc)CALL oft_abort("Orientation failed", &
   "sync_face_normals",__FILE__)

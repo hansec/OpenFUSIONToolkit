@@ -66,8 +66,8 @@ type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4), intent(in) :: cad_type !< Mesh type to load
 DEBUG_STACK_PUSH
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'**** Loading OFT mesh'
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A)')oft_indent,'**** Loading OFT mesh'
 END IF
 CALL oft_increase_indent
 !---Select mesh type and load
@@ -122,7 +122,7 @@ INTEGER(i4) :: i,j
 class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 IF(.NOT.fix_boundary)THEN
-  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Skipping boundary corrections'
+  IF(oft_env%head_proc)WRITE(oft_ounit,'(2A)')oft_indent,'Skipping boundary corrections'
   DEBUG_STACK_POP
   RETURN
 END IF
@@ -256,7 +256,7 @@ REAL(r8) :: u,v,w,f(4),goptmp(3,4),vol,vol_min,vol_max
 CHARACTER(LEN=70) :: error_str
 DEBUG_STACK_PUSH
 !---Check cells for negative jacobians
-IF(oft_debug_print(2))WRITE(*,'(A)')'Checking cell curvature'
+IF(oft_debug_print(2))WRITE(oft_ounit,'(A)')'Checking cell curvature'
 ALLOCATE(eflag(mesh%ne),fflag(mesh%nf))
 eflag=0.d0
 fflag=0.d0
@@ -281,7 +281,7 @@ cell_loop: DO cell=1,mesh%nc
           eflag(ABS(mesh%lce(:,cell)))=2.d0
           fflag(ABS(mesh%lcf(:,cell)))=2.d0
           nbad=nbad+1
-          IF(oft_debug_print(2))WRITE(*,'(A,I4,I6,ES11.3)')'  Negative jacobian',oft_env%rank,cell,vol
+          IF(oft_debug_print(2))WRITE(oft_ounit,'(A,I4,I6,ES11.3)')'  Negative jacobian',oft_env%rank,cell,vol
           CYCLE cell_loop
         END IF
       END DO
@@ -291,7 +291,7 @@ cell_loop: DO cell=1,mesh%nc
     eflag(ABS(mesh%lce(:,cell)))=2.d0
     fflag(ABS(mesh%lcf(:,cell)))=2.d0
     nbad=nbad+1
-    IF(oft_debug_print(2))WRITE(*,'(A,I4,I6,ES11.3)')'  Poorly shaped cell',oft_env%rank,cell,vol_max/vol_min
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(A,I4,I6,ES11.3)')'  Poorly shaped cell',oft_env%rank,cell,vol_max/vol_min
   END IF
 END DO cell_loop
 !---Synchornize flags
@@ -341,7 +341,7 @@ REAL(r8), ALLOCATABLE, DIMENSION(:,:,:) :: ct
 class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 mesh=>mg_mesh%mesh
-if(oft_debug_print(1))write(*,'(2X,A)')'Locating corner features'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Locating corner features'
 ALLOCATE(mesh%cp(mesh%np),mesh%ce(mesh%ne))
 mesh%cp=.FALSE.; mesh%ce=.FALSE.
 !---
@@ -468,7 +468,7 @@ else
   if(oft_env%nprocs==1)THEN
 #if !defined(HAVE_MPI)
     IF(oft_env%test_run)THEN
-      WRITE(*,*)'SKIP TEST'
+      WRITE(oft_ounit,*)'SKIP TEST'
       CALL oft_finalize
     END IF
 #endif
@@ -494,8 +494,8 @@ smesh=>mg_mesh%smesh
 !---Load and initialize mesh on processes
 smesh%fullmesh=.TRUE.
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A,I2)')oft_indent,'**** Generating grid level ',mg_mesh%level
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A,I2)')oft_indent,'**** Generating grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
 CALL mesh_global_periodic(mesh)
@@ -591,7 +591,7 @@ case(mesh_cubit_id)
 case(mesh_gmsh_id)
   CALL gmsh_finalize_setup
 end select
-IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(oft_ounit,*)
 DEBUG_STACK_POP
 CONTAINS
 !
@@ -649,8 +649,8 @@ write(mg_mesh%rlevel,'(I2.2)')mg_mesh%lev
 mesh=>mg_mesh%mesh
 smesh=>mg_mesh%smesh
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A,I2)')oft_indent,'**** Generating grid level ',mg_mesh%level
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A,I2)')oft_indent,'**** Generating grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
 !---Refine and setup local geometry
@@ -700,8 +700,8 @@ write(mg_mesh%rlevel,'(I2.2)')mg_mesh%lev
 mesh=>mg_mesh%mesh
 smesh=>mg_mesh%smesh
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A,I2)')oft_indent,'**** Generating grid level ',mg_mesh%level
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A,I2)')oft_indent,'**** Generating grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
 !---Decompose and setup local geometry
@@ -751,8 +751,8 @@ write(mg_mesh%rlevel,'(I2.2)')mg_mesh%lev
 mesh=>mg_mesh%mesh
 smesh=>mg_mesh%smesh
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A,I2)')oft_indent,'**** Generating grid level ',mg_mesh%level
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A,I2)')oft_indent,'**** Generating grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
 !---
@@ -803,8 +803,8 @@ integer(i4) :: i
 DEBUG_STACK_PUSH
 !---Select mesh type and load
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'**** Loading OFT surface mesh'
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A)')oft_indent,'**** Loading OFT surface mesh'
 END IF
 CALL oft_increase_indent
 select case(cad_type)
@@ -856,7 +856,7 @@ subroutine multigrid_reffix_surf(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 DEBUG_STACK_PUSH
 IF(.NOT.fix_boundary)THEN
-  IF(oft_env%head_proc)WRITE(*,*)'Skipping boundary corrections'
+  IF(oft_env%head_proc)WRITE(oft_ounit,*)'Skipping boundary corrections'
   DEBUG_STACK_POP
   RETURN
 END IF
@@ -976,7 +976,7 @@ else
   if(oft_env%nprocs==1)THEN
 #if !defined(HAVE_MPI)
     IF(oft_env%test_run)THEN
-      WRITE(*,*)'SKIP TEST'
+      WRITE(oft_ounit,*)'SKIP TEST'
       CALL oft_finalize
     END IF
 #endif
@@ -1000,8 +1000,8 @@ smesh=>mg_mesh%smesh
 ! smesh%meshname=meshname
 smesh%fullmesh=.TRUE.
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A,I2)')oft_indent,'**** Generating surface grid level ',mg_mesh%level
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A,I2)')oft_indent,'**** Generating surface grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
 ! CALL bmesh_local_init(smesh)
@@ -1065,7 +1065,7 @@ case(mesh_cubit_id)
 case(mesh_gmsh_id)
   CALL gmsh_finalize_setup
 end select
-IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(oft_ounit,*)
 DEBUG_STACK_POP
 CONTAINS
 !
@@ -1104,8 +1104,8 @@ mg_mesh%lev=mg_mesh%level
 write(mg_mesh%rlevel,'(I2.2)')mg_mesh%lev
 smesh=>mg_mesh%smesh
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A,I2)')oft_indent,'**** Generating surface grid level ',mg_mesh%level
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A,I2)')oft_indent,'**** Generating surface grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
 !---Refine and setup local geometry
@@ -1147,8 +1147,8 @@ mg_mesh%lev=mg_mesh%level-1
 write(mg_mesh%rlevel,'(I2.2)')mg_mesh%lev
 smesh=>mg_mesh%smesh
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A,I2)')oft_indent,'**** Generating surface grid level ',mg_mesh%level
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A,I2)')oft_indent,'**** Generating surface grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
 !---Decompose and setup local geometry
@@ -1189,8 +1189,8 @@ mg_mesh%lev=mg_mesh%level-1
 write(mg_mesh%rlevel,'(I2.2)')mg_mesh%lev
 smesh=>mg_mesh%smesh
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A,I2)')oft_indent,'**** Generating surface grid level ',mg_mesh%level
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A,I2)')oft_indent,'**** Generating surface grid level ',mg_mesh%level
 END IF
 CALL oft_increase_indent
 !---

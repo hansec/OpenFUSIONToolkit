@@ -548,7 +548,7 @@ class(gs_factory), intent(inout) :: self !< G-S object
 !---
 INTEGER(4) :: i,io_unit,iostat
 IF(TRIM(self%limiter_file)=='none')RETURN
-IF(oft_debug_print(1))WRITE(*,'(2A,I4,A)')oft_indent,'Loading limiters'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A,I4,A)')oft_indent,'Loading limiters'
 OPEN(NEWUNIT=io_unit,FILE=TRIM(self%limiter_file))
 READ(io_unit,*)self%nlimiter_pts
 ALLOCATE(self%limiter_pts(2,self%nlimiter_pts))
@@ -559,7 +559,7 @@ DO i=1,self%nlimiter_pts
 END DO
 CLOSE(io_unit)
 !---
-IF(oft_debug_print(1))WRITE(*,'(2A,2X,I4,A)')oft_indent,'Found ', &
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A,2X,I4,A)')oft_indent,'Found ', &
   self%nlimiter_pts,' limiter points'
 end subroutine gs_load_limiters
 !------------------------------------------------------------------------------
@@ -581,7 +581,7 @@ IF(PRESENT(skip_load))do_load=skip_load
 IF(PRESENT(make_plot))do_plot=make_plot
 !---
 IF(oft_debug_print(2))THEN
-  WRITE(*,'(2A)')oft_indent,'Setup internal regions:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Setup internal regions:'
   CALL oft_increase_indent
 END IF
 !---
@@ -636,9 +636,9 @@ DO i=1,self%ncond_regs
   IF(self%cond_regions(i)%nc==0)CYCLE
   !---
   IF(oft_debug_print(2))THEN
-    WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%cond_regions(i)%nc,' conductor cells'
-    WRITE(*,'(2A,2ES11.3)')oft_indent,'Rcenter = ',rcenter
-    WRITE(*,*)
+    WRITE(oft_ounit,'(2A,I8,A)')oft_indent,'Found ',self%cond_regions(i)%nc,' conductor cells'
+    WRITE(oft_ounit,'(2A,2ES11.3)')oft_indent,'Rcenter = ',rcenter
+    WRITE(oft_ounit,*)
   END IF
 END DO
 ALLOCATE(self%cond_weights(self%ncond_eigs))
@@ -719,9 +719,9 @@ DO i=1,self%nlimiter_nds+self%ninner_limiter_nds
 END DO
 DEALLOCATE(eflag,j_lag)
 IF(oft_debug_print(2))THEN!.AND.((self%ncoil_regs>0).OR.(self%ncond_regs>0)))THEN
-  WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%nlimiter_nds,' material limiter nodes'
-  IF(self%dipole_mode)WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%ninner_limiter_nds,' inner limiter nodes'
-  WRITE(*,*)
+  WRITE(oft_ounit,'(2A,I8,A)')oft_indent,'Found ',self%nlimiter_nds,' material limiter nodes'
+  IF(self%dipole_mode)WRITE(oft_ounit,'(2A,I8,A)')oft_indent,'Found ',self%ninner_limiter_nds,' inner limiter nodes'
+  WRITE(oft_ounit,*)
 END IF
 !---Mark non-continuous regions
 CALL set_noncontinuous
@@ -1140,11 +1140,11 @@ ELSE
   CALL equil%psi%get_local(psi_vals)
   CALL oft_random_number(psi_vals,equil%psi%n)
   CALL equil%psi%restore_local(psi_vals)
-  WRITE(*,'(2A)')oft_indent,'Computing force-free eigenmode'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Computing force-free eigenmode'
   CALL oft_increase_indent
   call eigsolver%apply(equil%psi,equil%ffp_scale)
   equil%ffp_scale=sqrt(equil%ffp_scale)
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Lambda = ',equil%ffp_scale
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Lambda = ',equil%ffp_scale
   CALL oft_decrease_indent
   !---
   IF(.NOT.self%free)THEN
@@ -2061,7 +2061,7 @@ IF(ASSOCIATED(device%coil_bounds))THEN
   bounds(:,1:device%ncoils+1)=device%coil_bounds
   CALL bvls(nCon,nDof,err_mat,rhs, &
     bounds,currs,rnorm,nsetp,w,index,ierr)
-  ! WRITE(*,*)ierr,currs
+  ! WRITE(oft_ounit,*)ierr,currs
   DEALLOCATE(w,index,bounds)
   END BLOCK
 ELSE
@@ -2261,7 +2261,7 @@ IF(((equil%R0_target>0.d0).OR.(equil%Z0_target>-1.d98)).AND.ALL(self%target_weig
 END IF
 !---
 IF(oft_env%pm)THEN
-  WRITE(*,'(2A)')oft_indent,'Starting non-linear GS solver'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Starting non-linear GS solver'
   CALL oft_increase_indent
 END IF
 DO i=1,self%maxits
@@ -2543,11 +2543,11 @@ DO i=1,self%maxits
   fail_test=fail_test.OR.((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)
   fail_test=fail_test.OR.((equil%o_point(1) < self%rmin).AND.equil%has_plasma)
   IF(fail_test)THEN
-    ! WRITE(*,*)psimax,equil%plasma_bounds,equil%o_point
+    ! WRITE(oft_ounit,*)psimax,equil%plasma_bounds,equil%o_point
     IF(psimax<gs_epsilon)error_flag=-2
     IF((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)error_flag=-3
     IF((equil%o_point(1) < self%rmin).AND.equil%has_plasma)error_flag=-4
-    ! WRITE(*,*)error_flag
+    ! WRITE(oft_ounit,*)error_flag
     EXIT
   END IF
   !---Under-relax solution
@@ -2611,7 +2611,7 @@ DO i=1,self%maxits
   CALL self%zerob_bc%apply(psip)
   nl_res=psip%dot(psip)
   !---Output progress
-  IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
+  IF(oft_env%pm)WRITE(oft_ounit,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
     SQRT(nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
   !---Check if converged
   IF((equil%R0_target>0.d0).AND.(ABS(R0_tmp-equil%R0_target)>1.d-8))CYCLE
@@ -2646,11 +2646,11 @@ IF(self%save_visit.AND.self%plot_final)THEN
 END IF
 self%timing(1)=self%timing(1)+(omp_get_wtime()-t0)
 IF(oft_env%pm)THEN
-  WRITE(*,*)'Timing:',self%timing(1)
-  WRITE(*,*)'  Source:  ',self%timing(2)
-  WRITE(*,*)'  Solve:   ',self%timing(3)
-  WRITE(*,*)'  Boundary:',self%timing(4)
-  WRITE(*,*)'  Other:   ',self%timing(1)-SUM(self%timing(2:4))
+  WRITE(oft_ounit,*)'Timing:',self%timing(1)
+  WRITE(oft_ounit,*)'  Source:  ',self%timing(2)
+  WRITE(oft_ounit,*)'  Solve:   ',self%timing(3)
+  WRITE(oft_ounit,*)'  Boundary:',self%timing(4)
+  WRITE(oft_ounit,*)'  Other:   ',self%timing(1)-SUM(self%timing(2:4))
 END IF
 !---
 CALL rhs%delete
@@ -2692,7 +2692,7 @@ IF(PRESENT(ierr))THEN
 ELSE
   IF(error_flag<0)THEN
     err_reason=gs_err_reason(error_flag)
-    WRITE(*,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
+    WRITE(oft_ounit,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
   END IF
 END IF
 end subroutine gs_solve
@@ -2735,7 +2735,7 @@ CALL equil%psi%new(psi_vcont)
 CALL equil%psi%new(psi_ffp)
 CALL equil%psi%new(psi_press)
 IF(oft_env%pm)THEN
-  WRITE(*,'(2A)')oft_indent,'Starting Linearized GS solver'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Starting Linearized GS solver'
   CALL oft_increase_indent
 END IF
 !---Update flux functions
@@ -2972,7 +2972,7 @@ IF(PRESENT(ierr))THEN
 ELSE
   IF(error_flag<0)THEN
     err_reason=gs_err_reason(error_flag)
-    WRITE(*,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
+    WRITE(oft_ounit,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
   END IF
 END IF
 end subroutine gs_lin_solve
@@ -3037,7 +3037,7 @@ END DO
 ! CALL psi_vac%add(1.d0,1.d0,psi_eddy)
 !
 IF((self%dt>0.d0).AND.oft_env%pm)THEN
-  WRITE(*,'(2A)')oft_indent,'Starting vacuum GS solver'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Starting vacuum GS solver'
   CALL oft_increase_indent
 END IF
 ! Compute inhomogeneous part
@@ -3146,7 +3146,7 @@ ELSE
   END IF
 END IF
 psimax=psi_sol%dot(psi_sol)
-IF(oft_env%pm)WRITE(*,'(A,I4,1ES12.4)')oft_indent,1,psimax
+IF(oft_env%pm)WRITE(oft_ounit,'(A,I4,1ES12.4)')oft_indent,1,psimax
 IF((self%dt>0.d0).AND.oft_env%pm)THEN
   CALL oft_decrease_indent
 END IF
@@ -3216,7 +3216,7 @@ TYPE(gs_factory), pointer :: device
 !---
 device=>self%device
 IF(device%free)CALL oft_abort("Equilibrium is free-boundary","gs_fixed_vflux",__FILE__)
-WRITE(*,'(2A)')oft_indent,"Computing fixed boundary vacuum flux"
+WRITE(oft_ounit,'(2A)')oft_indent,"Computing fixed boundary vacuum flux"
 !---
 NULLIFY(dels_free)
 CALL compute_bcmat(device)
@@ -3610,13 +3610,13 @@ ELSE
   IF(device%dipole_mode)self%o_point=pttmp ! TODO: Handle this better!
 END IF
 ! t2=omp_get_wtime()
-! WRITE(*,*)'Analyze',t2-t1
+! WRITE(oft_ounit,*)'Analyze',t2-t1
 ! alt_r=-1.d0
 ! CALL gs_psimax(self,alt_max,alt_r,alt_z)
-! WRITE(*,*)'CHK:'
-! WRITE(*,*)'  ',self%plasma_bounds(2),alt_max
-! WRITE(*,*)'  ',self%o_point(1),alt_r
-! WRITE(*,*)'  ',self%o_point(2),alt_z
+! WRITE(oft_ounit,*)'CHK:'
+! WRITE(oft_ounit,*)'  ',self%plasma_bounds(2),alt_max
+! WRITE(oft_ounit,*)'  ',self%o_point(1),alt_r
+! WRITE(oft_ounit,*)'  ',self%o_point(2),alt_z
 IF(self%o_point(1)<0.d0)THEN
   self%plasma_bounds(1)=MAXVAL(psi_vals) !MINVAL(psiv%v)
   self%plasma_bounds(2)=MAXVAL(psi_vals)
@@ -3645,7 +3645,7 @@ DO i=1,max_xpoints
     IF(self%o_point(2)>x_point(2,i))zmin=MAX(zmin,x_point(2,i))
     IF(self%o_point(2)<x_point(2,i))zmax=MIN(zmax,x_point(2,i))
     ! IF(oft_debug_print(1))THEN
-    !   WRITE(*,'(2A,5ES11.3)')oft_indent,'  X-point:',x_psi(i),x_point(:,i),self%o_point
+    !   WRITE(oft_ounit,'(2A,5ES11.3)')oft_indent,'  X-point:',x_psi(i),x_point(:,i),self%o_point
     ! END IF
     self%nx_points=self%nx_points+1
     ! self%x_points(:,self%nx_points)=x_point(:,i)
@@ -3665,7 +3665,7 @@ IF(self%nx_points>0)THEN
       self%x_vecs(:,i)=self%o_point-self%x_points(:,i)
     END IF
     IF(oft_debug_print(1))THEN
-      WRITE(*,'(2A,5ES11.3)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i)
+      WRITE(oft_ounit,'(2A,5ES11.3)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i)
     END IF
   END DO
   ALLOCATE(x_masked(self%nx_points))
@@ -3678,7 +3678,7 @@ IF(self%nx_points>0)THEN
       x_masked(i)=x_masked(i).AND.(DOT_PRODUCT(self%x_points(:,i)-self%x_points(:,j),self%x_vecs(:,j))>0.d0)
     END DO
     IF(oft_debug_print(1))THEN
-      WRITE(*,'(2A,5ES11.3,L1)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i),.NOT.x_masked(i)
+      WRITE(oft_ounit,'(2A,5ES11.3,L1)')oft_indent,'  X-point:',x_psi_sort(i),self%x_points(:,i),self%x_vecs(:,i),.NOT.x_masked(i)
     END IF
   END DO
   j=0
@@ -3709,11 +3709,11 @@ CALL psi_interp%setup(device%fe_rep)
 !   self%rlcfs(self%nlcfs,1)=zmax
 ! END IF
 ! t1=omp_get_wtime()
-! WRITE(*,*)'LCFS',t1-t2
+! WRITE(oft_ounit,*)'LCFS',t1-t2
 
 ! self%plasma_bounds(1)=-1.d99
 v=self%plasma_bounds(1)
-! WRITE(*,*)'CHK',v
+! WRITE(oft_ounit,*)'CHK',v
 !$omp parallel private(i,j,cell,f,psitmp,vtmp,pttmp)
 ! reduction(max:v)
 vtmp=self%plasma_bounds(1)
@@ -3723,7 +3723,7 @@ DO i=1,device%nlimiter_nds
   IF(psi_vals(j)>vtmp.AND.gs_test_bounds(self,device%rlimiter_nds(:,i)))THEN
     vtmp=psi_vals(j)
     pttmp=device%rlimiter_nds(:,i)
-    ! WRITE(*,*)i,device%rlimiter_nds(:,i),vtmp
+    ! WRITE(oft_ounit,*)i,device%rlimiter_nds(:,i),vtmp
   END IF
 END DO
 !$omp enddo nowait
@@ -3753,7 +3753,7 @@ END IF
 !$omp end parallel
 DEALLOCATE(psi_vals)
 ! t2=omp_get_wtime()
-! WRITE(*,*)'Limiter',t2-t1
+! WRITE(oft_ounit,*)'Limiter',t2-t1
 
 IF(v>self%plasma_bounds(1).OR.self%nx_points==0)THEN
   self%plasma_bounds(1)=v
@@ -3764,14 +3764,14 @@ IF(v>self%plasma_bounds(1).OR.self%nx_points==0)THEN
 ELSE
   self%lim_point=self%x_points(:,self%nx_points)
   IF(oft_debug_print(1))THEN
-    WRITE(*,'(2A,5ES11.3)')oft_indent,'  Active X-point:',self%plasma_bounds(1), &
+    WRITE(oft_ounit,'(2A,5ES11.3)')oft_indent,'  Active X-point:',self%plasma_bounds(1), &
       self%x_points(:,self%nx_points),self%o_point
   END IF
 END IF
 CALL psi_interp%delete()
 IF(trace_err/=0)CALL oft_warn("gs_update_bounds: Trace did not complete")
 ! t1=omp_get_wtime()
-! WRITE(*,*)'Finalize',t1-t2
+! WRITE(oft_ounit,*)'Finalize',t1-t2
 IF(device%full_domain)THEN
   self%plasma_bounds=[-1.d99,1.d99]
   self%diverted=.FALSE.
@@ -3780,7 +3780,7 @@ END IF
 !
 IF(.NOT.self%has_plasma)RETURN
 IF(oft_debug_print(1).AND.oft_env%pm)THEN
-  WRITE(*,'(2A,4ES11.3)')oft_indent,'New plasma bounds',self%plasma_bounds,self%o_point
+  WRITE(oft_ounit,'(2A,4ES11.3)')oft_indent,'New plasma bounds',self%plasma_bounds,self%o_point
 END IF
 device%timing(4)=device%timing(4)+(omp_get_wtime()-t1)
 end subroutine gs_update_bounds
@@ -3920,8 +3920,8 @@ CALL psi_eval%delete
 CALL psi_geval%delete
 CALL psi_g2eval%delete
 IF(oft_debug_print(2))THEN
-  WRITE(*,*)
-  WRITE(*,*)'Saddle points',n_unique
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,*)'Saddle points',n_unique
 END IF
 o_point(1)=-1.d0
 x_point(1,:)=-1.d0
@@ -3930,7 +3930,7 @@ DO m=1,n_unique
   ptmp=unique_saddles(1:2,m)
   cell=0
   CALL bmesh_findcell(smesh,cell,unique_saddles(1:2,m),f)
-  IF(oft_debug_print(2))WRITE(*,*)stypes(m),unique_saddles(:,m),smesh%reg(cell)
+  IF(oft_debug_print(2))WRITE(oft_ounit,*)stypes(m),unique_saddles(:,m),smesh%reg(cell)
   IF(device%saddle_rmask(smesh%reg(cell)))CYCLE
   IF((stypes(m)==1).AND.(ABS(o_psi-unique_saddles(3,m))<1.d-8))THEN
     IF(smesh%reg(cell)/=1)CYCLE
@@ -3943,7 +3943,7 @@ DO m=1,n_unique
   x_point(:,nx_points)=unique_saddles(1:2,m)
   x_psi(nx_points)=unique_saddles(3,m)
 END DO
-IF(oft_debug_print(2))WRITE(*,*)
+IF(oft_debug_print(2))WRITE(oft_ounit,*)
 end subroutine gs_analyze_saddles
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -4371,11 +4371,11 @@ END DO
 pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A)')oft_indent,'Axis Position:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Axis Position:'
   CALL oft_increase_indent
-  WRITE(*,'(2A,ES11.3)')oft_indent,'R    = ',raxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'R    = ',raxis
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
 !---Trace
@@ -4526,11 +4526,11 @@ END DO
 pt_last=[rmax,zaxis,0.d0]
 ! !---
 ! IF(oft_debug_print(1))THEN
-!   WRITE(*,'(2A)')oft_indent,'Axis Position:'
+!   WRITE(oft_ounit,'(2A)')oft_indent,'Axis Position:'
 !   CALL oft_increase_indent
-!   WRITE(*,'(2A,ES11.3)')oft_indent,'R    = ',raxis
-!   WRITE(*,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
-!   WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
+!   WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'R    = ',raxis
+!   WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
+!   WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
 !   CALL oft_decrease_indent
 ! END IF
 !---Trace
@@ -5167,7 +5167,7 @@ CLASS(oft_vector), POINTER :: oft_lag_vec
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing Boundary LAG::MOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing Boundary LAG::MOP'
   CALL mytimer%tick()
 END IF
 !------------------------------------------------------------------------------
@@ -5220,7 +5220,7 @@ CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine build_mrop
@@ -5255,7 +5255,7 @@ type(oft_timer) :: mytimer
 CLASS(oft_bmesh), POINTER :: smesh
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing Boundary LAG::LOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing Boundary LAG::LOP'
   CALL mytimer%tick()
 END IF
 dt_in=-1.d0
@@ -5524,7 +5524,7 @@ CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec,eta_reg)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine build_dels
@@ -5660,7 +5660,7 @@ end subroutine dels_coil_part
 subroutine factory_destroy(self)
 class(gs_factory), intent(inout) :: self !< G-S object
 integer(i4) :: i,j
-IF(oft_debug_print(2))WRITE(*,*)"Destroying Grad-Shafranov factory object"
+IF(oft_debug_print(2))WRITE(oft_ounit,*)"Destroying Grad-Shafranov factory object"
 IF(ASSOCIATED(self%gs_zerob_bc))THEN
   CALL self%gs_zerob_bc%delete()
   DEALLOCATE(self%gs_zerob_bc)
@@ -5780,7 +5780,7 @@ end subroutine factory_destroy
 !------------------------------------------------------------------------------
 subroutine equil_destroy(self)
 class(gs_equil), intent(inout) :: self !< G-S object
-IF(oft_debug_print(2))WRITE(*,*)"Destroying Grad-Shafranov equilibrium object"
+IF(oft_debug_print(2))WRITE(oft_ounit,*)"Destroying Grad-Shafranov equilibrium object"
 ! IF(ASSOCIATED(self%cond_weights))DEALLOCATE(self%cond_weights)
 IF(ASSOCIATED(self%isoflux_targets))DEALLOCATE(self%isoflux_targets)
 IF(ASSOCIATED(self%saddle_targets))DEALLOCATE(self%saddle_targets)
@@ -5842,7 +5842,7 @@ integer(4) :: neval,last,iwork(qp_div_lim),nfail
 real(8) :: abserr,work(5*qp_div_lim)
 character(len=6) :: nfail_str
 IF(ASSOCIATED(self%bc_lmat))RETURN
-WRITE(*,*)'Computing flux BC matrix '
+WRITE(oft_ounit,*)'Computing flux BC matrix '
 CALL set_quad_1d(quad,self%fe_rep%order+2)
 CALL set_quad_1d(quad_hp,4*self%fe_rep%order+2)
 smesh=>self%fe_rep%mesh
@@ -6125,7 +6125,7 @@ DO i=1,self%fe_rep%nbe
 END DO
 !
 CALL lapack_matinv(self%fe_rep%nbe,self%bc_lmat,ierr)
-IF(ierr>0)WRITE(*,*)'ERR1',ierr,smesh%nbp
+IF(ierr>0)WRITE(oft_ounit,*)'ERR1',ierr,smesh%nbp
 !
 vflux_mat = MATMUL(vflux_mat,MATMUL(self%bc_lmat,massmat))
 self%bc_lmat = MATMUL(massmat,MATMUL(self%bc_lmat,massmat))
@@ -6145,7 +6145,7 @@ END DO
 CALL quad%delete()
 CALL sing_quad%delete()
 DEALLOCATE(massmat,marker,bemap,vflux_mat)
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Complete'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Complete'
 end subroutine compute_bcmat
 !
 function bcmat_integrand1(x) result(itegrand)

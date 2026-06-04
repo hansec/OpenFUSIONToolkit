@@ -316,7 +316,7 @@ real(r8), ALLOCATABLE, DIMENSION(:,:) :: pt_list,tmp_list
 DEBUG_STACK_PUSH
 ALLOCATE(pt_list(tracer%neq,tracer%maxsteps))
 pt_list=0.d0
-if(oft_env%head_proc)write(*,'(A)')'Starting fieldline trace'
+if(oft_env%head_proc)WRITE(oft_ounit,'(A)')'Starting fieldline trace'
 CALL oft_mpi_barrier(ierr)
 test_timeout=.FALSE.
 CALL timeout_timer%tick
@@ -391,13 +391,13 @@ do while(active_tracer%ntrans<active_tracer%maxtrans)
       END DO
       active_tracer%ntrans=active_tracer%ntrans+1
     end if
-    ! if(oft_env%head_proc.AND.MOD(active_tracer%ntrans,100)==0)write(*,*)active_tracer%ntrans,active_tracer%nsteps
+    ! if(oft_env%head_proc.AND.MOD(active_tracer%ntrans,100)==0)WRITE(oft_ounit,*)active_tracer%ntrans,active_tracer%nsteps
 end do
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(2A)')  '  Tracing complete: ',termination_reason(active_tracer%status)
-  WRITE(*,'(A,I8)')'    # of steps     = ',active_tracer%nsteps
-  WRITE(*,'(A,I8)')'    # of transfers = ',active_tracer%ntrans
-  WRITE(*,*)
+  WRITE(oft_ounit,'(2A)')  '  Tracing complete: ',termination_reason(active_tracer%status)
+  WRITE(oft_ounit,'(A,I8)')'    # of steps     = ',active_tracer%nsteps
+  WRITE(oft_ounit,'(A,I8)')'    # of transfers = ',active_tracer%ntrans
+  WRITE(oft_ounit,*)
   ALLOCATE(tmp_list(tracer%neq,tracer%nsteps))
 #ifdef HAVE_MPI
   tmp_list=0.d0
@@ -446,7 +446,7 @@ type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_env%head_proc)THEN
   CALL mytimer%tick
-  WRITE(*,*)'Starting Poincare Section'
+  WRITE(oft_ounit,*)'Starting Poincare Section'
 END IF
 IF(tracer%neq/=3)CALL oft_abort("Poincare plot requires tracer with neq==3", &
   "tracing_poincare",__FILE__)
@@ -498,7 +498,7 @@ ELSE
 END IF
 !$omp barrier
 !$omp end parallel
-IF(nloc>=nlocpts)WRITE(*,*)'Warning: point buffer limit reached on task ',oft_env%rank
+IF(nloc>=nlocpts)WRITE(oft_ounit,*)'Warning: point buffer limit reached on task ',oft_env%rank
 IF(nthread==1)CALL omp_set_num_threads(1)
 !---Save punctures
 DO i=0,oft_env%nprocs-1
@@ -550,13 +550,13 @@ IF(oft_env%head_proc)THEN
     END SELECT
   END DO
   elapsed_time=mytimer%tock()
-  WRITE(*,'(1X,A,F6.1)')'Trace Complete: ',elapsed_time
-  WRITE(*,*)'  # exited mesh              ',counts(1)
-  WRITE(*,*)'  # exceeded transfer limit  ',counts(2)
-  WRITE(*,*)'  # exceeded step limit      ',counts(3)
-  WRITE(*,*)'  # exceeded timeout         ',counts(4)
-  WRITE(*,*)'  # stopped by buffer size   ',counts(5)
-  WRITE(*,*)'  # failure in tracer        ',counts(6)
+  WRITE(oft_ounit,'(1X,A,F6.1)')'Trace Complete: ',elapsed_time
+  WRITE(oft_ounit,*)'  # exited mesh              ',counts(1)
+  WRITE(oft_ounit,*)'  # exceeded transfer limit  ',counts(2)
+  WRITE(oft_ounit,*)'  # exceeded step limit      ',counts(3)
+  WRITE(oft_ounit,*)'  # exceeded timeout         ',counts(4)
+  WRITE(oft_ounit,*)'  # stopped by buffer size   ',counts(5)
+  WRITE(oft_ounit,*)'  # failure in tracer        ',counts(6)
 END IF
 !---Clean-up storage
 DO i=1,n
@@ -634,7 +634,7 @@ DO
           END IF
         END IF
       END IF
-      !write(*,*)'Sending Point ',oft_env%rank,i,loc_tracer%y
+      !WRITE(oft_ounit,*)'Sending Point ',oft_env%rank,i,loc_tracer%y
       IF(oft_env%nprocs==1)THEN
         loc_tracer%status=TRACER_SEND_ACTIVE
       ELSE
@@ -764,7 +764,7 @@ DO
         loc_tracer%status=TRACER_ERROR_TIME
         CYCLE
       END IF
-      !write(*,*)'Initializing Point ',oft_env%rank,i
+      !WRITE(oft_ounit,*)'Initializing Point ',oft_env%rank,i
       !---
       cell=0
       IF(mg_mesh%nbase<mg_mesh%mgdim)THEN

@@ -41,7 +41,7 @@ IF(ierr/=0)CALL oft_abort('Error parsing XML input file','test_xml',__FILE__)
 SELECT CASE(test_id)
 CASE(1)
     !---Look for element in root node
-    WRITE(*,*)'Test 1'
+    WRITE(oft_ounit,*)'Test 1'
     CALL xml_get_element(doc%root,'test1',current_node,ierr)
     IF(ierr/=0)CALL oft_abort('Error finding XML element "test1"','test_xml',__FILE__)
     !---Read content
@@ -57,7 +57,7 @@ CASE(1)
     IF(success)CALL oft_abort('Unexpectedly found "missing_attr" in XML node "test1"','test_xml',__FILE__)
 CASE(2)
     !---Test 1 for parsing of numeric content and attributes
-    WRITE(*,*)'Test 2'
+    WRITE(oft_ounit,*)'Test 2'
     CALL xml_get_element(doc%root,'test2',current_node,ierr)
     IF(ierr/=0)CALL oft_abort('Error finding XML element','test_xml',__FILE__)
     CALL xml_read_content(current_node,data,data_shape,iostat=ierr)
@@ -77,7 +77,7 @@ CASE(2)
     IF(ABS(real_tmp+1.d-3)>1.d-8)CALL oft_abort('Unexpected value for attr3','test_xml',__FILE__)
 CASE(3)
     !---Test 2 for parsing of numeric content and attributes
-    WRITE(*,*)'Test 3'
+    WRITE(oft_ounit,*)'Test 3'
     CALL xml_get_element(doc%root,'test3',current_node,ierr)
     IF(ierr/=0)CALL oft_abort('Error finding XML element','test_xml',__FILE__)
     CALL xml_read_content(current_node,data_int,data_shape,iostat=ierr)
@@ -94,7 +94,7 @@ CASE(3)
     IF(int_tmp /= -2)CALL oft_abort('Unexpected value extracted from XML attribute','test_xml',__FILE__)
 CASE(4)
     !---Test 3 for parsing of numeric content and attributes
-    WRITE(*,*)'Test 4'
+    WRITE(oft_ounit,*)'Test 4'
     CALL xml_get_element(doc%root,'test4',current_node,ierr)
     IF(ierr/=0)CALL oft_abort('Error finding XML element','test_xml',__FILE__)
     CALL xml_read_content(current_node,data,data_shape,iostat=ierr)

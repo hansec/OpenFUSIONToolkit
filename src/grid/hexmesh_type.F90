@@ -239,12 +239,12 @@ IF(np>0)THEN
     DO j=1,order-1
       inode(ind1) = inode(ind1) + inc1
       inodese(:,j,i) = inode
-      ! WRITE(*,*)i,j,inode
+      ! WRITE(oft_ounit,*)i,j,inode
     END DO
   END DO
   !---Faces
   ALLOCATE(inodesf(3,np**2,6))
-  ! WRITE(*,*)
+  ! WRITE(oft_ounit,*)
   DO i=1,6
     ! Direction 1
     ind1 = MAXLOC(ABS(inodesp(:,hex_fc(2,i))-inodesp(:,hex_fc(1,i))), DIM=1)
@@ -258,19 +258,19 @@ IF(np>0)THEN
       DO k=1,np
         inode(ind2) = inode(ind2) + inc2
         inodesf(:,(j-1)*np+k,i) = inode
-        ! WRITE(*,*)i,j,k,inode
+        ! WRITE(oft_ounit,*)i,j,k,inode
       END DO
       inode(ind2) = inodesp(ind2,hex_fc(1,i))
     END DO
   END DO
   !---Cell
   ALLOCATE(inodesc(3,np**3))
-  ! WRITE(*,*)
+  ! WRITE(oft_ounit,*)
   DO i=1,np
     DO j=1,np
       DO k=1,np
         inodesc(:,(i-1)*np*np+(j-1)*np+k) = (/1+i,1+j,1+k/)
-        ! WRITE(*,*)i,j,k,(/1+i,1+j,1+k/)
+        ! WRITE(oft_ounit,*)i,j,k,(/1+i,1+j,1+k/)
       END DO
     END DO
   END DO
@@ -298,15 +298,15 @@ inc1 = (p2-p1)
 ! Direction 2
 inc2 = (p3-p2)
 !
-! WRITE(*,*)p1
-! WRITE(*,*)p2
-! WRITE(*,*)p3
-! WRITE(*,*)inc1
-! WRITE(*,*)inc2
+! WRITE(oft_ounit,*)p1
+! WRITE(oft_ounit,*)p2
+! WRITE(oft_ounit,*)p3
+! WRITE(oft_ounit,*)inc1
+! WRITE(oft_ounit,*)inc2
 DO i=1,np
   DO j=1,np
     inode = p1 + inc1*i/(order) + inc2*j/(order) - 1
-    ! WRITE(*,*)i,j,inode
+    ! WRITE(oft_ounit,*)i,j,inode
     finds((i-1)*np+j) = (inode(1)-1)*np + inode(2)
   END DO
 END DO
@@ -333,15 +333,15 @@ inc1 = (p2-p1)
 ! Direction 2
 inc2 = (p3-p2)
 !
-! WRITE(*,*)p1
-! WRITE(*,*)p2
-! WRITE(*,*)p3
-! WRITE(*,*)inc1
-! WRITE(*,*)inc2
+! WRITE(oft_ounit,*)p1
+! WRITE(oft_ounit,*)p2
+! WRITE(oft_ounit,*)p3
+! WRITE(oft_ounit,*)inc1
+! WRITE(oft_ounit,*)inc2
 DO i=1,np
   DO j=1,np
     inode = p1 + inc1*i/(order) + inc2*j/(order) - 1
-    ! WRITE(*,*)i,j,inode
+    ! WRITE(oft_ounit,*)i,j,inode
     finds((i-1)*np+j) = (inode(1)-1)*np + inode(2)
   END DO
 END DO
@@ -583,7 +583,7 @@ uv=1.d0/2.d0
 call lmdif(tm_findcell_error,nerr,neq,uv,error, &
            ftol,xtol,gtol,maxfev,epsfcn,diag,mode,factor,nprint,info, &
            nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
-!IF(info>4)WRITE(*,*)'High-order find failed',i,info,nfev
+!IF(info>4)WRITE(oft_ounit,*)'High-order find failed',i,info,nfev
 f(1:3)=uv
 DEBUG_STACK_POP
 end function hexmesh_phys2logho
@@ -970,9 +970,9 @@ A(6,5)=2*jac(3,2)*jac(3,3)
 A(6,6)=jac(3,3)**2
 !---Invert
 CALL dgetrf(6,6,A,6,ipiv,info)
-IF(info/=0)WRITE(*,*)info
+IF(info/=0)WRITE(oft_ounit,*)info
 CALL dgetri(6,A,6,ipiv,work,12,info)
-IF(info/=0)WRITE(*,*)info
+IF(info/=0)WRITE(oft_ounit,*)info
 DEBUG_STACK_POP
 end subroutine hexmesh_g2inv
 END MODULE oft_hexmesh_type

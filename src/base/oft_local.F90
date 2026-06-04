@@ -15,6 +15,7 @@
 !--------------------------------------------------------------------------------
 MODULE oft_local
 USE, INTRINSIC :: iso_c_binding, only: c_int, c_ptr, c_long
+USE, INTRINSIC :: iso_fortran_env, ONLY: output_unit, error_unit
 #ifdef __INTEL_COMPILER
 USE ifport ! Intel fortran portability library
 #endif
@@ -32,6 +33,9 @@ INTEGER, PARAMETER :: r10=SELECTED_REAL_KIND(18,4900)   !< Extended precision fl
 INTEGER, PARAMETER :: c4=r4                             !< Single precision complex spec (4 Bytes)
 INTEGER, PARAMETER :: c8=r8                             !< Double precision complex spec (8 Bytes)
 REAL(r8), PARAMETER :: pi=3.141592653589793238462643_r8 !< \f$ \pi \f$
+!---I/O units for status and error messages
+INTEGER :: oft_ounit = output_unit !< Output unit for status messages
+INTEGER :: oft_eunit = error_unit !< Output unit for error messages
 !---------------------------------------------------------------------------------
 ! Define PETSc address type
 ! - This is the integer value of the C memory pointer to a given object

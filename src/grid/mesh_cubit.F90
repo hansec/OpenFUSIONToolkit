@@ -193,10 +193,10 @@ IF(oft_env%head_proc)THEN
   IF(ierr<0)CALL oft_abort('No "cubit_options" found in input file.','mesh_cubit_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cubit_options" in input file.','mesh_cubit_load',__FILE__)
   IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','mesh_cubit_load',__FILE__)
-  WRITE(*,'(2A)')oft_indent,'CUBIT volume mesh:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'CUBIT volume mesh:'
   CALL oft_increase_indent
-  WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
-  WRITE(*,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
+  WRITE(oft_ounit,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
+  WRITE(oft_ounit,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
 ELSE
   CALL oft_increase_indent
 END IF
@@ -255,7 +255,7 @@ IF(TRIM(inpname)/='none')THEN
   call mesh_cubit_read_surface
   call mesh_cubit_geom
 ELSE
-  IF(oft_debug_print(2))WRITE(*,'(A)')oft_indent,'No Cubit geometry file specified'
+  IF(oft_debug_print(2))WRITE(oft_ounit,'(A)')oft_indent,'No Cubit geometry file specified'
 END IF
 #endif
 !---Load mesh vertices
@@ -345,12 +345,12 @@ END IF
 IF(oft_env%rank/=0)DEALLOCATE(mesh%r,mesh%lc,mesh%reg)
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A,I8)')oft_indent,'# of Regions      = ',nblks
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of Regions      = ',nblks
 #ifdef HAVE_ONURBS
-  WRITE(*,'(2A,2I8)')oft_indent,'# of CAD curves   = ',ngwc,ngmc
-  WRITE(*,'(2A,2I8)')oft_indent,'# of CAD surfaces = ',ngws,ngms
+  WRITE(oft_ounit,'(2A,2I8)')oft_indent,'# of CAD curves   = ',ngwc,ngmc
+  WRITE(oft_ounit,'(2A,2I8)')oft_indent,'# of CAD surfaces = ',ngws,ngms
 #else
-  WRITE(*,'(2A)')oft_indent,'Skipping CAD information: Not compiled with OpenNURBS'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Skipping CAD information: Not compiled with OpenNURBS'
 #endif
 END IF
 CALL oft_decrease_indent
@@ -366,7 +366,7 @@ integer(i4) :: i,j,nc
 integer(i4), allocatable :: rmark(:),lctmp(:,:)
 character(3) :: blknm
 character(40) :: eltype
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Loading Cubit regions'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Loading Cubit regions'
 CALL oft_increase_indent
 !---
 allocate(rmark(nblks))
@@ -385,7 +385,7 @@ do i=1,nblks
   else if(i>=1000)then
     CALL oft_abort('Invalid Exodus variable index (connectXXX)','mesh_cubit_read_regions',__FILE__)
   end if
-  IF(oft_debug_print(2))WRITE(*,'(3A)')oft_indent,'Loading cell count for region ',TRIM(blknm)
+  IF(oft_debug_print(2))WRITE(oft_ounit,'(3A)')oft_indent,'Loading cell count for region ',TRIM(blknm)
   !---
   call mesh_cubit_error(NF90_inq_varid(ncid,"connect"//TRIM(blknm),blkID))
   call mesh_cubit_error(NF90_INQUIRE_ATTRIBUTE(ncid,blkID,"elem_type",len=att_len))
@@ -440,7 +440,7 @@ do i=1,nblks
   else if(i>99.AND.i<1000)then
     write(blknm,'(I3)')i
   end if
-  IF(oft_debug_print(2))WRITE(*,'(3A)')oft_indent,'Loading cell lists for region ',TRIM(blknm)
+  IF(oft_debug_print(2))WRITE(oft_ounit,'(3A)')oft_indent,'Loading cell lists for region ',TRIM(blknm)
   !---
   call mesh_cubit_error(NF90_INQ_DIMID(ncid,"num_el_in_blk"//TRIM(blknm),elemID))
   call mesh_cubit_error(NF90_INQUIRE_DIMENSION(ncid,elemID,len=nc))
@@ -516,9 +516,9 @@ IF(oft_env%head_proc)THEN
   IF(ierr<0)CALL oft_abort('No "cubit_options" found in input file.','smesh_cubit_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cubit_options" in input file.','smesh_cubit_load',__FILE__)
   IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','smesh_cubit_load',__FILE__)
-  WRITE(*,'(2A)')oft_indent,'CUBIT surface mesh:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'CUBIT surface mesh:'
   CALL oft_increase_indent
-  WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
+  WRITE(oft_ounit,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
 ELSE
   CALL oft_increase_indent
 END IF
@@ -656,11 +656,11 @@ smesh%r(3,:)=smesh%r(3,:)*zstretch
 ! END IF
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A,I8)')oft_indent,'# of Regions      = ',nblks
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of Regions      = ',nblks
 #ifdef HAVE_ONURBS
-  WRITE(*,'(2A,2I8)')oft_indent,'# of CAD curves   = ',ngwc,ngmc
+  WRITE(oft_ounit,'(2A,2I8)')oft_indent,'# of CAD curves   = ',ngwc,ngmc
 #else
-  WRITE(*,'(2A)')oft_indent,'Skipping CAD information: Not compiled with OpenNURBS'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Skipping CAD information: Not compiled with OpenNURBS'
 #endif
 END IF
 CALL oft_decrease_indent
@@ -690,7 +690,7 @@ integer(i4), allocatable :: rmark(:),lctmp(:,:)
 character(3) :: blknm
 character(40) :: eltype
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Loading Cubit regions'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Loading Cubit regions'
 CALL oft_increase_indent
 !---
 allocate(rmark(nblks))
@@ -699,7 +699,7 @@ nregions=0
 smesh%nc=0
 !---
 do i=1,nblks
-  IF(oft_debug_print(2))WRITE(*,'(3A)')oft_indent,'Loading cell count for region ',TRIM(format_blknum(i))
+  IF(oft_debug_print(2))WRITE(oft_ounit,'(3A)')oft_indent,'Loading cell count for region ',TRIM(format_blknum(i))
   !---
   call mesh_cubit_error(NF90_inq_varid(ncid,"connect"//TRIM(format_blknum(i)),blkID))
   call mesh_cubit_error(NF90_INQUIRE_ATTRIBUTE(ncid,blkID,"elem_type",len=att_len))
@@ -747,7 +747,7 @@ END IF
 smesh%nc=0
 do i=1,nblks
   if(rmark(i)==0)cycle
-  IF(oft_debug_print(2))WRITE(*,'(3A)')oft_indent,'Loading cell lists for region ',TRIM(format_blknum(i))
+  IF(oft_debug_print(2))WRITE(oft_ounit,'(3A)')oft_indent,'Loading cell lists for region ',TRIM(format_blknum(i))
   call mesh_cubit_error(NF90_INQ_DIMID(ncid,"num_el_in_blk"//TRIM(format_blknum(i)),elemID))
   call mesh_cubit_error(NF90_INQUIRE_DIMENSION(ncid,elemID,len=nc))
   call mesh_cubit_error(NF90_INQ_VARID(ncid,"connect"//TRIM(format_blknum(i)),lcID))
@@ -887,7 +887,7 @@ character(LEN=5) :: id
 CHARACTER(LEN=exodus_string_len) :: ntmp
 CHARACTER(LEN=exodus_string_len), ALLOCATABLE :: block_names(:),qa_records(:,:)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Loading Cubit surfaces'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Loading Cubit surfaces'
 !---
 ALLOCATE(block_names(nblks))
 call mesh_cubit_error(NF90_inq_varid(ncid,"eb_names",ebID))
@@ -897,7 +897,7 @@ ALLOCATE(qa_records(4,1))
 call mesh_cubit_error(NF90_inq_varid(ncid,"qa_records",qaID))
 call mesh_cubit_error(NF90_GET_VAR(ncid,qaID,qa_records))
 READ(qa_records(2,1),'(F4.1)')cubit_version
-IF(oft_debug_print(1))WRITE(*,'(4X,A,F4.1)')'Generated by CUBIT v',cubit_version
+IF(oft_debug_print(1))WRITE(oft_ounit,'(4X,A,F4.1)')'Generated by CUBIT v',cubit_version
 !---
 allocate(rmark(nblks))
 rmark=0
@@ -928,10 +928,10 @@ do i=1,nblks
     !---
     valid_link=(ntmp(1:4)=='TBC_')
     IF(.NOT.valid_link)THEN
-      WRITE(*,*)'======================'
-      WRITE(*,*)'ERROR: Non-curve geometry linked to "BAR" region'
-      WRITE(*,*)'  Block: ',i
-      WRITE(*,*)'  Geom:  ',ntmp
+      WRITE(oft_ounit,*)'======================'
+      WRITE(oft_ounit,*)'ERROR: Non-curve geometry linked to "BAR" region'
+      WRITE(oft_ounit,*)'  Block: ',i
+      WRITE(oft_ounit,*)'  Geom:  ',ntmp
       CALL oft_abort('Invalid Cubit geometry','mesh_cubit_read_surface',__FILE__)
     END IF
   else if(eltype(1:4)=="TRI3")then
@@ -944,10 +944,10 @@ do i=1,nblks
       valid_link=(ntmp(1:4)=='TBS_')
     END IF
     IF(.NOT.valid_link)THEN
-      WRITE(*,*)'======================'
-      WRITE(*,*)'ERROR: Non-surface geometry linked to "TRI" region'
-      WRITE(*,*)'  Block: ',i
-      WRITE(*,*)'  Geom:  ',ntmp
+      WRITE(oft_ounit,*)'======================'
+      WRITE(oft_ounit,*)'ERROR: Non-surface geometry linked to "TRI" region'
+      WRITE(oft_ounit,*)'  Block: ',i
+      WRITE(oft_ounit,*)'  Geom:  ',ntmp
       CALL oft_abort('Invalid Cubit geometry','mesh_cubit_read_surface',__FILE__)
     END IF
   else if(eltype(1:5)=="QUAD4")then
@@ -960,10 +960,10 @@ do i=1,nblks
       valid_link=(ntmp(1:4)=='TBS_')
     END IF
     IF(.NOT.valid_link)THEN
-      WRITE(*,*)'======================'
-      WRITE(*,*)'ERROR: Non-surface geometry linked to "QUAD" region'
-      WRITE(*,*)'  Block: ',i
-      WRITE(*,*)'  Geom:  ',ntmp
+      WRITE(oft_ounit,*)'======================'
+      WRITE(oft_ounit,*)'ERROR: Non-surface geometry linked to "QUAD" region'
+      WRITE(oft_ounit,*)'  Block: ',i
+      WRITE(oft_ounit,*)'  Geom:  ',ntmp
       CALL oft_abort('Invalid Cubit geometry','mesh_cubit_read_surface',__FILE__)
     END IF
   end if
@@ -1042,7 +1042,7 @@ character(kind=c_char,len=31) :: obj_name
 DEBUG_STACK_PUSH
 IF(cubit_version<13.95)CALL oft_abort('CUBIT version too old, v14.0+ required', &
 'mesh_cubit_geom',__FILE__)
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Loading OpenNURBS geometry:'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Loading OpenNURBS geometry:'
 CALL oft_increase_indent
 !---
 call nurbs_init(ierr)
@@ -1088,14 +1088,14 @@ do i=1,ngwc
   read(id,'(I5)')j
   wf_curves(i)%cid=j
   IF(oft_debug_print(3))THEN
-    WRITE(*,'(2A)')oft_indent,'============================'
-    WRITE(*,'(3A)')oft_indent,'Found CAD Curve: id = ',TRIM(obj_name)
-    WRITE(*,'(2A,L)')oft_indent,'Linear: ',wf_curves(i)%linear
-    WRITE(*,'(2A,L)')oft_indent,'Periodic: ',wf_curves(i)%periodic
-    WRITE(*,'(2A,2ES12.4)')oft_indent,'Domain: ',wf_curves(i)%domain
-    WRITE(*,'(2A,3ES12.4)')oft_indent,'Start Point: ',pt1
-    WRITE(*,'(2A,3ES12.4)')oft_indent,'End Point:   ',pt2
-    WRITE(*,'(2A)')oft_indent,'============================'
+    WRITE(oft_ounit,'(2A)')oft_indent,'============================'
+    WRITE(oft_ounit,'(3A)')oft_indent,'Found CAD Curve: id = ',TRIM(obj_name)
+    WRITE(oft_ounit,'(2A,L)')oft_indent,'Linear: ',wf_curves(i)%linear
+    WRITE(oft_ounit,'(2A,L)')oft_indent,'Periodic: ',wf_curves(i)%periodic
+    WRITE(oft_ounit,'(2A,2ES12.4)')oft_indent,'Domain: ',wf_curves(i)%domain
+    WRITE(oft_ounit,'(2A,3ES12.4)')oft_indent,'Start Point: ',pt1
+    WRITE(oft_ounit,'(2A,3ES12.4)')oft_indent,'End Point:   ',pt2
+    WRITE(oft_ounit,'(2A)')oft_indent,'============================'
   END IF
 end do
 do i=1,ngws
@@ -1126,13 +1126,13 @@ do i=1,ngws
   read(id,'(I5)')j
   wf_surfs(i)%sid=j
   IF(oft_debug_print(3))THEN
-    WRITE(*,'(2A)')oft_indent,'============================'
-    WRITE(*,'(3A)')oft_indent,'Found CAD surface: id = ',TRIM(obj_name)
-    WRITE(*,'(2A,L)')oft_indent,'Planar: ',wf_surfs(i)%planar
-    WRITE(*,'(2A,2L)')oft_indent,'Periodic: ',wf_surfs(i)%periodic
-    WRITE(*,'(2A,4L)')oft_indent,'Singular: ',wf_surfs(i)%singular(:,1),wf_surfs(i)%singular(:,2)
-    WRITE(*,'(2A,4ES12.4)')oft_indent,'Domain: ',wf_surfs(i)%domain(:,1),wf_surfs(i)%domain(:,2)
-    WRITE(*,'(2A)')oft_indent,'============================'
+    WRITE(oft_ounit,'(2A)')oft_indent,'============================'
+    WRITE(oft_ounit,'(3A)')oft_indent,'Found CAD surface: id = ',TRIM(obj_name)
+    WRITE(oft_ounit,'(2A,L)')oft_indent,'Planar: ',wf_surfs(i)%planar
+    WRITE(oft_ounit,'(2A,2L)')oft_indent,'Periodic: ',wf_surfs(i)%periodic
+    WRITE(oft_ounit,'(2A,4L)')oft_indent,'Singular: ',wf_surfs(i)%singular(:,1),wf_surfs(i)%singular(:,2)
+    WRITE(oft_ounit,'(2A,4ES12.4)')oft_indent,'Domain: ',wf_surfs(i)%domain(:,1),wf_surfs(i)%domain(:,2)
+    WRITE(oft_ounit,'(2A)')oft_indent,'============================'
   END IF
 end do
 CALL oft_decrease_indent
@@ -1151,7 +1151,7 @@ integer(i4) :: i,j,m,ind,k,ep(2),fp(3),etmp(2),ftmp(3),ierr(4),chk
 integer(i4), allocatable, dimension(:) :: fmap,lce_tmp,lcf_tmp
 IF(TRIM(inpname)=='none')RETURN
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Linking OpenNURBS geometry to mesh'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Linking OpenNURBS geometry to mesh'
 CALL oft_increase_indent
 !---Allocate preliminary linkages
 ALLOCATE(lce_tmp(mesh%ne),lcf_tmp(mesh%nf))
@@ -1164,7 +1164,7 @@ DO i=1,ngmc
   chk=0
   DO j=1,ngwc
     IF(wf_curves(j)%cid/=model_curves(i)%top_cid)CYCLE
-    IF(oft_debug_print(3))WRITE(*,*)model_curves(i)%top_cid,wf_curves(j)%cid
+    IF(oft_debug_print(3))WRITE(oft_ounit,*)model_curves(i)%top_cid,wf_curves(j)%cid
     model_curves(i)%cid=j
     !---Attempt to find edge vertices on current CAD curve
     etmp=model_curves(i)%lgme(:,1)
@@ -1172,9 +1172,9 @@ DO i=1,ngmc
     CALL wf_curves(j)%locate(pt,u,v,ierr(1))
     pt=mesh%r(:,etmp(2))
     CALL wf_curves(j)%locate(pt,u,v,ierr(2))
-    IF(oft_debug_print(3))WRITE(*,*)i,j,ierr(1:2)
+    IF(oft_debug_print(3))WRITE(oft_ounit,*)i,j,ierr(1:2)
     IF(ALL(ierr(1:2)==0))THEN
-      IF(oft_debug_print(3))WRITE(*,*)'Bar set ',INT(i,2),' linked with curve ',INT(j,2)
+      IF(oft_debug_print(3))WRITE(oft_ounit,*)'Bar set ',INT(i,2),' linked with curve ',INT(j,2)
       IF(.NOT.wf_curves(j)%linear)THEN
         DO m=1,model_curves(i)%ne
           etmp=model_curves(i)%lgme(:,m)
@@ -1187,7 +1187,7 @@ DO i=1,ngmc
       chk=1
     END IF
   END DO
-  IF(chk==0.AND.oft_debug_print(3))WRITE(*,'(2A,I6,A)')oft_indent,'Bar set ',i,' unlinked'
+  IF(chk==0.AND.oft_debug_print(3))WRITE(oft_ounit,'(2A,I6,A)')oft_indent,'Bar set ',i,' unlinked'
 END DO
 !---Get face boundary mapping
 ALLOCATE(fmap(mesh%nf))
@@ -1204,10 +1204,10 @@ DO i=1,ngms
       pt=mesh%r(:,model_surfaces(i)%lgmf(m,1))
       CALL wf_surfs(j)%locate(pt,u,v,ierr(m))
     END DO
-    IF(oft_debug_print(3))WRITE(*,*)i,j,ierr(1:mesh%face_np)
+    IF(oft_debug_print(3))WRITE(oft_ounit,*)i,j,ierr(1:mesh%face_np)
     !---If matched link remaining faces
     IF(ALL(ierr(1:mesh%face_np)==0))THEN
-      IF(oft_debug_print(3))WRITE(*,'(2A,I6,A,I6)')oft_indent,'Tri set ',i, &
+      IF(oft_debug_print(3))WRITE(oft_ounit,'(2A,I6,A,I6)')oft_indent,'Tri set ',i, &
         ' linked with surface ',wf_surfs(j)%id
       DO m=1,model_surfaces(i)%nf
         ind=abs(mesh_local_findface(mesh,model_surfaces(i)%lgmf(:,m))) ! Find face on mesh
@@ -1221,7 +1221,7 @@ DO i=1,ngms
       EXIT
     END IF
   END DO
-  IF(chk==0.AND.oft_debug_print(3))WRITE(*,'(2A,I6,A)')oft_indent,'Tri set ',i,' unlinked'
+  IF(chk==0.AND.oft_debug_print(3))WRITE(oft_ounit,'(2A,I6,A)')oft_indent,'Tri set ',i,' unlinked'
 END DO
 DEALLOCATE(fmap) ! Destroy mapping array
 !---Link faces to CAD objects and propogate to edges
@@ -1266,7 +1266,7 @@ end subroutine mesh_cubit_cadlink
 subroutine mesh_cubit_hobase(self)
 CLASS(oft_amesh), INTENT(inout) :: self
 IF(.NOT.have_ho)RETURN
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Importing quadratic mesh nodes'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Importing quadratic mesh nodes'
 SELECT CASE(self%type)
   CASE(1) ! Tet/Tri
     SELECT TYPE(self)
@@ -1502,7 +1502,7 @@ END IF
 IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer level
 #ifdef HAVE_ONURBS
   !---Synchronize CAD linkage to distributed mesh
-  IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Copying geometry linkage to distributed mesh'
+  IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Copying geometry linkage to distributed mesh'
   CALL oft_increase_indent
   !---Get CAD representation aliases
   pmesh_cad_link=>ML_cad_link(mg_mesh%level-1)
@@ -1574,7 +1574,7 @@ END IF
 !---Refine new boundary points using CAD model
 IF(TRIM(inpname)/='none')THEN
 #ifdef HAVE_ONURBS
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Adjusting points to OpenNURBS CAD boundary'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Adjusting points to OpenNURBS CAD boundary'
 CALL oft_increase_indent
 !---Get CAD representation aliases
 pmesh_cad_link=>ML_cad_link(mg_mesh%level-1)
@@ -1666,7 +1666,7 @@ class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
 mesh=>mg_mesh%mesh
 IF(tor_mesh)THEN
-  if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Setting toroidal quadratic nodes'
+  if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting toroidal quadratic nodes'
   wts_tmp(1:2)=1.d0/2.d0
   DO i=1,mesh%ne
     pts_tmp(:,1)=mesh%r(:,mesh%le(1,i))
@@ -1697,7 +1697,7 @@ END IF
 !
 IF(TRIM(inpname)/='none')THEN
 #ifdef HAVE_ONURBS
-  if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Setting Cubit quadratic nodes'
+  if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting Cubit quadratic nodes'
   !---Get CAD representation alias
   cad_link=>ML_cad_link(mg_mesh%level)
   !---Locate edge end points and place daughter node
@@ -1757,7 +1757,7 @@ real(r8) :: rp(3),pt(3)
 integer(i4) :: j,ierr
 integer(i4), allocatable :: emap(:)
 DEBUG_STACK_PUSH
-if(oft_env%head_proc)write(*,'(2A)')oft_indent,'Testing Cubit edge location'
+if(oft_env%head_proc)WRITE(oft_ounit,'(2A)')oft_indent,'Testing Cubit edge location'
 call oft_increase_indent
 !---Get CAD representation alias
 cad_link=>ML_cad_link(mg_mesh%level)
@@ -1769,7 +1769,7 @@ END DO
 !---
 IF(j<=cad_link%nce)THEN
   IF(.NOT.ASSOCIATED(cad_link%lbeg(j)%wo))THEN
-    WRITE(*,'(2A)')oft_indent,'No CAD object linked'
+    WRITE(oft_ounit,'(2A)')oft_indent,'No CAD object linked'
     call oft_decrease_indent
     DEBUG_STACK_POP
     RETURN
@@ -1777,12 +1777,12 @@ IF(j<=cad_link%nce)THEN
   !---
   SELECT TYPE(obj=>cad_link%lbeg(j)%wo)
     TYPE IS(nurbs_curve)
-      WRITE(*,'(2A)')oft_indent,'Entity is NURBS curve'
+      WRITE(oft_ounit,'(2A)')oft_indent,'Entity is NURBS curve'
       call oft_increase_indent
-      WRITE(*,'(2A,L)')oft_indent,'Linear:   ',obj%linear
-      WRITE(*,'(2A,L)')oft_indent,'Periodic: ',obj%periodic
-      WRITE(*,'(2A,2ES14.6)')oft_indent,'Domain:   ',obj%domain
-      WRITE(*,'(2A,6ES14.6)')oft_indent,'Extent:   ',obj%rgrid(:,1),obj%rgrid(:,20)
+      WRITE(oft_ounit,'(2A,L)')oft_indent,'Linear:   ',obj%linear
+      WRITE(oft_ounit,'(2A,L)')oft_indent,'Periodic: ',obj%periodic
+      WRITE(oft_ounit,'(2A,2ES14.6)')oft_indent,'Domain:   ',obj%domain
+      WRITE(oft_ounit,'(2A,6ES14.6)')oft_indent,'Extent:   ',obj%rgrid(:,1),obj%rgrid(:,20)
       call oft_decrease_indent
       !---
       pt=rp
@@ -1793,16 +1793,16 @@ IF(j<=cad_link%nce)THEN
       call nurbs_curve_midpoint(obj,pt,mesh%r(:,mesh%le(1,i)),mesh%r(:,mesh%le(2,i)), &
       2.d0/3,1.d0/3,ierr)
     TYPE IS(nurbs_surf)
-      WRITE(*,'(2A)')oft_indent,'Entity is NURBS surface',obj%sid
+      WRITE(oft_ounit,'(2A)')oft_indent,'Entity is NURBS surface',obj%sid
       call oft_increase_indent
-      WRITE(*,'(2A,L)')oft_indent,'Planar:   ',obj%planar
-      WRITE(*,'(2A,L,1X,L)')oft_indent,'Periodic: ',obj%periodic
-      WRITE(*,'(2A,L,1X,L,1X,L,1X,L)')oft_indent,'Singular: ',obj%singular(:,1),obj%singular(:,2)
-      WRITE(*,'(2A,4ES14.6)')oft_indent,'Domain:   ',obj%domain(:,1),obj%domain(:,2)
-      WRITE(*,'(2A,6ES14.6)')oft_indent,'Edge 1:   ',obj%rgrid(:,1,1),obj%rgrid(:,2,1)
-      WRITE(*,'(2A,6ES14.6)')oft_indent,'Edge 2:   ',obj%rgrid(:,20,1),obj%rgrid(:,20,2)
-      WRITE(*,'(2A,6ES14.6)')oft_indent,'Edge 3:   ',obj%rgrid(:,20,20),obj%rgrid(:,19,20)
-      WRITE(*,'(2A,6ES14.6)')oft_indent,'Edge 4:   ',obj%rgrid(:,1,20),obj%rgrid(:,1,19)
+      WRITE(oft_ounit,'(2A,L)')oft_indent,'Planar:   ',obj%planar
+      WRITE(oft_ounit,'(2A,L,1X,L)')oft_indent,'Periodic: ',obj%periodic
+      WRITE(oft_ounit,'(2A,L,1X,L,1X,L,1X,L)')oft_indent,'Singular: ',obj%singular(:,1),obj%singular(:,2)
+      WRITE(oft_ounit,'(2A,4ES14.6)')oft_indent,'Domain:   ',obj%domain(:,1),obj%domain(:,2)
+      WRITE(oft_ounit,'(2A,6ES14.6)')oft_indent,'Edge 1:   ',obj%rgrid(:,1,1),obj%rgrid(:,2,1)
+      WRITE(oft_ounit,'(2A,6ES14.6)')oft_indent,'Edge 2:   ',obj%rgrid(:,20,1),obj%rgrid(:,20,2)
+      WRITE(oft_ounit,'(2A,6ES14.6)')oft_indent,'Edge 3:   ',obj%rgrid(:,20,20),obj%rgrid(:,19,20)
+      WRITE(oft_ounit,'(2A,6ES14.6)')oft_indent,'Edge 4:   ',obj%rgrid(:,1,20),obj%rgrid(:,1,19)
       call oft_decrease_indent
       !---
       pt=rp
@@ -1813,10 +1813,10 @@ IF(j<=cad_link%nce)THEN
       call nurbs_surf_midpoint(obj,pt,mesh%r(:,mesh%le(1,i)),mesh%r(:,mesh%le(2,i)), &
       2.d0/3,1.d0/3,ierr)
     CLASS DEFAULT
-      WRITE(*,'(2A)')oft_indent,'Could not determine NURBS entity'
+      WRITE(oft_ounit,'(2A)')oft_indent,'Could not determine NURBS entity'
   END SELECT
 ELSE
-  WRITE(*,'(2A)')oft_indent,'Edge is not on a CAD surface'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Edge is not on a CAD surface'
 END IF
 call oft_decrease_indent
 DEBUG_STACK_POP
@@ -1830,7 +1830,7 @@ end subroutine mesh_cubit_test_edge
 subroutine mesh_cubit_error(status)
 integer(i4), intent(in) :: status
 if(status /= nf90_noerr) THEN
-  WRITE(*,'(A,I8.8)')'NETCDF-ERROR_CODE: ',status
+  WRITE(oft_ounit,'(A,I8.8)')'NETCDF-ERROR_CODE: ',status
   call oft_abort(TRIM(nf90_strerror(status)),'mesh_cubit_error',__FILE__)
 end if
 end subroutine mesh_cubit_error
@@ -1844,7 +1844,7 @@ integer(i4) :: npold,ncold,i,j,ic,is,cid_max,sid_max,nreg,n_ho
 integer(i4), allocatable :: newindex(:),hoindex(:),regtmp(:),ltemp(:,:)
 real(r8), allocatable :: rtemp(:,:)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting mesh -> z'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Reflecting mesh -> z'
 CALL oft_increase_indent
 !---Reflect points that are not on reflection plane
 npold=mesh%np
@@ -1997,7 +1997,7 @@ IF(np_per>0)THEN
   END DO
 END IF
 deallocate(newindex)
-! IF(oft_debug_print(3))write(*,'(A)')oft_indent,'Done'
+! IF(oft_debug_print(3))WRITE(oft_ounit,'(A)')oft_indent,'Done'
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine mesh_cubit_reflect
@@ -2010,7 +2010,7 @@ integer(i4) :: i,j,pt_e(2),ind,k,kk
 integer(i4), ALLOCATABLE :: pt_f(:)
 IF(np_per==0)RETURN
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting Cubit periodicity'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting Cubit periodicity'
 CALL oft_increase_indent
 IF(.NOT.ASSOCIATED(mesh%periodic%lp))THEN
   ALLOCATE(mesh%periodic%lp(mesh%np))
@@ -2046,7 +2046,7 @@ DO i=1,mesh%nbe
   pt_e=mesh%periodic%lp(mesh%le(:,j))
   IF(ALL(pt_e>0))THEN
     ind=ABS(mesh_local_findedge(mesh,pt_e))
-    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad edge',i,ind
+    IF(ind==0)WRITE(oft_ounit,'(2A,2I8)')oft_indent,'Bad edge',i,ind
     mesh%periodic%le(j)=ind
   END IF
 END DO
@@ -2057,7 +2057,7 @@ DO i=1,mesh%nbf
   pt_f=mesh%periodic%lp(mesh%lf(:,j))
   IF(ALL(pt_f>0))THEN
     ind=ABS(mesh_local_findface(mesh,pt_f))
-    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad face',i,ind
+    IF(ind==0)WRITE(oft_ounit,'(2A,2I8)')oft_indent,'Bad face',i,ind
     mesh%periodic%lf(j)=ind
   END IF
 END DO

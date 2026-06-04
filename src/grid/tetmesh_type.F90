@@ -422,7 +422,7 @@ uv=1.d0/4.d0
 call lmdif(tm_findcell_error,nerr,neq,uv,error, &
             ftol,xtol,gtol,maxfev,epsfcn,diag,mode,factor,nprint,info, &
             nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
-!IF(info>4)WRITE(*,*)'High-order find failed',i,info,nfev
+!IF(info>4)WRITE(oft_ounit,*)'High-order find failed',i,info,nfev
 f(1:3)=uv; f(4)=1.d0-SUM(uv)
 end function tetmesh_phys2logho
 end subroutine tetmesh_phys2log
@@ -827,9 +827,9 @@ A(6,5)=2*jac(3,2)*jac(3,3)
 A(6,6)=jac(3,3)**2
 !---Invert
 CALL dgetrf(6,6,A,6,ipiv,info)
-IF(info/=0)WRITE(*,*)info
+IF(info/=0)WRITE(oft_ounit,*)info
 CALL dgetri(6,A,6,ipiv,work,12,info)
-IF(info/=0)WRITE(*,*)info
+IF(info/=0)WRITE(oft_ounit,*)info
 !---Map back to g2op
 g2op(:,5)=A(:,1)
 g2op(:,6)=A(:,2)

@@ -379,9 +379,9 @@ CALL self%psi_sol%get_local(vals_out,1)
 CALL self%mfop%gs_equil%psi%restore_local(vals_out)
 CALL self%psi_sol%get_local(vals_out,2)
 ! self%mfop%gs_equil%vcontrol_val=vals_out(self%mfop%gs_device%ncoils+1)
-! WRITE(*,'(A,I4,2ES14.6)')'vCHK',0,self%mfop%gs_equil%vcontrol_val/mu0,vals_out(self%mfop%gs_device%ncoils+1)/mu0
+! WRITE(oft_ounit,'(A,I4,2ES14.6)')'vCHK',0,self%mfop%gs_equil%vcontrol_val/mu0,vals_out(self%mfop%gs_device%ncoils+1)/mu0
 DO i=1,self%mfop%gs_device%ncoils
-    ! WRITE(*,'(A,I4,2ES14.6)')'CHK',i,self%mfop%gs_equil%coil_currs(i)/mu0,vals_out(i)/mu0
+    ! WRITE(oft_ounit,'(A,I4,2ES14.6)')'CHK',i,self%mfop%gs_equil%coil_currs(i)/mu0,vals_out(i)/mu0
   self%mfop%gs_equil%coil_currs(i)=vals_out(i)
   CALL self%mfop%gs_equil%psi%add(1.d0,self%mfop%gs_equil%coil_currs(i),self%mfop%gs_device%psi_coil(i)%f)
   ! +self%mfop%gs_equil%vcontrol_val*self%mfop%gs_device%coil_vcont(i)
@@ -394,7 +394,7 @@ ELSE
     self%mfop%gs_equil%ffp_scale=self%mfop%f_scale
     self%mfop%gs_equil%p_scale=self%mfop%p_scale
 END IF
-! WRITE(*,'(4ES14.6,3I4)')time_val,self%mfop%ip,self%mfop%gs_equil%o_point(2),err_tmp, &
+! WRITE(oft_ounit,'(4ES14.6,3I4)')time_val,self%mfop%ip,self%mfop%gs_equil%o_point(2),err_tmp, &
 ! nksolver%nlits,nksolver%lits,j
 ! IF(self%mfop%ip<1.d-6)THEN
 !     self%mfop%p_scale=0.d0
@@ -697,7 +697,7 @@ IF(self%gs_device%ncoils>0)THEN
         CALL self%gs_device%psi_coil(i)%f%get_local(rhs_vals)
         ! vcont_val=pol_vals(lag_rep%ne+self%gs_device%ncoils+1)*self%gs_device%coil_vcont(i)
         pol_vals(1:lag_rep%ne)=pol_vals(1:lag_rep%ne)+pol_vals(lag_rep%ne+i)*rhs_vals
-        ! IF(self%gs_device%Rcoils(i)>0.d0)WRITE(*,*)'CHK',pol_vals(lag_rep%ne+i)/mu0
+        ! IF(self%gs_device%Rcoils(i)>0.d0)WRITE(oft_ounit,*)'CHK',pol_vals(lag_rep%ne+i)/mu0
     END DO
     DEALLOCATE(rhs_vals)
 END IF
@@ -789,14 +789,14 @@ CALL ptmp%delete
 self%ip=(diag(1)+diag(2))/mu0
 self%estored=diag(2)/mu0*3.d0/2.d0
 ! eta_source=b%dot(b)
-! WRITE(*,*)'CHK',eta_source
-! WRITE(*,*)self%ip
+! WRITE(oft_ounit,*)'CHK',eta_source
+! WRITE(oft_ounit,*)self%ip
 DEALLOCATE(pol_vals,rhs_vals,ptmp,alam_vals)
 !---Report time
 ! IF(oft_debug_print(1))THEN
 
 ! self%mfop_time=self%mfop_time+mytimer%tock()
-!   WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+!   WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 ! END IF
 DEBUG_STACK_POP
 end subroutine apply_mfop
@@ -853,9 +853,9 @@ end subroutine delete_gs_mat
 ! logical :: curved
 ! ! type(oft_timer) :: mytimer
 ! DEBUG_STACK_PUSH
-! ! WRITE(*,*)'Hi'
+! ! WRITE(oft_ounit,*)'Hi'
 ! ! IF(oft_debug_print(1))THEN
-! !   WRITE(*,'(2X,A)')'Constructing Poloidal flux time-advance operator'
+! !   WRITE(oft_ounit,'(2X,A)')'Constructing Poloidal flux time-advance operator'
 ! !   CALL mytimer%tick()
 ! ! END IF
 ! !------------------------------------------------------------------------------
@@ -915,7 +915,7 @@ end subroutine delete_gs_mat
 ! !$omp end critical
 ! deallocate(j)
 ! !$omp end parallel
-! ! WRITE(*,*)'Psi',psi_max,psi_lim
+! ! WRITE(oft_ounit,*)'Psi',psi_max,psi_lim
 ! IF(ABS(psi_max-psi_lim)<1.d-8)THEN
 !     psi_max=psi_lim+1.d-8
 !     ! DEALLOCATE(pol_vals)
@@ -931,7 +931,7 @@ end subroutine delete_gs_mat
 ! !---Report time
 ! ! IF(oft_debug_print(1))THEN
 ! !   elapsed_time=mytimer%tock()
-! !   WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+! !   WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 ! ! END IF
 ! DEBUG_STACK_POP
 ! end subroutine update_lims
@@ -970,7 +970,7 @@ DEBUG_STACK_PUSH
 mesh=>self%gs_device%mesh
 lag_rep=>self%gs_device%fe_rep
 IF(oft_debug_print(1))THEN
-    WRITE(*,'(2X,A)')'Constructing Toroidal flux time-advance operator'
+    WRITE(oft_ounit,'(2X,A)')'Constructing Toroidal flux time-advance operator'
     CALL mytimer%tick()
 END IF
 !------------------------------------------------------------------------------
@@ -1024,7 +1024,7 @@ end do
 !         lim_tmp=SQRT(SUM((self%gs_eq%lim_point-mesh%r(1:2,i))**2))
 !     END IF
 ! END DO
-! WRITE(*,*)mat%lim_node
+! WRITE(oft_ounit,*)mat%lim_node
 self%F%plasma_bounds=self%gs_equil%plasma_bounds
 self%P%plasma_bounds=self%gs_equil%plasma_bounds
 psi_norm=self%gs_equil%plasma_bounds(2)-self%gs_equil%plasma_bounds(1)
@@ -1118,7 +1118,7 @@ DEALLOCATE(oft_lag_vec)
 !---Report time
 IF(oft_debug_print(1))THEN
     elapsed_time=mytimer%tock()
-    WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+    WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine build_jop
@@ -1161,7 +1161,7 @@ DEBUG_STACK_PUSH
 smesh=>self%gs_device%mesh
 lag_rep=>self%gs_device%fe_rep
 IF(oft_debug_print(1))THEN
-    WRITE(*,'(2X,A)')'Constructing Toroidal flux time-advance operator'
+    WRITE(oft_ounit,'(2X,A)')'Constructing Toroidal flux time-advance operator'
     CALL mytimer%tick()
 END IF
 NULLIFY(pol_vals,eta_vals)
@@ -1259,7 +1259,7 @@ ELSE
     ! CALL lhs_mat%mat%zero
     ! lhs_mat%lim_vals=0.d0
 END IF
-! WRITE(*,*)mat%lim_node
+! WRITE(oft_ounit,*)mat%lim_node
 self%F%plasma_bounds=self%gs_equil%plasma_bounds
 self%P%plasma_bounds=self%gs_equil%plasma_bounds
 psi_norm=self%gs_equil%plasma_bounds(2)-self%gs_equil%plasma_bounds(1)
@@ -1425,7 +1425,7 @@ DEALLOCATE(oft_lag_vec)
 !---Report time
 IF(oft_debug_print(1))THEN
     elapsed_time=mytimer%tock()
-    WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+    WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine build_linearized

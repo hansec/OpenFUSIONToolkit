@@ -325,11 +325,11 @@ DEBUG_STACK_PUSH
 minlev_out=1
 IF(PRESENT(minlev))minlev_out=minlev
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'**** Creating Lagrange FE space'
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2A)')oft_indent,'**** Creating Lagrange FE space'
   CALL oft_increase_indent
-  WRITE(*,'(2A,I4)')oft_indent,'Order  = ',order
-  WRITE(*,'(2A,I4)')oft_indent,'Minlev = ',minlev_out
+  WRITE(oft_ounit,'(2A,I4)')oft_indent,'Order  = ',order
+  WRITE(oft_ounit,'(2A,I4)')oft_indent,'Minlev = ',minlev_out
 ELSE
   CALL oft_increase_indent
 END IF
@@ -407,7 +407,7 @@ END IF
 IF(PRESENT(ML_lag_obj))CALL ML_lag_obj%set_level(ML_lag_obj%nlevels)
 IF(PRESENT(ML_vlag_obj))CALL ML_vlag_obj%set_level(ML_lag_obj%nlevels)
 IF(PRESENT(ML_blag_obj))CALL ML_blag_obj%set_level(ML_blag_obj%nlevels)
-IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(oft_ounit,*)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine oft_lag_setup
@@ -422,8 +422,8 @@ class(oft_mesh), target, intent(in) :: tmesh !< Needs docs
 integer(i4), intent(in) :: order !< Order of representation desired
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A)')oft_indent,'Creating 3D Lagrange FE space'
-  WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
+  WRITE(oft_ounit,'(2A)')oft_indent,'Creating 3D Lagrange FE space'
+  WRITE(oft_ounit,'(A,2X,A,I4)')oft_indent,'Order  = ',order
 END IF
 CALL oft_increase_indent
 !---
@@ -483,8 +483,8 @@ integer(i4), intent(in) :: order !< Order of representation desired
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(tmesh%parent))THEN
   IF(oft_debug_print(1))THEN
-    WRITE(*,'(2A)')oft_indent,'Creating 2D Lagrange FE space'
-    WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
+    WRITE(oft_ounit,'(2A)')oft_indent,'Creating 2D Lagrange FE space'
+    WRITE(oft_ounit,'(A,2X,A,I4)')oft_indent,'Order  = ',order
   END IF
 END IF
 CALL oft_increase_indent

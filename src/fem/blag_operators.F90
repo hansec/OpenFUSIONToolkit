@@ -403,7 +403,7 @@ type(oft_timer) :: mytimer
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing Boundary LAG::MOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing Boundary LAG::MOP'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_getmop",__FILE__)
@@ -475,7 +475,7 @@ CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_blag_getmop
@@ -502,7 +502,7 @@ type(oft_timer) :: mytimer
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing Boundary LAG::LOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing Boundary LAG::LOP'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_getlop",__FILE__)
@@ -615,7 +615,7 @@ CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_blag_getlop

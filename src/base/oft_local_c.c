@@ -26,9 +26,13 @@ void dump_cov()
 }
 
 // Print git information
-void oft_print_git() {
-   printf("Development branch:    %s\n",GITBRANCH);
-   printf("Revision id:           %s\n",GITVERSION);
+void oft_print_git(int fd) {
+	FILE* stream = fdopen(fd, "a");
+	if (stream != NULL) {
+		fprintf(stream, "Development branch:    %s\n",GITBRANCH);
+		fprintf(stream, "Revision id:           %s\n",GITVERSION);
+		fflush(stream);
+	}
 }
 
 // Define the function to be called when ctrl-c (SIGINT) signal is sent to process

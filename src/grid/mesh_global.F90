@@ -226,7 +226,7 @@ end subroutine smesh_global_init
 subroutine mesh_global_link(self)
 class(oft_mesh), intent(inout) :: self !< Mesh object
 DEBUG_STACK_PUSH
-IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Generating domain linkage'
+IF(oft_env%head_proc)WRITE(oft_ounit,'(2A)')oft_indent,'Generating domain linkage'
 CALL oft_increase_indent
 call mesh_global_plinkage(self) ! Link seam points
 call mesh_global_elinkage(self) ! Link seam edges
@@ -244,7 +244,7 @@ subroutine bmesh_global_link(self,parent)
 class(oft_bmesh), intent(inout) :: self !< Mesh object
 class(oft_mesh), optional, intent(inout) :: parent !< Parent volume mesh (if present)
 DEBUG_STACK_PUSH
-IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'Generating boundary domain linkage'
+IF(oft_env%head_proc)WRITE(oft_ounit,'(2A)')oft_indent,'Generating boundary domain linkage'
 CALL oft_increase_indent
 IF(PRESENT(parent))THEN
   call plinkage_from_parent(self,parent) ! Link seam points
@@ -267,7 +267,7 @@ class(oft_amesh), intent(inout) :: self !< Mesh object
 #ifdef HAVE_MPI
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Syncing mesh'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Syncing mesh'
 CALL oft_mpi_barrier(ierr) ! Wait for all processes
 CALL MPI_Bcast(self%cad_type,1,OFT_MPI_I4,0,oft_env%COMM,ierr) ! Broadcast mesh type
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','mesh_global_sync',__FILE__)
@@ -344,7 +344,7 @@ if(oft_env%rank==0)then
       DO k=1,self%cell_np
         cpart(i)=MIN(cpart(i),pflag(self%lc(k,i)))
       END DO
-      IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
+      IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(oft_ounit,*)'cBAD',i,cpart(i)
     END DO
   elseif(part_meth==5)THEN ! Toroidal spatial partitioning
     zmin = -pi
@@ -369,7 +369,7 @@ if(oft_env%rank==0)then
       DO k=1,self%cell_np
         cpart(i)=MIN(cpart(i),pflag(self%lc(k,i)))
       END DO
-      IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
+      IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(oft_ounit,*)'cBAD',i,cpart(i)
     END DO
   else
     CALL oft_abort('Invalid partitioning method', 'mesh_global_partition', __FILE__)
@@ -426,10 +426,10 @@ if(oft_env%rank==0)then
   do i=1,self%nc
     ncells(meshpart(i))=ncells(meshpart(i))+1
   end do
-  write(*,'(2A)')oft_indent,'Mesh Partitioned:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Mesh Partitioned:'
   CALL oft_increase_indent
-  write(*,'(2A,I8)')oft_indent,'Min # of cells/domain = ',MINVAL(ncells)
-  write(*,'(2A,I8)')oft_indent,'Max # of cells/domain = ',MAXVAL(ncells)
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'Min # of cells/domain = ',MINVAL(ncells)
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'Max # of cells/domain = ',MAXVAL(ncells)
   CALL oft_decrease_indent
 endif
 !---Scatter decomposition to all processors
@@ -615,7 +615,7 @@ INTEGER(i4) :: m,mm,nptmp,nbpmax
 INTEGER(i4) :: ierr,i,j
 DEBUG_STACK_PUSH
 !---
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Point linkage'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Point linkage'
 CALL oft_increase_indent
 IF(.NOT.self%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 !------------------------------------------------------------------------------
@@ -624,7 +624,7 @@ IF(.NOT.self%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 nptmp=self%nbp
 nbpmax=self%nbp
 IF(.NOT.self%fullmesh)nbpmax=oft_mpi_max(nptmp)
-IF(oft_debug_print(2))WRITE(*,'(2A,I8)')oft_indent,'Max # of seam points =',nbpmax
+IF(oft_debug_print(2))WRITE(oft_ounit,'(2A,I8)')oft_indent,'Max # of seam points =',nbpmax
 self%pstitch%nbemax=nbpmax
 !---Initialize seam structure from mesh
 CALL oft_init_seam(self,self%pstitch)
@@ -898,7 +898,7 @@ LOGICAL :: etest,set_gbe
 LOGICAL, ALLOCATABLE :: echeck(:,:)
 DEBUG_STACK_PUSH
 !---
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Edge linkage'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Edge linkage'
 CALL oft_increase_indent
 IF(.NOT.self%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 !------------------------------------------------------------------------------
@@ -907,7 +907,7 @@ IF(.NOT.self%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 netmp=self%nbe
 nbemax=self%nbe
 IF(.NOT.self%fullmesh)nbemax=oft_mpi_max(netmp)
-IF(oft_debug_print(2))WRITE(*,'(2A,I8)')oft_indent,'Max # of seam edges =',nbemax
+IF(oft_debug_print(2))WRITE(oft_ounit,'(2A,I8)')oft_indent,'Max # of seam edges =',nbemax
 self%estitch%nbemax=nbemax
 !---Initialize seam structure from mesh
 CALL oft_init_seam(self,self%estitch)
@@ -1218,7 +1218,7 @@ LOGICAL :: ftest
 LOGICAL, ALLOCATABLE :: fcheck(:,:)
 DEBUG_STACK_PUSH
 !---
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Face linkage'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Face linkage'
 CALL oft_increase_indent
 IF(.NOT.self%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 !------------------------------------------------------------------------------
@@ -1227,7 +1227,7 @@ IF(.NOT.self%fullmesh)CALL oft_mpi_barrier(ierr) ! Wait for all processes
 nftmp=self%nbf
 nbfmax=self%nbf
 IF(.NOT.self%fullmesh)nbfmax=oft_mpi_max(nftmp)
-IF(oft_debug_print(2))WRITE(*,'(2A,I8)')oft_indent,'Max # of seam faces =',nbfmax
+IF(oft_debug_print(2))WRITE(oft_ounit,'(2A,I8)')oft_indent,'Max # of seam faces =',nbfmax
 self%fstitch%nbemax=nbfmax
 !---Initialize seam structure from mesh
 CALL oft_init_seam(self,self%fstitch)
@@ -1510,7 +1510,7 @@ INTEGER(i4) :: i,j,k,m
 INTEGER(i4), POINTER :: lpbound(:),lploc(:)
 IF(self%np==0)RETURN
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Point linkage'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Point linkage'
 ALLOCATE(lpbound(self%np))
 CALL get_inverse_map(self%lbp,self%nbp,lpbound,self%np)
 ALLOCATE(lploc(parent%np))
@@ -1593,7 +1593,7 @@ INTEGER(i4) :: i,j,k,m
 INTEGER(i4), POINTER :: leloc(:),lebound(:)
 IF(self%ne==0)RETURN
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Edge linkage'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Edge linkage'
 ALLOCATE(lebound(self%ne))
 CALL get_inverse_map(self%lbe,self%nbe,lebound,self%ne)
 ALLOCATE(leloc(parent%ne))

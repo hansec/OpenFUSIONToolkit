@@ -538,7 +538,7 @@ IF(use_hodlr)THEN
   ALLOCATE(hodlr_op)
   hodlr_op%tw_obj=>tw_obj
   CALL hodlr_op%setup(.TRUE.)
-  WRITE(*,*)
+  WRITE(oft_ounit,*)
   IF(TRIM(filename)=='')THEN
     CALL hodlr_op%compute_L()
   ELSE

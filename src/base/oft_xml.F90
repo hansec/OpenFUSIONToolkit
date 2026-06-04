@@ -20,7 +20,7 @@
 MODULE oft_xml
 USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_ptr, c_char, c_null_char, &
   c_null_ptr, c_f_pointer, c_associated, c_double, c_loc
-USE oft_local, ONLY: i4, r8, string_to_upper
+USE oft_local, ONLY: i4, r8, string_to_upper, oft_ounit, oft_eunit
 IMPLICIT NONE
 !------------------------------------------------------------------------------
 !> Libxml2 node wrapper
@@ -205,12 +205,12 @@ END SUBROUTINE xml_set_exception
 SUBROUTINE xml_print_exceptions()
 INTEGER(i4) :: i
 IF(xml_exception_depth==0)THEN
-  WRITE(*,*)'No XML exceptions to report.'
+  WRITE(oft_ounit,*)'No XML exceptions to report.'
   RETURN
 END IF
-WRITE(*,'(A)')'WARNING: XML Exceptions found'
+WRITE(oft_ounit,'(A)')'WARNING: XML Exceptions found'
 DO i=xml_exception_depth,1,-1
-  WRITE(*,'(2A)')'WARNING:     ',xml_exceptions(i)%msg
+  WRITE(oft_ounit,'(2A)')'WARNING:     ',xml_exceptions(i)%msg
 END DO
 END SUBROUTINE xml_print_exceptions
 !---------------------------------------------------------------------------------
@@ -432,7 +432,7 @@ DO j=i,nchars
     IF(line_strip(LEN(line_strip):LEN(line_strip))==',')THEN
       line_strip = line_strip(:LEN(line_strip)-1)
     END IF
-    ! WRITE(*,*)'Stripped line: "',line_strip,'"'
+    ! WRITE(oft_ounit,*)'Stripped line: "',line_strip,'"'
     content_out(k:k+LEN(line_strip))=line_strip//NL
     k=k+LEN(line_strip)+1
     ilast=j+1
@@ -444,7 +444,7 @@ DO m=1,LEN(line_strip)
   IF(line_strip(m:m)==TAB)line_strip(m:m)=' '
 END DO
 line_strip = TRIM(ADJUSTL(line_strip))
-! WRITE(*,*)'Remaining: "',line_strip,'"'
+! WRITE(oft_ounit,*)'Remaining: "',line_strip,'"'
 IF(LEN(line_strip)>0)THEN
   IF(line_strip(1:1)/='#')THEN
     IF(line_strip(1:1)==',')THEN
@@ -498,7 +498,7 @@ IF(INDEX(content,',')==0)THEN
     END IF
   END DO
 END IF
-! WRITE(*,*)'Parsing: ncols=',ncols
+! WRITE(oft_ounit,*)'Parsing: ncols=',ncols
 !---Count number of columns
 istart=1
 iend=INDEX(content(istart:nchars),NL)
@@ -513,7 +513,7 @@ DO j=istart,iend-1
     ncols=ncols+1
   END IF
 END DO
-! WRITE(*,*)'Parsing: ncols=',ncols-offset,' nrows=',nrows
+! WRITE(oft_ounit,*)'Parsing: ncols=',ncols-offset,' nrows=',nrows
 !---Generate actual tokens
 ALLOCATE(tokens(2,ncols,nrows))
 istart=1
@@ -535,13 +535,13 @@ outer_read: DO i=1,nrows
       END IF
       iend2=MIN(iend-istart,nchars-istart+1)
     END IF
-    ! WRITE(*,*)i,j,'"',content(istart:istart+iend2-1),'"',istart,istart+iend2-1,nchars
+    ! WRITE(oft_ounit,*)i,j,'"',content(istart:istart+iend2-1),'"',istart,istart+iend2-1,nchars
     tokens(:,j,i)=[istart,istart+iend2-1]
     istart=istart+iend2+1
   END DO
   istart=iend+1
 END DO outer_read
-! WRITE(*,*)'Parsing error code: ',ierr
+! WRITE(oft_ounit,*)'Parsing error code: ',ierr
 IF(ierr/=0)THEN
   DEALLOCATE(tokens)
   RETURN

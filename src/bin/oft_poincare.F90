@@ -175,8 +175,8 @@ END DO
 DEALLOCATE(pts,pt_flag)
 IF(nfinal==0)CALL oft_abort('No launch points within mesh!','poincare_trace',__FILE__)
 IF(oft_env%head_proc.AND.npts/=nfinal)THEN
-  WRITE(*,*)'Removed ',INT(npts-nfinal,2),' offmesh points'
-  WRITE(*,*)'Proceeding with remaining ',INT(nfinal,2),' points'
+  WRITE(oft_ounit,*)'Removed ',INT(npts-nfinal,2),' offmesh points'
+  WRITE(oft_ounit,*)'Proceeding with remaining ',INT(nfinal,2),' points'
 END IF
 !---Loop over file list
 ind=0
@@ -187,12 +187,12 @@ DO
   READ(rst_file_unit,'(A)',IOSTAT=io_stat)filename
   IF(io_stat/=0)THEN
     IF(oft_env%head_proc.AND.io_stat/=IOSTAT_END)THEN
-      WRITE(*,*)'Error reading rst_list_file at line ',INT(ind+1,2)
+      WRITE(oft_ounit,*)'Error reading rst_list_file at line ',INT(ind+1,2)
     END IF
     EXIT
   END IF
   IF(.NOT.oft_file_exist(filename))THEN
-    IF(oft_env%head_proc)WRITE(*,*)'Restart file at line',INT(ind+1,2),' in rst_list_file does not exist'
+    IF(oft_env%head_proc)WRITE(oft_ounit,*)'Restart file at line',INT(ind+1,2),' in rst_list_file does not exist'
     EXIT
   END IF
   !---Read field

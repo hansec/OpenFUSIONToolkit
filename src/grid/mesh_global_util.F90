@@ -34,7 +34,7 @@ class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,k
 real(r8), allocatable, dimension(:) :: btrans
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Constructing global boundary'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Constructing global boundary'
 !------------------------------------------------------------------------------
 ! Set global boundary points and cells
 !------------------------------------------------------------------------------
@@ -93,7 +93,7 @@ INTEGER(8) :: npp,nep,nfp
 INTEGER(8), ALLOCATABLE :: gtmp(:)
 IF(mesh%periodic%nper==0)RETURN
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Setting Up Periodic Mesh'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting Up Periodic Mesh'
 !---Faces can only have one periodic parent
 DO i=1,mesh%nbf
   j=mesh%lbf(i)
@@ -168,10 +168,10 @@ DEALLOCATE(gtmp)
 !---
 if(oft_debug_print(1))then
   CALL oft_increase_indent
-  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic directions =',mesh%periodic%nper
-  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
-  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
-  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Faces      =',nfp
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of Periodic directions =',mesh%periodic%nper
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of Periodic Faces      =',nfp
   CALL oft_decrease_indent
 end if
 DEBUG_STACK_POP
@@ -186,7 +186,7 @@ integer(i4), ALLOCATABLE, DIMENSION(:) :: ltmp
 integer(8) :: etmp(2)
 integer(8), ALLOCATABLE, DIMENSION(:) :: kc,kf
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Orienting geometry'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Orienting geometry'
 !$omp parallel do private(etmp,ed)
 do i=1,mesh%ne
   ed=mesh%le(:,i)
@@ -321,7 +321,7 @@ integer(i4) :: stat(MPI_STATUS_SIZE)
 #endif
 #endif
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting I/O information'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting I/O information'
 !---Initialize counters for ring update
 j=oft_env%rank+1
 if(j>oft_env%nprocs-1)j=0
@@ -469,7 +469,7 @@ END DO
 IF(self%fullmesh)THEN
   !---Check periodicity
   IF(self%igrnd(1)==-1)THEN
-    IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'No grounding point found: self is fully periodic!'
+    IF(oft_env%head_proc)WRITE(oft_ounit,'(2A)')oft_indent,'No grounding point found: self is fully periodic!'
   ELSE
     grnd_global=self%global%lp(self%igrnd(1))
     self%igrnd=-1
@@ -484,7 +484,7 @@ IF(self%fullmesh)THEN
         END IF
       END IF
     END DO
-    IF(oft_env%head_proc)WRITE(*,'(2A,I8)')oft_indent,'Surface grounded at vertex',self%igrnd(1)
+    IF(oft_env%head_proc)WRITE(oft_ounit,'(2A,I8)')oft_indent,'Surface grounded at vertex',self%igrnd(1)
   END IF
   DEBUG_STACK_POP
   RETURN
@@ -517,7 +517,7 @@ CALL MPI_ALLREDUCE(MPI_IN_PLACE,grnd_global,1,OFT_MPI_I8,MPI_MAX,oft_env%COMM,ie
 #endif
 self%igrnd=-1
 IF(grnd_global==-1)THEN
-  IF(oft_env%head_proc)WRITE(*,'(2A)')oft_indent,'No grounding point found: self is fully periodic!'
+  IF(oft_env%head_proc)WRITE(oft_ounit,'(2A)')oft_indent,'No grounding point found: self is fully periodic!'
 ELSE
   owned=.FALSE.
   DO i=1,self%nbp
@@ -534,7 +534,7 @@ ELSE
     END IF
   END DO
   !---Write out grounding information
-  IF(oft_env%head_proc)WRITE(*,'(2A,I8)')oft_indent,'Surface grounded at vertex ',grnd_global
+  IF(oft_env%head_proc)WRITE(oft_ounit,'(2A,I8)')oft_indent,'Surface grounded at vertex ',grnd_global
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE mesh_global_igrnd
@@ -614,37 +614,37 @@ if(self%fullmesh)then
     self%global%nbc=COUNT(self%global%gbc)
   END IF
   if(oft_env%head_proc)then
-    write(*,'(2A)')oft_indent,'Mesh statistics:'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Mesh statistics:'
     CALL oft_increase_indent
-    write(*,'(2A,ES11.3)')oft_indent,'Volume          =',vol
-    write(*,'(2A,ES11.3)')oft_indent,'Surface area    =',area
-    write(*,'(2A,I8)')    oft_indent,'# of points     =',self%global%np
-    write(*,'(2A,I8)')    oft_indent,'# of edges      =',self%global%ne
-    write(*,'(2A,I8)')    oft_indent,'# of faces      =',self%global%nf
-    write(*,'(2A,I8)')    oft_indent,'# of cells      =',self%global%nc
-    write(*,'(2A,I8)')    oft_indent,'# of boundary points =',self%global%nbp
-    write(*,'(2A,I8)')    oft_indent,'# of boundary edges  =',self%global%nbe
-    write(*,'(2A,I8)')    oft_indent,'# of boundary faces  =',self%global%nbf
-    write(*,'(2A,I8)')    oft_indent,'# of boundary cells  =',self%global%nbc
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Volume          =',vol
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Surface area    =',area
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of points     =',self%global%np
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of edges      =',self%global%ne
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of faces      =',self%global%nf
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of cells      =',self%global%nc
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of boundary points =',self%global%nbp
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of boundary edges  =',self%global%nbe
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of boundary faces  =',self%global%nbf
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
-    write(*,'(2A)')oft_indent,'Resolution statistics:'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
-    write(*,'(2A,ES11.3)')oft_indent,'hmin =',self%hmin
-    write(*,'(2A,ES11.3)')oft_indent,'hrms =',self%hrms
-    write(*,'(2A,ES11.3)')oft_indent,'hmax =',self%hmax
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hmin =',self%hmin
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hrms =',self%hrms
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hmax =',self%hmax
     CALL oft_decrease_indent
   endif
 else
 #ifdef HAVE_MPI
   if(oft_env%head_proc)then
-    write(*,'(2A)')oft_indent,'Mesh statistics:'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Mesh statistics:'
     CALL oft_increase_indent
-    write(*,'(2A,ES11.3)')oft_indent,'Volume          =',vol
-    write(*,'(2A,ES11.3)')oft_indent,'Surface area    =',area
-    write(*,'(2A,I8)')    oft_indent,'# of points     =',self%global%np
-    write(*,'(2A,I8)')    oft_indent,'# of edges      =',self%global%ne
-    write(*,'(2A,I8)')    oft_indent,'# of faces      =',self%global%nf
-    write(*,'(2A,I8)')    oft_indent,'# of cells      =',self%global%nc
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Volume          =',vol
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Surface area    =',area
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of points     =',self%global%np
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of edges      =',self%global%ne
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of faces      =',self%global%nf
+    WRITE(oft_ounit,'(2A,I8)')    oft_indent,'# of cells      =',self%global%nc
   endif
   !---Count boundary points
   a=0
@@ -685,16 +685,16 @@ else
   self%global%nbf=tmp(3)
   self%global%nbc=tmp(4)
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
-    write(*,'(2A,I8)')oft_indent,'# of boundary faces  =',self%global%nbf
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary faces  =',self%global%nbf
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
-    write(*,'(2A)')oft_indent,'Resolution statistics:'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
-    write(*,'(2A,ES11.3)')oft_indent,'hmin =',self%hmin
-    write(*,'(2A,ES11.3)')oft_indent,'hrms =',self%hrms
-    write(*,'(2A,ES11.3)')oft_indent,'hmax =',self%hmax
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hmin =',self%hmin
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hrms =',self%hrms
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hmax =',self%hmax
     CALL oft_decrease_indent
   endif
 #else
@@ -711,7 +711,7 @@ class(oft_bmesh), intent(inout) :: self !< Mesh object
 integer(i4) :: i,j,k
 real(r8), allocatable, dimension(:) :: btrans
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Constructing global boundary'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Constructing global boundary'
 !------------------------------------------------------------------------------
 ! Set global boundary points and cells
 !------------------------------------------------------------------------------
@@ -749,7 +749,7 @@ INTEGER(8) :: npp,nep,nfp
 INTEGER(8), ALLOCATABLE :: gtmp(:)
 IF(self%periodic%nper==0)RETURN
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Setting Up Periodic Mesh'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting Up Periodic Mesh'
 !---Edges can only have one periodic parent
 DO i=1,self%nbe
   j=self%lbe(i)
@@ -801,9 +801,9 @@ DEALLOCATE(gtmp)
 !---
 if(oft_debug_print(1))then
   CALL oft_increase_indent
-  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic directions =',self%periodic%nper
-  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
-  WRITE(*,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of Periodic directions =',self%periodic%nper
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of Periodic Points     =',npp
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of Periodic Edges      =',nep
   CALL oft_decrease_indent
 end if
 DEBUG_STACK_POP
@@ -820,7 +820,7 @@ integer(8) :: etmp(2)
 integer(8), ALLOCATABLE, DIMENSION(:) :: kfg
 DEBUG_STACK_PUSH
 IF(PRESENT(parent))THEN
-  if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Copying orientation to surface'
+  if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Copying orientation to surface'
   !$omp parallel do private(etmp)
   do i=1,self%ne
     etmp=self%le(:,i)
@@ -851,7 +851,7 @@ IF(PRESENT(parent))THEN
   end do
   deallocate(kf,kfg,forder)
 ELSE
-  if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Orienting surface geometry'
+  if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Orienting surface geometry'
   !$omp parallel do private(etmp,ed)
   do i=1,self%ne
     ed=self%le(:,i)
@@ -907,12 +907,12 @@ DEBUG_STACK_PUSH
 call mesh_global_resolution(self)
 area = self%area()
 if(oft_env%head_proc)then
-  write(*,'(2A)')oft_indent,'Mesh statistics:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Mesh statistics:'
   CALL oft_increase_indent
-  write(*,'(2A,ES11.3)')oft_indent,'Area         =',area
-  write(*,'(2A,I8)')oft_indent,'# of points  =',self%global%np
-  write(*,'(2A,I8)')oft_indent,'# of edges   =',self%global%ne
-  write(*,'(2A,I8)')oft_indent,'# of cells   =',self%global%nc
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Area         =',area
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of points  =',self%global%np
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of edges   =',self%global%ne
+  WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of cells   =',self%global%nc
 endif
 if(self%fullmesh)then
   IF(self%periodic%nper>0)THEN
@@ -925,15 +925,15 @@ if(self%fullmesh)then
     self%global%nbc=COUNT(self%global%gbc)
   END IF
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
-    write(*,'(2A)')oft_indent,'Resolution statistics:'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
-    write(*,'(2A,ES11.3)')oft_indent,'hmin =',self%hmin
-    write(*,'(2A,ES11.3)')oft_indent,'hrms =',self%hrms
-    write(*,'(2A,ES11.3)')oft_indent,'hmax =',self%hmax
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hmin =',self%hmin
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hrms =',self%hrms
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hmax =',self%hmax
     CALL oft_decrease_indent
   endif
 else
@@ -969,15 +969,15 @@ else
   self%global%nbe=tmp(2)
   self%global%nbc=tmp(3)
   if(oft_env%head_proc)then
-    write(*,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
-    write(*,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
-    write(*,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary points =',self%global%nbp
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary edges  =',self%global%nbe
+    WRITE(oft_ounit,'(2A,I8)')oft_indent,'# of boundary cells  =',self%global%nbc
     CALL oft_decrease_indent
-    write(*,'(2A)')oft_indent,'Resolution statistics:'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Resolution statistics:'
     CALL oft_increase_indent
-    write(*,'(2A,ES11.3)')oft_indent,'hmin =',self%hmin
-    write(*,'(2A,ES11.3)')oft_indent,'hrms =',self%hrms
-    write(*,'(2A,ES11.3)')oft_indent,'hmax =',self%hmax
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hmin =',self%hmin
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hrms =',self%hrms
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'hmax =',self%hmax
     CALL oft_decrease_indent
   endif
 #else

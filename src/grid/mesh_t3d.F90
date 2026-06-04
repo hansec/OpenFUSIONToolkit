@@ -117,21 +117,21 @@ IF(oft_env%head_proc)THEN
   IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','mesh_t3d_load',__FILE__)
   lenreflag=lnblnk(reflect)
   !
-  WRITE(*,'(2A)')oft_indent,'T3D volume mesh:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'T3D volume mesh:'
   CALL oft_increase_indent
-  WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
-  WRITE(*,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
+  WRITE(oft_ounit,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
+  WRITE(oft_ounit,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
   IF(lenreflag>0)THEN
-    WRITE(*,'(2A)')oft_indent,'Reflection:'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Reflection:'
     CALL oft_increase_indent
     DO i=1,lenreflag
       SELECT CASE(reflect(i:i))
         CASE('x')
-          WRITE(*,'(2A,L1)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
+          WRITE(oft_ounit,'(2A,L1)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
         CASE('y')
-          WRITE(*,'(2A,L1)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
+          WRITE(oft_ounit,'(2A,L1)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
         CASE('z')
-          WRITE(*,'(2A,L1)')oft_indent,'XY-plane, periodic = ',ref_per(3)
+          WRITE(oft_ounit,'(2A,L1)')oft_indent,'XY-plane, periodic = ',ref_per(3)
       END SELECT
     END DO
     CALL oft_decrease_indent
@@ -243,21 +243,21 @@ IF(oft_env%head_proc)THEN
   IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','smesh_t3d_load',__FILE__)
   lenreflag=lnblnk(reflect)
   !
-  WRITE(*,'(2A)')oft_indent,'T3D surface mesh:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'T3D surface mesh:'
   CALL oft_increase_indent
-  WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
-  WRITE(*,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
+  WRITE(oft_ounit,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
+  WRITE(oft_ounit,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
   IF(lenreflag>0)THEN
-    WRITE(*,'(2X,A)')oft_indent,'Reflection:'
+    WRITE(oft_ounit,'(2X,A)')oft_indent,'Reflection:'
     CALL oft_increase_indent
     DO i=1,lenreflag
       SELECT CASE(reflect(i:i))
         CASE('x')
-          WRITE(*,'(4X,A,L1)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
+          WRITE(oft_ounit,'(4X,A,L1)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
         CASE('y')
-          WRITE(*,'(4X,A,L1)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
+          WRITE(oft_ounit,'(4X,A,L1)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
         CASE('z')
-          WRITE(*,'(4X,A,L1)')oft_indent,'XY-plane, periodic = ',ref_per(3)
+          WRITE(oft_ounit,'(4X,A,L1)')oft_indent,'XY-plane, periodic = ',ref_per(3)
       END SELECT
     END DO
     CALL oft_decrease_indent
@@ -361,7 +361,7 @@ character(40) :: t1,t2,t3
 DEBUG_STACK_PUSH
 !---Only lead process reads file
 if(oft_env%head_proc)then
-  if(oft_debug_print(1))WRITE(*,'(2X,A)')'Loading T3D geometry:'
+  if(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Loading T3D geometry:'
   !---Open File for parsing
   open(NEWUNIT=io_unit,FILE=TRIM(inpname),ACTION='read')
   !---Initialize CAD counters
@@ -483,11 +483,11 @@ if(oft_env%head_proc)then
   close(io_unit)
   !---Write out CAD stats
   IF(oft_debug_print(1))THEN
-    WRITE(*,'(4X,A,I8)')'# of vertices          =',cad_tmp%ngwv
-    WRITE(*,'(4X,A,I8)')'# of weight points     =',cad_tmp%ngww
-    WRITE(*,'(4X,A,I8)')'# of curves            =',cad_tmp%ngwc
-    WRITE(*,'(4X,A,I8)')'# of surfaces          =',cad_tmp%ngws
-    WRITE(*,'(4X,A,I8)')'# of patches           =',cad_tmp%ngwp
+    WRITE(oft_ounit,'(4X,A,I8)')'# of vertices          =',cad_tmp%ngwv
+    WRITE(oft_ounit,'(4X,A,I8)')'# of weight points     =',cad_tmp%ngww
+    WRITE(oft_ounit,'(4X,A,I8)')'# of curves            =',cad_tmp%ngwc
+    WRITE(oft_ounit,'(4X,A,I8)')'# of surfaces          =',cad_tmp%ngws
+    WRITE(oft_ounit,'(4X,A,I8)')'# of patches           =',cad_tmp%ngwp
   END IF
 end if
 DEBUG_STACK_POP
@@ -499,7 +499,7 @@ subroutine mesh_t3d_cadsync(mg_mesh)
 type(multigrid_mesh), intent(inout) :: mg_mesh
 integer(i4) :: tmp(11),ierr
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2X,A)')'Syncing T3D geometry'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Syncing T3D geometry'
 CALL oft_mpi_barrier(ierr) ! Wait for all processes
 !---Communicate T3D boundary information
 if(oft_env%rank==0)then
@@ -629,7 +629,7 @@ class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,ind,k,ep(2),fp(3),ind_par
 integer(i4), allocatable :: emap(:),fmap(:)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))write(*,'(2X,A)')'Linking T3D geometry to mesh'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Linking T3D geometry to mesh'
 !---Get edge boundary mapping
 allocate(emap(mesh%ne))
 allocate(cad_link%lbeg(mesh%nbe)) ! Create edge linkage
@@ -835,7 +835,7 @@ if(mg_mesh%level==1)THEN
 END IF
 if(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))then ! Current level is transfer level
   !---Synchronize T3D linkage to distributed mesh
-  if(oft_debug_print(1))write(*,*)'Copying geometry linkage to distributed mesh'
+  if(oft_debug_print(1))WRITE(oft_ounit,*)'Copying geometry linkage to distributed mesh'
   !---Get global point mapping
   allocate(tmp(mesh%base%np))
   tmp=0
@@ -879,12 +879,12 @@ if(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))then ! Current level is transfer leve
   enddo
   !---Destroy mapping arrays
   deallocate(tmp,emap,fmap)
-  if(oft_debug_print(1))write(*,*)'Complete'
+  if(oft_debug_print(1))WRITE(oft_ounit,*)'Complete'
   DEBUG_STACK_POP
   return
 endif
 !---Refine new boundary points using CAD model
-if(oft_debug_print(1))write(*,*)'Adjusting points to T3D boundary'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Adjusting points to T3D boundary'
 !---Get CAD representation aliases
 pmesh_cad_rep=>ML_cad_rep(mg_mesh%level-1)
 pmesh_cad_link=>ML_cad_link(mg_mesh%level-1)
@@ -962,7 +962,7 @@ do j=1,pmesh%nbf
 enddo
 !---Destroy mapping arrays
 deallocate(emap,fmap)
-if(oft_debug_print(1))write(*,*)'Complete'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_t3d_reffix
 !---------------------------------------------------------------------------------
@@ -976,7 +976,7 @@ integer(i4), allocatable :: emap(:)
 class(oft_mesh), pointer :: mesh
 CHARACTER(LEN=60) :: error_str
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,*)'Setting T3D quadratic nodes'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Setting T3D quadratic nodes'
 !---Get CAD representation alias
 mesh=>mg_mesh%mesh
 cad_rep=>ML_cad_rep(mg_mesh%level)
@@ -1029,7 +1029,7 @@ IF(oft_env%head_proc.AND.nerr>0)THEN
   WRITE(error_str,'(A,I4,A)')'Quadratic node placement failed for ',INT(nerr,2),' edges'
   CALL oft_warn(error_str)
 END IF
-if(oft_debug_print(1))write(*,*)'Complete'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_t3d_add_quad
 !---------------------------------------------------------------------------------
@@ -1050,7 +1050,7 @@ real(r8) :: rnorm
 character(LEN=1), PARAMETER :: coords(3)=(/'x','y','z'/)
 DEBUG_STACK_PUSH
 if(abs(k-2)>1)call oft_abort('Invalid coordinate index','mesh_t3d_reflect',__FILE__)
-IF(oft_debug_print(1))write(*,'(2X,2A)')'Reflecting mesh -> ',coords(k)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,2A)')'Reflecting mesh -> ',coords(k)
 k1=mod(k ,3)+1
 k2=mod(k1,3)+1
 !---Reflect points that are not on reflection plane
@@ -1332,7 +1332,7 @@ real(r8) :: pt_i(3),pt_j(3),d_plane,per_dir(3)
 real(r8), parameter :: tol=1.d-6
 logical :: flag(3)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Setting T3D periodicity'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Setting T3D periodicity'
 !---Set periodic faces
 mesh%periodic%nper=COUNT(ref_per)
 ALLOCATE(mesh%periodic%lp(mesh%np))

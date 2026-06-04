@@ -159,7 +159,7 @@ IF(mg_mesh%level==1)THEN
 END IF
 IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer level
   !---Synchronize T3D linkage to distributed mesh
-  IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Copying quadratic mapping to distributed mesh'
+  IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Copying quadratic mapping to distributed mesh'
   CALL oft_increase_indent
   !---Copy quadratic mesh if available
   IF(ASSOCIATED(pmesh%ho_info%r))THEN
@@ -214,7 +214,7 @@ IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN ! Current level is transfer leve
   RETURN
 END IF
 !---Copy quadratic mesh if available
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Adjusting points to parent quadratic mesh'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Adjusting points to parent quadratic mesh'
 CALL oft_increase_indent
 DO i=1,pmesh%ne
   j=i+pmesh%np
@@ -581,7 +581,7 @@ IF(mg_mesh%level==1)THEN
 END IF
 IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN ! Current level is transfer level
   !---Synchronize T3D linkage to distributed mesh
-  IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Copying quadratic mapping to distributed mesh'
+  IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Copying quadratic mapping to distributed mesh'
   CALL oft_increase_indent
   !---Copy quadratic mesh if available
   IF(ASSOCIATED(pmesh%ho_info%r))THEN
@@ -613,7 +613,7 @@ IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN ! Current level is transfer lev
   RETURN
 END IF
 !---Copy quadratic mesh if available
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Adjusting points to parent quadratic mesh'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Adjusting points to parent quadratic mesh'
 CALL oft_increase_indent
 DO i=1,pmesh%ne
   j=i+pmesh%np
@@ -1144,7 +1144,7 @@ do i=1,self%ne ! loop over coarse edges & find daughter edges
   lede(1,i)=mesh_local_findedge(fmesh,(/lecors(1), i+self%np/))
   lede(2,i)=mesh_local_findedge(fmesh,(/lecors(2), i+self%np/))
   IF(ANY(lede(:,i)==0))THEN
-    WRITE(*,*)i,lede(:,i)
+    WRITE(oft_ounit,*)i,lede(:,i)
     CALL oft_abort('Bad lede', "tetmesh_mg_globals", __FILE__)
   END IF
 enddo
@@ -1160,7 +1160,7 @@ do i=1,self%nf ! loop over coarse faces & find daughter edges
   lfde(2,i)=mesh_local_findedge(fmesh,(/lfecors(3),lfecors(1)/))
   lfde(3,i)=mesh_local_findedge(fmesh,(/lfecors(2),lfecors(1)/))
   IF(ANY(lfde(:,i)==0))THEN
-    WRITE(*,*)i,lfde(:,i)
+    WRITE(oft_ounit,*)i,lfde(:,i)
     CALL oft_abort('Bad lfde', "tetmesh_mg_globals", __FILE__)
   END IF
   !
@@ -1177,7 +1177,7 @@ do i=1,self%nf ! loop over coarse faces & find daughter edges
   END DO
   lfdf(4,i)=mesh_local_findface(fmesh, lfecors)
   IF(ANY(lfdf(:,i)==0))THEN
-    WRITE(*,*)i,lfdf(:,i)
+    WRITE(oft_ounit,*)i,lfdf(:,i)
     CALL oft_abort('Bad lfdf', "tetmesh_mg_globals", __FILE__)
   END IF
 enddo
@@ -1206,7 +1206,7 @@ do i=1,self%nc ! loop over coarse faces & find daughter faces
   ! k=mg_mesh%inter(mg_mesh%level-1)%lcdg(i) ! diagonal placement index
   ! lcde(1,i)=mesh_local_findedge(fmesh,(/lcecors(k), lcecors(k+3)/))
   IF(ANY(lcde(:,i)==0))THEN
-    WRITE(*,*)i,lcde(:,i)
+    WRITE(oft_ounit,*)i,lcde(:,i)
     CALL oft_abort('Bad lcde', "tetmesh_mg_globals", __FILE__)
   END IF
   !
@@ -1224,7 +1224,7 @@ do i=1,self%nc ! loop over coarse faces & find daughter faces
     j=j+1
   END DO
   IF(ANY(lcdf(:,i)==0))THEN
-    WRITE(*,*)i,lcdf(:,i)
+    WRITE(oft_ounit,*)i,lcdf(:,i)
     CALL oft_abort('Bad lcdf', "tetmesh_mg_globals", __FILE__)
   END IF
 enddo
@@ -1319,7 +1319,7 @@ do i=1,self%ne ! loop over coarse edges & find daughter edges
   lede(1,i)=mesh_local_findedge(fmesh,(/lecors(1), i+self%np/))
   lede(2,i)=mesh_local_findedge(fmesh,(/lecors(2), i+self%np/))
   IF(ANY(lede(:,i)==0))THEN
-    WRITE(*,*)i,lede(:,i)
+    WRITE(oft_ounit,*)i,lede(:,i)
     CALL oft_abort('Bad lede', "trimesh_mg_globals", __FILE__)
   END IF
 enddo
@@ -1333,7 +1333,7 @@ do i=1,self%nc ! loop over coarse cells & find daughter edges
   lcde(2,i)=mesh_local_findedge(fmesh,(/lcecors(3),lcecors(1)/))
   lcde(3,i)=mesh_local_findedge(fmesh,(/lcecors(2),lcecors(1)/))
   IF(ANY(lcde(:,i)==0))THEN
-    WRITE(*,*)i,lcde(:,i)
+    WRITE(oft_ounit,*)i,lcde(:,i)
     CALL oft_abort('Bad lcde', "trimesh_mg_globals", __FILE__)
   END IF
 enddo
@@ -1398,7 +1398,7 @@ do i=1,self%ne ! loop over coarse edges & find daughter edges
   lede(1,i)=mesh_local_findedge(fmesh,(/lecors(1), i+self%np/))
   lede(2,i)=mesh_local_findedge(fmesh,(/lecors(2), i+self%np/))
   IF(ANY(lede(:,i)==0))THEN
-    WRITE(*,*)i,lede(:,i)
+    WRITE(oft_ounit,*)i,lede(:,i)
     CALL oft_abort('Bad lede', "hexmesh_mg_globals", __FILE__)
   END IF
 enddo
@@ -1415,7 +1415,7 @@ do i=1,self%nf ! loop over coarse faces & find daughter edges
   lfde(3,i)=mesh_local_findedge(fmesh,(/lfecors(3), i+self%np+self%ne/))
   lfde(4,i)=mesh_local_findedge(fmesh,(/lfecors(4), i+self%np+self%ne/))
   IF(ANY(lfde(:,i)==0))THEN
-    WRITE(*,*)i,lfde(:,i)
+    WRITE(oft_ounit,*)i,lfde(:,i)
     CALL oft_abort('Bad lfde', "hexmesh_mg_globals", __FILE__)
   END IF
   !
@@ -1430,7 +1430,7 @@ do i=1,self%nf ! loop over coarse faces & find daughter edges
   lfdf(4,i)=mesh_local_findface(fmesh, (/lfcors(4), lfecors(4), &
     i+self%np+self%ne, lfecors(3)/))
   IF(ANY(lfdf(:,i)==0))THEN
-    WRITE(*,*)i,lfdf(:,i)
+    WRITE(oft_ounit,*)i,lfdf(:,i)
     CALL oft_abort('Bad lfdf', "hexmesh_mg_globals", __FILE__)
   END IF
 enddo
@@ -1446,7 +1446,7 @@ do i=1,self%nc ! loop over coarse faces & find daughter faces
       i+self%np+self%ne+self%nf/))
   END DO
   IF(ANY(lcde(:,i)==0))THEN
-    WRITE(*,*)i,lcde(:,i)
+    WRITE(oft_ounit,*)i,lcde(:,i)
     CALL oft_abort('Bad lcde', "hexmesh_mg_globals", __FILE__)
   END IF
   DO j=1,12
@@ -1466,7 +1466,7 @@ do i=1,self%nc ! loop over coarse faces & find daughter faces
       i+self%np+self%ne+self%nf, lfecors(2)/))
   END DO
   IF(ANY(lcdf(:,i)==0))THEN
-    WRITE(*,*)i,lcdf(:,i)
+    WRITE(oft_ounit,*)i,lcdf(:,i)
     CALL oft_abort('Bad lcdf', "hexmesh_mg_globals", __FILE__)
   END IF
 enddo
@@ -1564,7 +1564,7 @@ do i=1,self%ne ! loop over coarse edges & find daughter edges
   lede(1,i)=mesh_local_findedge(fmesh,(/lecors(1), i+self%np/))
   lede(2,i)=mesh_local_findedge(fmesh,(/lecors(2), i+self%np/))
   IF(ANY(lede(:,i)==0))THEN
-    WRITE(*,*)i,lede(:,i)
+    WRITE(oft_ounit,*)i,lede(:,i)
     CALL oft_abort('Bad lede', "quadmesh_mg_globals", __FILE__)
   END IF
 enddo
@@ -1579,7 +1579,7 @@ do i=1,self%nc ! loop over coarse faces & find daughter edges
   lcde(3,i)=mesh_local_findedge(fmesh,(/lcecors(3), i+self%np+self%ne/))
   lcde(4,i)=mesh_local_findedge(fmesh,(/lcecors(4), i+self%np+self%ne/))
   IF(ANY(lcde(:,i)==0))THEN
-    WRITE(*,*)i,lcde(:,i)
+    WRITE(oft_ounit,*)i,lcde(:,i)
     CALL oft_abort('Bad lcde', "quadmesh_mg_globals", __FILE__)
   END IF
 enddo

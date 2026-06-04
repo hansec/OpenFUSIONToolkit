@@ -31,7 +31,7 @@ class OFT_env():
             cls.instance = super(OFT_env, cls).__new__(cls)
         return cls.instance
 
-    def __init__(self,debug_level=0,nthreads=2,unique_tempfiles='global',abort_callback=True,quiet=False):
+    def __init__(self,debug_level=0,nthreads=2,unique_tempfiles='global',abort_callback=True,quiet=False,stdout_file=None,stderr_file=None):
         '''! Initialize OFT runtime object
 
         @param debug_level Level of debug printing (0-3)
@@ -42,6 +42,8 @@ class OFT_env():
         'none': Use non-unique names in local directory; can lead to conflict with multiple instances)
         @param abort_callback Use callback for "graceful" abort
         @param quiet If `True`, do not print OFT environment information on initialization
+        @param stdout_file If not `None`, path to file for redirecting OFT Fortran/C stdout
+        @param stderr_file If not `None`, path to file for redirecting OFT Fortran/C stderr
         '''
         ## OS type
         self.os = platform.uname()[0]
@@ -114,6 +116,8 @@ class OFT_env():
         self.oft_in_groups = {
             "runtime_options": {
                 "debug": "{0}".format(debug_level),
+                "ofile": "'{0}'".format(stdout_file) if stdout_file is not None else "''",
+                "efile": "'{0}'".format(stderr_file) if stderr_file is not None else "''"
             },
             "mesh_options": {
                 "meshname": "'none'"

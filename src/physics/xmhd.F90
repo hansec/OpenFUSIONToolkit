@@ -760,52 +760,52 @@ IF(oft_env%head_proc)THEN
 100 FORMAT(2X,A,L1)
 101 FORMAT(2X,2A)
 102 FORMAT(2X,A,ES11.3)
-  WRITE(*,*)
-  WRITE(*,'(A)')'============================'
-  WRITE(*,'(A)')'Starting non-linear xMHD run'
-  WRITE(*,100)'Lorentz    = ',xmhd_jcb
-  WRITE(*,100)'V-Advec    = ',xmhd_advec
-  WRITE(*,100)'B-Adv      = ',xmhd_adv_b
-  WRITE(*,100)'N-Adv      = ',xmhd_adv_den
-  WRITE(*,100)'T-Adv      = ',xmhd_adv_temp
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(A)')'============================'
+  WRITE(oft_ounit,'(A)')'Starting non-linear xMHD run'
+  WRITE(oft_ounit,100)'Lorentz    = ',xmhd_jcb
+  WRITE(oft_ounit,100)'V-Advec    = ',xmhd_advec
+  WRITE(oft_ounit,100)'B-Adv      = ',xmhd_adv_b
+  WRITE(oft_ounit,100)'N-Adv      = ',xmhd_adv_den
+  WRITE(oft_ounit,100)'T-Adv      = ',xmhd_adv_temp
   IF(xmhd_two_temp)THEN
-    WRITE(*,100)'Two Temp   = ',xmhd_two_temp
+    WRITE(oft_ounit,100)'Two Temp   = ',xmhd_two_temp
   ELSE
-    WRITE(*,102)'Te/Ti    = ',te_factor
+    WRITE(oft_ounit,102)'Te/Ti    = ',te_factor
   END IF
-  WRITE(*,100)'Hall       = ',xmhd_hall
-  WRITE(*,100)'Ohmic      = ',xmhd_ohmic
-  WRITE(*,100)'Visc Heat  = ',xmhd_visc_heat
-  WRITE(*,100)'Upwinding  = ',xmhd_upwind
-  WRITE(*,101)'B-BC       = ',bbc
-  WRITE(*,101)'V-BC       = ',vbc
-  IF(xmhd_adv_den)WRITE(*,101) 'N-BC       = ',nbc
-  IF(xmhd_adv_temp)WRITE(*,101)'T-BC       = ',tbc
-  WRITE(*,102)'t0         = ',t
-  WRITE(*,102)'dt         = ',dt
-  WRITE(*,102)'eta0       = ',eta
-  WRITE(*,102)'eta0_Temp  = ',eta_temp
-  WRITE(*,101)'visc_type  = ',visc_type
-  WRITE(*,102)'  nu_par   = ',nu_par
-  WRITE(*,102)'  nu_perp  = ',nu_perp
-  IF(xmhd_adv_den)WRITE(*,102)'D_dens     = ',d_dens
+  WRITE(oft_ounit,100)'Hall       = ',xmhd_hall
+  WRITE(oft_ounit,100)'Ohmic      = ',xmhd_ohmic
+  WRITE(oft_ounit,100)'Visc Heat  = ',xmhd_visc_heat
+  WRITE(oft_ounit,100)'Upwinding  = ',xmhd_upwind
+  WRITE(oft_ounit,101)'B-BC       = ',bbc
+  WRITE(oft_ounit,101)'V-BC       = ',vbc
+  IF(xmhd_adv_den)WRITE(oft_ounit,101) 'N-BC       = ',nbc
+  IF(xmhd_adv_temp)WRITE(oft_ounit,101)'T-BC       = ',tbc
+  WRITE(oft_ounit,102)'t0         = ',t
+  WRITE(oft_ounit,102)'dt         = ',dt
+  WRITE(oft_ounit,102)'eta0       = ',eta
+  WRITE(oft_ounit,102)'eta0_Temp  = ',eta_temp
+  WRITE(oft_ounit,101)'visc_type  = ',visc_type
+  WRITE(oft_ounit,102)'  nu_par   = ',nu_par
+  WRITE(oft_ounit,102)'  nu_perp  = ',nu_perp
+  IF(xmhd_adv_den)WRITE(oft_ounit,102)'D_dens     = ',d_dens
   IF(xmhd_adv_temp)THEN
-    WRITE(*,102)'kappa_par  = ',kappa_par
-    WRITE(*,102)'kappa_perp = ',kappa_perp
+    WRITE(oft_ounit,102)'kappa_par  = ',kappa_par
+    WRITE(oft_ounit,102)'kappa_perp = ',kappa_perp
   END IF
-  IF(temp_floor<0.d0)WRITE(*,102)'temp_floor = ',temp_floor
-  IF(den_floor<0.d0)WRITE(*,102)'den_floor  = ',den_floor
-  WRITE(*,102)'L-Tol      = ',lin_tol
-  WRITE(*,102)'NL-Tol     = ',nl_tol
-  WRITE(*,102)'Mag Energy = ',mer
-  WRITE(*,102)'Kin Energy = ',ver
-  IF(xmhd_monitor_div)WRITE(*,'(2X,A,2ES11.3)')'Div Error  = ',derror,jump_error
-  WRITE(*,102)'# B-DOFs   = ',REAL(oft_hcurl%global%ne+oft_hgrad%global%ne,8)
-  WRITE(*,102)'# V-DOFs   = ',REAL(3*oft_lagrange%global%ne,8)
-  WRITE(*,102)'# N-DOFs   = ',REAL(oft_lagrange%global%ne,8)
-  WRITE(*,102)'# T-DOFs   = ',REAL(oft_lagrange%global%ne,8)
-  WRITE(*,'(A)')'============================'
-  WRITE(*,*)
+  IF(temp_floor<0.d0)WRITE(oft_ounit,102)'temp_floor = ',temp_floor
+  IF(den_floor<0.d0)WRITE(oft_ounit,102)'den_floor  = ',den_floor
+  WRITE(oft_ounit,102)'L-Tol      = ',lin_tol
+  WRITE(oft_ounit,102)'NL-Tol     = ',nl_tol
+  WRITE(oft_ounit,102)'Mag Energy = ',mer
+  WRITE(oft_ounit,102)'Kin Energy = ',ver
+  IF(xmhd_monitor_div)WRITE(oft_ounit,'(2X,A,2ES11.3)')'Div Error  = ',derror,jump_error
+  WRITE(oft_ounit,102)'# B-DOFs   = ',REAL(oft_hcurl%global%ne+oft_hgrad%global%ne,8)
+  WRITE(oft_ounit,102)'# V-DOFs   = ',REAL(3*oft_lagrange%global%ne,8)
+  WRITE(oft_ounit,102)'# N-DOFs   = ',REAL(oft_lagrange%global%ne,8)
+  WRITE(oft_ounit,102)'# T-DOFs   = ',REAL(oft_lagrange%global%ne,8)
+  WRITE(oft_ounit,'(A)')'============================'
+  WRITE(oft_ounit,*)
 END IF
 IF(PRESENT(profile_only))THEN
   IF(profile_only)CALL xmhd_profile(u)
@@ -876,7 +876,7 @@ DO i=1,nsteps
     !---Clean accumulated divergence error
     IF(MOD(rst_ind+i,nclean)==0)THEN
       CALL oft_xmhd_pop(u,sub_fields)
-      IF(oft_env%head_proc)WRITE(*,*)'  Cleaning Divergence'
+      IF(oft_env%head_proc)WRITE(oft_ounit,*)'  Cleaning Divergence'
       CALL divout%apply(sub_fields%B)
       CALL oft_xmhd_push(sub_fields,u)
     END IF
@@ -902,12 +902,12 @@ DO i=1,nsteps
       IF(neg_flag(3,j)>0.d0)neg_source(3,j)=MAX(neg_source(3,j),MIN(2.d0,neg_flag(3,j)))
     END DO
     k=COUNT(neg_source(1,:)>0.d0)
-    IF(k>0)WRITE(*,*)oft_env%rank,'N-FLOOR cells  ',k
+    IF(k>0)WRITE(oft_ounit,*)oft_env%rank,'N-FLOOR cells  ',k
     k=COUNT(neg_source(2,:)>0.d0)
-    IF(k>0)WRITE(*,*)oft_env%rank,'T-FLOOR cells  ',k
+    IF(k>0)WRITE(oft_ounit,*)oft_env%rank,'T-FLOOR cells  ',k
     IF(xmhd_two_temp)THEN
       k=COUNT(neg_source(3,:)>0.d0)
-      IF(k>0)WRITE(*,*)oft_env%rank,'Te-FLOOR cells ',k
+      IF(k>0)WRITE(oft_ounit,*)oft_env%rank,'Te-FLOOR cells ',k
     END IF
     neg_flag=0.d0
 !------------------------------------------------------------------------------
@@ -917,7 +917,7 @@ DO i=1,nsteps
     IF(MOD(xmhd_opcount,xmhd_prefreq)==0.OR.ABS(xmhd_opdt-dt)/dt>.15d0)xmhd_opcount=0
     !---Update preconditioning matrices if necessary
     IF(xmhd_mfnk.AND.xmhd_opcount/=0.AND.(nksolver%lits>baseit+1.OR.nksolver%nlits>=nl_update))THEN
-       IF(oft_env%head_proc)WRITE(*,*)'Update Jacobian',nksolver%lits,baseit,nredo
+       IF(oft_env%head_proc)WRITE(oft_ounit,*)'Update Jacobian',nksolver%lits,baseit,nredo
        IF(nredo<1)THEN
          jac_dt=dt/2.d0
          xmhd_skip_update=.FALSE.
@@ -1017,8 +1017,8 @@ DO i=1,nsteps
       hist_i4=(/rst_ind+i-1,nksolver%lits,nksolver%nlits/)
       hist_r4=REAL([t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,2X,I4,F12.3,ES12.2)
-      WRITE(*,103)rst_ind+i,t,nksolver%lits,nksolver%nlits,elapsed_time,dt
-      IF(oft_debug_print(1))WRITE(*,*)
+      WRITE(oft_ounit,103)rst_ind+i,t,nksolver%lits,nksolver%nlits,elapsed_time,dt
+      IF(oft_debug_print(1))WRITE(oft_ounit,*)
       CALL hist_file%write(data_i4=hist_i4, data_r4=hist_r4)
     END IF
     !---Process probes
@@ -1051,7 +1051,7 @@ DO i=1,nsteps
       IF(PRESENT(driver))CALL driver%rst_save('xMHD_'//rst_char//'.rst')
       IF(oft_env%head_proc)THEN
         elapsed_time=mytimer%tock()
-        WRITE(*,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
+        WRITE(oft_ounit,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
         CALL hist_file%flush
         IF(PRESENT(probes))CALL probes%flush
       END IF
@@ -1300,43 +1300,43 @@ IF(oft_env%head_proc)THEN
 100 FORMAT(2X,A,L1)
 101 FORMAT(2X,2A)
 102 FORMAT(2X,A,ES11.3)
-  WRITE(*,*)
-  WRITE(*,'(A)')'============================'
-  WRITE(*,'(A)')'Starting linear xMHD run'
-  WRITE(*,100)'Lorentz    = ',xmhd_jcb
-  WRITE(*,100)'V-Advec    = ',xmhd_advec
-  WRITE(*,100)'N-Adv      = ',xmhd_adv_den
-  WRITE(*,100)'T-Adv      = ',xmhd_adv_temp
-  WRITE(*,100)'Hall       = ',xmhd_hall
-  WRITE(*,100)'Ohmic      = ',xmhd_ohmic
-  WRITE(*,100)'Visc Heat  = ',xmhd_visc_heat
-  WRITE(*,101)'B-BC       = ',bbc
-  WRITE(*,101)'V-BC       = ',vbc
-  IF(xmhd_adv_den)WRITE(*,101)'N-BC       = ',nbc
-  IF(xmhd_adv_temp)WRITE(*,101)'T-BC       = ',tbc
-  WRITE(*,102)'t0         = ',t
-  WRITE(*,102)'dt         = ',dt
-  WRITE(*,102)'eta0       = ',eta
-  WRITE(*,102)'eta0_Temp  = ',eta_temp
-  WRITE(*,101)'visc_type  = ',visc_type
-  WRITE(*,102)'  nu_par   = ',nu_par
-  WRITE(*,102)'  nu_perp  = ',nu_perp
-  IF(xmhd_adv_den)WRITE(*,102)'D_dens     = ',d_dens
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(A)')'============================'
+  WRITE(oft_ounit,'(A)')'Starting linear xMHD run'
+  WRITE(oft_ounit,100)'Lorentz    = ',xmhd_jcb
+  WRITE(oft_ounit,100)'V-Advec    = ',xmhd_advec
+  WRITE(oft_ounit,100)'N-Adv      = ',xmhd_adv_den
+  WRITE(oft_ounit,100)'T-Adv      = ',xmhd_adv_temp
+  WRITE(oft_ounit,100)'Hall       = ',xmhd_hall
+  WRITE(oft_ounit,100)'Ohmic      = ',xmhd_ohmic
+  WRITE(oft_ounit,100)'Visc Heat  = ',xmhd_visc_heat
+  WRITE(oft_ounit,101)'B-BC       = ',bbc
+  WRITE(oft_ounit,101)'V-BC       = ',vbc
+  IF(xmhd_adv_den)WRITE(oft_ounit,101)'N-BC       = ',nbc
+  IF(xmhd_adv_temp)WRITE(oft_ounit,101)'T-BC       = ',tbc
+  WRITE(oft_ounit,102)'t0         = ',t
+  WRITE(oft_ounit,102)'dt         = ',dt
+  WRITE(oft_ounit,102)'eta0       = ',eta
+  WRITE(oft_ounit,102)'eta0_Temp  = ',eta_temp
+  WRITE(oft_ounit,101)'visc_type  = ',visc_type
+  WRITE(oft_ounit,102)'  nu_par   = ',nu_par
+  WRITE(oft_ounit,102)'  nu_perp  = ',nu_perp
+  IF(xmhd_adv_den)WRITE(oft_ounit,102)'D_dens     = ',d_dens
   IF(xmhd_adv_temp)THEN
-    WRITE(*,102)'kappa_par  = ',kappa_par
-    WRITE(*,102)'kappa_perp = ',kappa_perp
+    WRITE(oft_ounit,102)'kappa_par  = ',kappa_par
+    WRITE(oft_ounit,102)'kappa_perp = ',kappa_perp
   END IF
-  WRITE(*,102)'L-Tol      = ',lin_tol
-  WRITE(*,102)'NL-Tol     = ',nl_tol
-  WRITE(*,102)'Mag Energy = ',mer
-  WRITE(*,102)'Kin Energy = ',ver
-  IF(xmhd_monitor_div)WRITE(*,'(2X,A,2ES11.3)')'Div Error  = ',derror,jump_error
-  WRITE(*,102)'# B-DOFs   = ',REAL(oft_hcurl%global%ne+oft_hgrad%global%ne,4)
-  WRITE(*,102)'# V-DOFs   = ',REAL(3*oft_lagrange%global%ne,4)
-  WRITE(*,102)'# N-DOFs   = ',REAL(oft_lagrange%global%ne,4)
-  WRITE(*,102)'# T-DOFs   = ',REAL(oft_lagrange%global%ne,4)
-  WRITE(*,'(A)')'============================'
-  WRITE(*,*)
+  WRITE(oft_ounit,102)'L-Tol      = ',lin_tol
+  WRITE(oft_ounit,102)'NL-Tol     = ',nl_tol
+  WRITE(oft_ounit,102)'Mag Energy = ',mer
+  WRITE(oft_ounit,102)'Kin Energy = ',ver
+  IF(xmhd_monitor_div)WRITE(oft_ounit,'(2X,A,2ES11.3)')'Div Error  = ',derror,jump_error
+  WRITE(oft_ounit,102)'# B-DOFs   = ',REAL(oft_hcurl%global%ne+oft_hgrad%global%ne,4)
+  WRITE(oft_ounit,102)'# V-DOFs   = ',REAL(3*oft_lagrange%global%ne,4)
+  WRITE(oft_ounit,102)'# N-DOFs   = ',REAL(oft_lagrange%global%ne,4)
+  WRITE(oft_ounit,102)'# T-DOFs   = ',REAL(oft_lagrange%global%ne,4)
+  WRITE(oft_ounit,'(A)')'============================'
+  WRITE(oft_ounit,*)
 END IF
 !------------------------------------------------------------------------------
 ! Setup linear solver
@@ -1377,7 +1377,7 @@ DO i=1,nsteps
     !---Clean accumulated divergence error
     IF(MOD(rst_ind+i,nclean)==0)THEN
       CALL oft_xmhd_pop(du,sub_fields)
-      IF(oft_env%head_proc)WRITE(*,*)'  Cleaning Divergence'
+      IF(oft_env%head_proc)WRITE(oft_ounit,*)'  Cleaning Divergence'
       CALL divout%apply(sub_fields%B)
       CALL oft_xmhd_push(sub_fields,du)
     END IF
@@ -1455,8 +1455,8 @@ DO i=1,nsteps
       hist_i4=(/rst_ind+i-1,solver%cits,0/)
       hist_r4=REAL([t,tflux,tcurr,mer,jump_error,derror,ver,npart,temp_avg,tempe_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,F12.3,ES12.2)
-      WRITE(*,103)rst_ind+i,t,solver%cits,elapsed_time,dt
-      IF(oft_debug_print(1))WRITE(*,*)
+      WRITE(oft_ounit,103)rst_ind+i,t,solver%cits,elapsed_time,dt
+      IF(oft_debug_print(1))WRITE(oft_ounit,*)
       CALL hist_file%write(data_i4=hist_i4, data_r4=hist_r4)
     END IF
     !---Update current time
@@ -1473,7 +1473,7 @@ DO i=1,nsteps
       CALL oft_xmhd_rst_save(du, t, dt, 'xMHD_'//rst_char//'.rst', 'U')
       IF(oft_env%head_proc)THEN
         elapsed_time=mytimer%tock()
-        WRITE(*,'(A,F12.3)')'  I/O Time = ',elapsed_time
+        WRITE(oft_ounit,'(A,F12.3)')'  I/O Time = ',elapsed_time
         CALL hist_file%flush
       END IF
     END IF
@@ -1550,7 +1550,7 @@ class(oft_matrix), pointer :: Jac
 type(oft_quad_type), pointer :: quad
 type(xmhd_loc_values) :: u0
 DEBUG_STACK_PUSH
-IF(oft_debug_print(2))write(*,'(4X,A,I4)')'Building xMHD Jacobian: ',xmhd_level
+IF(oft_debug_print(2))WRITE(oft_ounit,'(4X,A,I4)')'Building xMHD Jacobian: ',xmhd_level
 !---
 Jac=>oft_xmhd_ops%J
 quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad !oft_hcurl%quad
@@ -2382,7 +2382,7 @@ DEALLOCATE(tlocks)
 !------------------------------------------------------------------------------
 ! Set BC diagnoals
 !------------------------------------------------------------------------------
-IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
+IF(oft_debug_print(2))WRITE(oft_ounit,'(4X,A)')'Setting BCs'
 CALL fem_dirichlet_diag(oft_hcurl,Jac,oft_xmhd_ops%b1_bc,1)
 CALL fem_dirichlet_diag(oft_hgrad,Jac,oft_xmhd_ops%b2_bc,2)
 CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%n_bc,6)
@@ -2435,7 +2435,7 @@ allocate(oft_xmhd_ops_ML(xmhd_ML_hcurl%nlevels))
 xmhd_blevel=xmhd_ML_hcurl%blevel
 xmhd_nlevels=xmhd_ML_hcurl%nlevels
 xmhd_level=xmhd_ML_hcurl%level
-IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Allocating xMHD structures'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Allocating xMHD structures'
 !------------------------------------------------------------------------------
 ! Setup matrix mask based on included physics
 !------------------------------------------------------------------------------
@@ -2582,7 +2582,7 @@ DO level=levelin,xmhd_minlev,-1
   CALL xmhd_set_bc()
 END DO
 call xmhd_set_level(levelin)
-! IF(oft_debug_print(2))WRITE(*,*)'  Done'
+! IF(oft_debug_print(2))WRITE(oft_ounit,*)'  Done'
 DEBUG_STACK_POP
 end subroutine xmhd_alloc_ops
 !------------------------------------------------------------------------------
@@ -2784,7 +2784,7 @@ type(oft_quad_type), pointer :: quad
 TYPE(xmhd_interp) :: full_interp
 type(xmhd_loc_values) :: u0
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD non-linear function'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Apply xMHD non-linear function'
 quad=>oft_hcurl%quad
 neg_vols=0.d0
 !------------------------------------------------------------------------------
@@ -3308,7 +3308,7 @@ NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !------------------------------------------------------------------------------
 ! Boundary conditions
 !------------------------------------------------------------------------------
-IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
+IF(oft_debug_print(2))WRITE(oft_ounit,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_hcurl,full_interp%bcurl_loc,bcout,oft_xmhd_ops%b1_bc)
 CALL fem_dirichlet_vec(oft_hgrad,full_interp%bgrad_loc,bgout,oft_xmhd_ops%b2_bc)
 CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,4),nout,oft_xmhd_ops%n_bc)
@@ -3365,10 +3365,10 @@ IF(back_step)THEN
 END IF
 CALL full_interp%delete
 !----
-IF(neg_vols(1)>0.d0)WRITE(*,'(A,I6,A,ES11.3)') '[',oft_env%rank,'] NEG Ne volume   = ',REAL(neg_vols(1),4)
-IF(neg_vols(2)>0.d0)WRITE(*,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Ti volume   = ',REAL(neg_vols(2),4)
+IF(neg_vols(1)>0.d0)WRITE(oft_ounit,'(A,I6,A,ES11.3)') '[',oft_env%rank,'] NEG Ne volume   = ',REAL(neg_vols(1),4)
+IF(neg_vols(2)>0.d0)WRITE(oft_ounit,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Ti volume   = ',REAL(neg_vols(2),4)
 IF(xmhd_two_temp)THEN
-  IF(neg_vols(3)>0.d0)WRITE(*,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Te volume   = ',REAL(neg_vols(3),4)
+  IF(neg_vols(3)>0.d0)WRITE(oft_ounit,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Te volume   = ',REAL(neg_vols(3),4)
 END IF
 DEBUG_STACK_POP
 end subroutine xmhd_errmatrix_apply
@@ -3395,7 +3395,7 @@ type(oft_quad_type), pointer :: quad
 TYPE(xmhd_interp) :: full_interp
 type(xmhd_loc_values) :: u0
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD mass matrix'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Apply xMHD mass matrix'
 quad=>oft_hcurl%quad
 !------------------------------------------------------------------------------
 ! Get local field values from source
@@ -3566,7 +3566,7 @@ NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !------------------------------------------------------------------------------
 ! Boundary conditions
 !------------------------------------------------------------------------------
-IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
+IF(oft_debug_print(2))WRITE(oft_ounit,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_hcurl,full_interp%bcurl_loc,bcout,oft_xmhd_ops%b1_bc)
 CALL fem_dirichlet_vec(oft_hgrad,full_interp%bgrad_loc,bgout,oft_xmhd_ops%b2_bc)
 CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,4),nout,oft_xmhd_ops%n_bc)
@@ -3644,7 +3644,7 @@ type(oft_quad_type), pointer :: quad
 TYPE(xmhd_interp) :: full_interp
 type(xmhd_loc_values) :: u0
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD mass matrix'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Apply xMHD mass matrix'
 quad=>oft_hcurl%quad
 !------------------------------------------------------------------------------
 ! Get local field values from source
@@ -3755,7 +3755,7 @@ end subroutine xmhd_diag
 !> Setup composite FE representation and ML environment
 !------------------------------------------------------------------------------
 subroutine xmhd_setup_rep
-IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating xMHD FE type'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Creating xMHD FE type'
 !---Create FE representation
 ML_xmhd_rep%nlevels=xmhd_ML_hcurl%nlevels
 ML_xmhd_rep%nfields=7
@@ -3837,7 +3837,7 @@ end subroutine xmhd_set_level
 !------------------------------------------------------------------------------
 subroutine xmhd_mfnk_update(uin)
 class(oft_vector), target, intent(inout) :: uin !< Current field
-IF(oft_debug_print(1))write(*,*)'Updating xMHD MF-Jacobian'
+IF(oft_debug_print(1))WRITE(oft_ounit,*)'Updating xMHD MF-Jacobian'
 CALL mfmat%update(uin)
 END SUBROUTINE xmhd_mfnk_update
 !------------------------------------------------------------------------------
@@ -4139,7 +4139,7 @@ IF(xmhd_skip_update)THEN
   xmhd_skip_update=.FALSE.
   RETURN
 END IF
-IF(oft_debug_print(1))write(*,'(2X,A)')'Update xMHD Jacobians'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Update xMHD Jacobians'
 !------------------------------------------------------------------------------
 ! Setup interpolators
 !------------------------------------------------------------------------------
@@ -4598,9 +4598,9 @@ namelist/xmhd_plot_options/probe_only,plot_div,file_list,t0,t1,dt, &
   rst_start,rst_end
 DEBUG_STACK_PUSH
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(A)')'============================'
-  WRITE(*,'(2X,A)')'Starting xMHD post-processing'
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(A)')'============================'
+  WRITE(oft_ounit,'(2X,A)')'Starting xMHD post-processing'
 END IF
 mg_mesh=>xmhd_ML_hcurl%ml_mesh
 IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_plot",__FILE__)
@@ -4649,12 +4649,12 @@ ELSE
   CALL oft_abort("First restart file cannot be found or is inaccessible",'xmhd_plot',__FILE__)
 END IF
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(4X,A,L1)')'Linear   = ',linear
-  WRITE(*,'(4X,A,L1)')'Te found = ',xmhd_two_temp
-  WRITE(*,'(4X,A,L1)')'N2 found = ',(d2_dens>0.d0)
-  WRITE(*,'(4X,A,L1)')'J2 found = ',(eta_hyper>0.d0)
-  WRITE(*,'(A)')'============================'
-  WRITE(*,*)
+  WRITE(oft_ounit,'(4X,A,L1)')'Linear   = ',linear
+  WRITE(oft_ounit,'(4X,A,L1)')'Te found = ',xmhd_two_temp
+  WRITE(oft_ounit,'(4X,A,L1)')'N2 found = ',(d2_dens>0.d0)
+  WRITE(oft_ounit,'(4X,A,L1)')'J2 found = ',(eta_hyper>0.d0)
+  WRITE(oft_ounit,'(A)')'============================'
+  WRITE(oft_ounit,*)
 END IF
 !------------------------------------------------------------------------------
 ! Read-in run parameters (only `rst_freq` is used)
@@ -4789,7 +4789,7 @@ IF(file_list(1:4)/="none")THEN
     END IF
     nsteps=nsteps+1
   END DO
-  IF(oft_env%head_proc)WRITE(*,*)'Found ',INT(nsteps,2),' restart files in list'
+  IF(oft_env%head_proc)WRITE(oft_ounit,*)'Found ',INT(nsteps,2),' restart files in list'
   REWIND(io_unit)
 END IF
 !------------------------------------------------------------------------------
@@ -5043,7 +5043,7 @@ matvec_time=0.d0
 nlop_time=0.d0
 build_optime=0.d0
 dot_time=0.d0
-IF(oft_env%head_proc)WRITE(*,'(A)')'Starting profiling'
+IF(oft_env%head_proc)WRITE(oft_ounit,'(A)')'Starting profiling'
 comm_times=0
 DO i=1,10
   IF(oft_env%head_proc)CALL mytimer%tick
@@ -5067,10 +5067,10 @@ DO i=1,10
   END DO
 END DO
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(A,ES11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
-  WRITE(*,'(A,ES11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
-  WRITE(*,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
-  WRITE(*,'(A,ES11.3)')'  Build  = ',matvec_time/REAL(10,8)
+  WRITE(oft_ounit,'(A,ES11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
+  WRITE(oft_ounit,'(A,ES11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
+  WRITE(oft_ounit,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
+  WRITE(oft_ounit,'(A,ES11.3)')'  Build  = ',matvec_time/REAL(10,8)
 END IF
 CALL oft_finalize()
 end subroutine xmhd_profile

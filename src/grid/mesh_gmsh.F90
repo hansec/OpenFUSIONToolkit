@@ -97,10 +97,10 @@ IF(oft_env%head_proc)THEN
   IF(ierr<0)CALL oft_abort('No "gmsh_options" found in input file.','mesh_gmsh_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "gmsh_options" in input file.','mesh_gmsh_load',__FILE__)
   IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','mesh_gmsh_load',__FILE__)
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Loading GMSH mesh'
-  WRITE(*,'(2X,2A)')  'Mesh File = ',TRIM(filename)
-  WRITE(*,'(2X,A,I4)')'Order     = ',order
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(A)')'**** Loading GMSH mesh'
+  WRITE(oft_ounit,'(2X,2A)')  'Mesh File = ',TRIM(filename)
+  WRITE(oft_ounit,'(2X,A,I4)')'Order     = ',order
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -188,7 +188,7 @@ DO i=1,nptmp
 END DO
 close(io_unit)
 !---Setup surface mesh
-IF(oft_debug_print(2))WRITE(*,*)'  Creating CAD surface mesh'
+IF(oft_debug_print(2))WRITE(oft_ounit,*)'  Creating CAD surface mesh'
 ALLOCATE(cad_ptmp(nptmp))
 cad_ptmp=0
 np_cad=0
@@ -229,7 +229,7 @@ IF(order==2)THEN
     END DO
   END DO
 END IF
-IF(oft_debug_print(2))WRITE(*,*)'  Complete'
+IF(oft_debug_print(2))WRITE(oft_ounit,*)'  Complete'
 !---
 call mesh_global_resolution(mesh)
 DEBUG_STACK_POP
@@ -242,7 +242,7 @@ class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,ind,fp(3)
 integer(i4), allocatable :: fmap(:)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))write(*,*)'Linking GMSH geometry to mesh'
+IF(oft_debug_print(1))WRITE(oft_ounit,*)'Linking GMSH geometry to mesh'
 !---Get face boundary mapping
 allocate(fmap(mesh%nf))
 allocate(cad_link%lbfg(mesh%nbf)) ! Create face linkage
@@ -261,7 +261,7 @@ end do
 !---Destroy mapping arrays
 deallocate(fmap)
 CALL mesh_gmsh_hobase(mesh)
-if(oft_debug_print(2))write(*,*)'  Complete'
+if(oft_debug_print(2))WRITE(oft_ounit,*)'  Complete'
 DEBUG_STACK_POP
 end subroutine mesh_gmsh_cadlink
 !---------------------------------------------------------------------------------
@@ -273,7 +273,7 @@ real(r8) :: pt(3)
 integer(i4) :: i,j,k,etmp(2),ind
 IF(order==1)RETURN
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,*)'Quadratic mesh nodes imported'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Quadratic mesh nodes imported'
 !---Setup quadratic mesh
 mesh%order=1
 mesh%ho_info%nep=1
@@ -292,7 +292,7 @@ do i=1,cad_mesh%ne
   if(ind==0)CALL oft_abort('Unlinked mesh edge','mesh_gmsh_hobase',__FILE__)
   mesh%ho_info%r(:,ind) = cad_mesh%ho_info%r(:,i)
 end do
-if(oft_debug_print(1))write(*,*)'Complete'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_gmsh_hobase
 !---------------------------------------------------------------------------------
@@ -317,7 +317,7 @@ if(mg_mesh%level==1)THEN
 END IF
 if(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))then ! Current level is transfer level
   !---Synchronize T3D linkage to distributed mesh
-  if(oft_debug_print(1))write(*,*)'Copying geometry linkage to distributed mesh'
+  if(oft_debug_print(1))WRITE(oft_ounit,*)'Copying geometry linkage to distributed mesh'
   !---Get global point mapping
   allocate(tmp(mesh%global%np))
   tmp=0
@@ -344,12 +344,12 @@ if(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))then ! Current level is transfer leve
   enddo
   !---Destroy mapping arrays
   deallocate(tmp,fmap)
-  if(oft_debug_print(1))write(*,*)'Complete'
+  if(oft_debug_print(1))WRITE(oft_ounit,*)'Complete'
   DEBUG_STACK_POP
   return
 endif
 !---Refine new boundary points using CAD model
-if(oft_debug_print(1))write(*,*)'Adjusting points to GMSH boundary'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Adjusting points to GMSH boundary'
 !---Get CAD representation aliases
 pmesh_cad_link=>ML_cad_link(mg_mesh%level-1)
 cad_link=>ML_cad_link(mg_mesh%level)
@@ -382,7 +382,7 @@ do j=1,pmesh%nbf
 enddo
 !---Destroy mapping arrays
 deallocate(fmap)
-if(oft_debug_print(1))write(*,*)'Complete'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_gmsh_reffix
 !---------------------------------------------------------------------------------
@@ -394,7 +394,7 @@ class(oft_mesh), pointer :: mesh
 real(r8) :: pt(3)
 integer(i4) :: i,ierr,j,k,edge,face
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,*)'Setting GMSH quadratic nodes'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Setting GMSH quadratic nodes'
 !---Get CAD representation alias
 mesh=>mg_mesh%mesh
 cad_link=>ML_cad_link(mg_mesh%level)
@@ -417,7 +417,7 @@ do i=1,mesh%nbf
     ! END DO
   end do
 enddo
-if(oft_debug_print(1))write(*,*)'Complete'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Complete'
 DEBUG_STACK_POP
 end subroutine mesh_gmsh_add_quad
 !------------------------------------------------------------------------------
@@ -469,7 +469,7 @@ call lmdif(gmsh_spt_error,nerr,neq,uv,error, &
            ftol,xtol,gtol,maxfev,epsfcn,diag,mode,factor,nprint,info, &
            nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 uv1=uv
-IF(info<0)WRITE(*,*)'Surface midpoint failed',face
+IF(info<0)WRITE(oft_ounit,*)'Surface midpoint failed',face
 !---Find second point
 uv=(/u,v/)
 active_endpts(1,:)=pt2; active_wts(1)=wt1
@@ -477,7 +477,7 @@ call lmdif(gmsh_spt_error,nerr,neq,uv,error, &
            ftol,xtol,gtol,maxfev,epsfcn,diag,mode,factor,nprint,info, &
            nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 uv2=uv
-IF(info<0)WRITE(*,*)'Surface midpoint failed',face
+IF(info<0)WRITE(oft_ounit,*)'Surface midpoint failed',face
 !---Evaluate midpoint
 uv=(uv1+uv2)/2.d0
 f(1)=uv(1)

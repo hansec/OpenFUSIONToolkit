@@ -807,7 +807,7 @@ integer(i4), POINTER :: lctmp(:,:),fmap(:)
 real(r8), POINTER :: rtmp(:,:),reg_tmp(:)
 DEBUG_STACK_PUSH
 !---Initialize HDF5 and open mesh file
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Writing mesh to plot files'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Writing mesh to plot files'
 CALL oft_increase_indent
 self%tess_order=tess_order
 self%bmesh%tess_order=tess_order
@@ -866,7 +866,7 @@ class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
 sizes=self%tessellated_sizes()
 IF(SIZE(p,DIM=1)/=sizes(1))CALL oft_abort("Incorrect array size","mesh_save_vertex_scalar",__FILE__)
 CALL xdmf_obj%write(p,self%meshname,path,1,PLOT_R4_FLAG)
@@ -882,7 +882,7 @@ class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
 sizes=self%tessellated_sizes()
 IF(SIZE(p,DIM=1)/=sizes(2))CALL oft_abort("Incorrect array size","mesh_save_cell_scalar",__FILE__)
 CALL xdmf_obj%write(p,self%meshname,path,2,PLOT_R4_FLAG)
@@ -898,7 +898,7 @@ class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
 IF(SIZE(bv,DIM=1)/=3)CALL oft_abort("Output array is not 3 vector","mesh_save_vertex_vector",__FILE__)
 sizes=self%tessellated_sizes()
 IF(SIZE(bv,DIM=2)/=sizes(1))CALL oft_abort("Incorrect array size","mesh_save_vertex_vector",__FILE__)
@@ -915,7 +915,7 @@ class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
 IF(SIZE(bcc,DIM=1)/=3)CALL oft_abort("Output array is not 3 vector","mesh_save_cell_vector",__FILE__)
 sizes=self%tessellated_sizes()
 IF(SIZE(bcc,DIM=2)/=sizes(2))CALL oft_abort("Incorrect array size","mesh_save_cell_vector",__FILE__)
@@ -1180,7 +1180,7 @@ integer(i4), POINTER :: lftmp(:,:),fmap(:)
 real(r8), POINTER :: rtmp(:,:),reg_tmp(:)
 DEBUG_STACK_PUSH
 !---Setup I/O
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Writing boundary mesh to plot files'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Writing boundary mesh to plot files'
 CALL oft_increase_indent
 self%tess_order=tess_order
 IF(self%nc==0)THEN
@@ -1224,7 +1224,7 @@ class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
 sizes=self%tessellated_sizes()
 IF(SIZE(p,DIM=1)/=sizes(1))CALL oft_abort("Incorrect array size","bmesh_save_vertex_scalar",__FILE__)
 CALL xdmf_obj%write(p,self%meshname,path,1,PLOT_R4_FLAG)
@@ -1240,7 +1240,7 @@ class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(3A)')oft_indent,'Saving scalar plot field: ',TRIM(path)
 sizes=self%tessellated_sizes()
 IF(SIZE(p,DIM=1)/=sizes(2))CALL oft_abort("Incorrect array size","bmesh_save_cell_scalar",__FILE__)
 CALL xdmf_obj%write(p,self%meshname,path,2,PLOT_R4_FLAG)
@@ -1256,7 +1256,7 @@ class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
 IF(SIZE(bv,DIM=1)/=3)CALL oft_abort("Output array is not 3 vector","bmesh_save_vertex_vector",__FILE__)
 sizes=self%tessellated_sizes()
 IF(SIZE(bv,DIM=2)/=sizes(1))CALL oft_abort("Incorrect array size","bmesh_save_vertex_vector",__FILE__)
@@ -1273,7 +1273,7 @@ class(xdmf_plot_file), intent(in) :: xdmf_obj !< XDMF save object
 character(LEN=*), intent(in) :: path !< Name of the output field
 integer(i4) :: sizes(2)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(3A)')oft_indent,'Saving vector plot field: ',TRIM(path)
 IF(SIZE(bcc,DIM=1)/=3)CALL oft_abort("Output array is not 3 vector","bmesh_save_cell_vector",__FILE__)
 sizes=self%tessellated_sizes()
 IF(SIZE(bcc,DIM=2)/=sizes(2))CALL oft_abort("Incorrect array size","bmesh_save_cell_vector",__FILE__)

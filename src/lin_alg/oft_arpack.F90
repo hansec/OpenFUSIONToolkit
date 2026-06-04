@@ -319,7 +319,7 @@ DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Setup solver
 !------------------------------------------------------------------------------
-IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Starting IRA solver'
+IF(oft_env%head_proc.AND.oft_env%pm)WRITE(oft_ounit,*)'Starting IRA solver'
 !---Set ARPACK parameters
 IF(self%ncv==0)self%ncv=2*self%nev+1
 SELECT CASE(self%mode)
@@ -400,7 +400,7 @@ DO
 #endif
   END IF
   i=i+1
-  !IF(head_proc.AND.pm)WRITE(*,*)i,ido
+  !IF(head_proc.AND.pm)WRITE(oft_ounit,*)i,ido
   !---Handle user action request
   IF(ido==-1.OR.ido==1)THEN ! Apply y = OP*x
     !---Propogate local slice to full vector
@@ -454,11 +454,11 @@ DO
   IF(info<0)THEN ! Error in solve
     alam=0.d0
     self%info=info
-    IF(oft_env%head_proc)WRITE(*,*)'Error in EV solve ',info
+    IF(oft_env%head_proc)WRITE(oft_ounit,*)'Error in EV solve ',info
     EXIT
   ELSE ! Solver has converged
     self%info=info
-    IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Fetching EVs',info
+    IF(oft_env%head_proc.AND.oft_env%pm)WRITE(oft_ounit,*)'Fetching EVs',info
     !---Retrieve eigenvalue and eigenvector
     IF(u%ng==u%nslice)THEN
       CALL dneupd(rvec,'A',select,dr,di,v,ldv, &
@@ -475,7 +475,7 @@ DO
     END IF
     !---Zero non-converged eigenvalues
     IF(info==1)THEN
-      IF(oft_env%head_proc)WRITE(*,*)'Only ',iparam(5),' of ',self%nev,' eigenvalues converged in IRAM solve'
+      IF(oft_env%head_proc)WRITE(oft_ounit,*)'Only ',iparam(5),' of ',self%nev,' eigenvalues converged in IRAM solve'
       self%info=iparam(5)
       DO i=self%info+1,self%nev
         dr(i)=0.d0
@@ -484,9 +484,9 @@ DO
       END DO
     END IF
     IF(oft_env%head_proc.AND.oft_env%pm)THEN
-      WRITE(*,*)'Solve Complete:'
-      WRITE(*,*)'  ',dr(1:self%nev)
-      WRITE(*,*)'  ',di(1:self%nev)
+      WRITE(oft_ounit,*)'Solve Complete:'
+      WRITE(oft_ounit,*)'  ',dr(1:self%nev)
+      WRITE(oft_ounit,*)'  ',di(1:self%nev)
     END IF
     !---
     ind=MAXLOC(dr(1:self%nev),DIM=1)
@@ -540,7 +540,7 @@ DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Setup solver
 !------------------------------------------------------------------------------
-IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Starting IRA solver'
+IF(oft_env%head_proc.AND.oft_env%pm)WRITE(oft_ounit,*)'Starting IRA solver'
 !---Set ARPACK parameters
 SELECT CASE(self%mode)
 CASE(1) ! Solver mode (A*x = lam*x **** w/ OP = A and B = I)
@@ -649,7 +649,7 @@ DO i=1,4000
   IF(info<0)THEN ! Error in solve
     alam=0.d0
     self%info=info
-    IF(oft_env%head_proc)WRITE(*,*)'Error in EV solve ',info
+    IF(oft_env%head_proc)WRITE(oft_ounit,*)'Error in EV solve ',info
     EXIT
   ELSE ! Solver has converged
     self%info=info
@@ -716,7 +716,7 @@ DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Setup solver
 !------------------------------------------------------------------------------
-IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Starting IRL solver'
+IF(oft_env%head_proc.AND.oft_env%pm)WRITE(oft_ounit,*)'Starting IRL solver'
 !---Set ARPACK parameters
 SELECT CASE(self%mode)
 CASE(1) ! Solver mode (A*x = lam*x **** w/ OP = A and B = I)
@@ -796,7 +796,7 @@ DO
 #endif
   END IF
   i=i+1
-  !IF(head_proc.AND.pm)WRITE(*,*)i,ido
+  !IF(head_proc.AND.pm)WRITE(oft_ounit,*)i,ido
   !---Handle user action request
   IF(ido==-1.OR.ido==1)THEN ! Apply y = OP*x
     !---Propogate local slice to full vector
@@ -849,11 +849,11 @@ DO
   IF(info<0)THEN ! Error in solve
     alam=0.d0
     self%info=info
-    IF(oft_env%head_proc)WRITE(*,*)'Error in EV solve ',info
+    IF(oft_env%head_proc)WRITE(oft_ounit,*)'Error in EV solve ',info
     EXIT
   ELSE ! Solver has converged
     self%info=info
-    IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Fetching EVs'
+    IF(oft_env%head_proc.AND.oft_env%pm)WRITE(oft_ounit,*)'Fetching EVs'
     !---Retrieve eigenvalue and eigenvector
     IF(u%ng==u%nslice)THEN
       CALL dseupd(rvec,'A',select,d,v,ldv, &
@@ -868,7 +868,7 @@ DO
     END IF
     !---Zero non-converged eigenvalues
     IF(info==1)THEN
-      IF(oft_env%head_proc)WRITE(*,*)'Only ',iparam(5),' of ',self%nev,' eigenvalues converged in IRLM solve'
+      IF(oft_env%head_proc)WRITE(oft_ounit,*)'Only ',iparam(5),' of ',self%nev,' eigenvalues converged in IRLM solve'
       self%info=iparam(5)
       DO i=self%info+1,self%nev
         d(i)=0.d0
@@ -876,8 +876,8 @@ DO
       END DO
     END IF
     IF(oft_env%head_proc.AND.oft_env%pm)THEN
-      WRITE(*,*)'Solve Complete:'
-      WRITE(*,*)'  ',d(1:self%nev)
+      WRITE(oft_ounit,*)'Solve Complete:'
+      WRITE(oft_ounit,*)'  ',d(1:self%nev)
     END IF
     !---Copy eigenvector to output
     vslice=>v(:,1)
@@ -887,7 +887,7 @@ DO
     !---Save to persistent arrays
     self%eig_val(1,:)=d(1:self%nev)
     self%eig_vec=v(:,1:self%nev)
-    IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Solve Complete',d(1:self%nev)
+    IF(oft_env%head_proc.AND.oft_env%pm)WRITE(oft_ounit,*)'Solve Complete',d(1:self%nev)
     EXIT
   END IF
 END DO
@@ -930,7 +930,7 @@ DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Setup solver
 !------------------------------------------------------------------------------
-IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Starting IRL solver'
+IF(oft_env%head_proc.AND.oft_env%pm)WRITE(oft_ounit,*)'Starting IRL solver'
 !---Set ARPACK parameters
 SELECT CASE(self%mode)
 CASE(1) ! Solver mode (A*x = lam*x **** w/ OP = A and B = I)
@@ -1048,12 +1048,12 @@ DO
   IF(info<0)THEN ! Error in solve
     alam=0.d0
     self%info=info
-    IF(oft_env%head_proc)WRITE(*,*)'Error in EV solve ',info
+    IF(oft_env%head_proc)WRITE(oft_ounit,*)'Error in EV solve ',info
     EXIT
   ELSE ! Solver has converged
     self%info=info
     IF(info==1)THEN
-      IF(oft_env%head_proc)WRITE(*,*)'Maximum number of Iterations reached'
+      IF(oft_env%head_proc)WRITE(oft_ounit,*)'Maximum number of Iterations reached'
     END IF
     !---Retrieve eigenvalues
     IF(u%ng==u%nslice)THEN

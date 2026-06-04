@@ -492,7 +492,7 @@ DO i=1,self%eig_obj%nm
 END DO
 CALL utmp%delete()
 DEALLOCATE(tmp,utmp)
-IF(zero_norm)WRITE(*,*)'Setting gauge'
+IF(zero_norm)WRITE(oft_ounit,*)'Setting gauge'
 divout%pm=.TRUE.
 CALL divout%apply(interp_obj%u)
 CALL interp_obj%setup(self%ML_hcurl%current_level,self%ML_h1%current_level)

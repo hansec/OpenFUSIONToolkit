@@ -780,7 +780,7 @@ type(oft_timer) :: mytimer
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing LAG::MOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing LAG::MOP'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_getmop",__FILE__)
@@ -868,7 +868,7 @@ CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_getmop
@@ -894,7 +894,7 @@ type(oft_timer) :: mytimer
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing LAG::LOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing LAG::LOP'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_getlop",__FILE__)
@@ -981,7 +981,7 @@ CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_getlop
@@ -1010,7 +1010,7 @@ CLASS(oft_scalar_fem), POINTER :: lag_rep
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing LAG::PDOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing LAG::PDOP'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_lag_getpdop",__FILE__)
@@ -1112,7 +1112,7 @@ CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_getpdop
@@ -1244,7 +1244,7 @@ class(oft_scalar_fem), pointer :: lag_rep
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing LAG_V::MOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing LAG_V::MOP'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,vlag_rep%fields(1)%fe))CALL oft_abort("Incorrect FE type","oft_lag_vgetmop",__FILE__)
@@ -1387,7 +1387,7 @@ CALL oft_lag_vec%delete
 DEALLOCATE(oft_lag_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_lag_vgetmop
@@ -2025,7 +2025,7 @@ bc_tmp%ML_lag_rep=>ML_lag_rep
 !------------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
 !------------------------------------------------------------------------------
-IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for LAG::LOP'
+IF(oft_env%head_proc)WRITE(oft_ounit,*)'Optimizing Jacobi damping for LAG::LOP'
 ALLOCATE(df(ML_lag_rep%nlevels))
 df=0.d0
 DO i=minlev,ML_lag_rep%nlevels
@@ -2051,7 +2051,7 @@ DO i=minlev,ML_lag_rep%nlevels
   CALL create_native_pre(arsolver%Minv, "jacobi")
   arsolver%Minv%A=>lop
   !---
-  IF(oft_debug_print(1))WRITE(*,*)'  optimizing level = ',i
+  IF(oft_debug_print(1))WRITE(oft_ounit,*)'  optimizing level = ',i
   CALL arsolver%max(u,lam0)
   df(i) = 1.8d0/lam0
   !---
@@ -2061,11 +2061,11 @@ DO i=minlev,ML_lag_rep%nlevels
 END DO
 !---Output
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(A)',ADVANCE='NO')' df_lop = '
+  WRITE(oft_ounit,'(A)',ADVANCE='NO')' df_lop = '
   DO i=1,ML_lag_rep%nlevels-1
-    WRITE(*,'(F5.3,A)',ADVANCE='NO')df(i),', '
+    WRITE(oft_ounit,'(F5.3,A)',ADVANCE='NO')df(i),', '
   END DO
-  WRITE(*,'(F5.3,A)')df(ML_lag_rep%nlevels)
+  WRITE(oft_ounit,'(F5.3,A)')df(ML_lag_rep%nlevels)
 END IF
 DEALLOCATE(df)
 DEBUG_STACK_POP

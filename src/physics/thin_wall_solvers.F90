@@ -73,21 +73,21 @@ N = self%nelems
 LDA = N
 LDVL = N
 LDVR = N
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Starting eigenvalue solve (direct)'
+WRITE(oft_ounit,*)
+WRITE(oft_ounit,'(2A)')oft_indent,'Starting eigenvalue solve (direct)'
 CALL oft_increase_indent
 CALL loctimer%tick
 ALLOCATE(WR(N),WI(N),VL(LDVL,N),VR(LDVR,N),WORK(1))
 LWORK = -1
 CALL DGEEV(JOBVL, JOBVR, N, Acomp, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
 LWORK = INT(WORK(1),4)
-IF(oft_debug_print(1))WRITE(*,'(2A,I8)')oft_indent,'LU Block size = ',lwork/N
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A,I8)')oft_indent,'LU Block size = ',lwork/N
 DEALLOCATE(work)
 ALLOCATE(work(lwork))
 CALL DGEEV(JOBVL, JOBVR, N, Acomp, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
 DEALLOCATE(VL,WORK,Acomp)
 elapsed_time=loctimer%tock()
-WRITE(*,'(2A,ES12.4,I4)')oft_indent,'Time = ',elapsed_time,INFO
+WRITE(oft_ounit,'(2A,ES12.4,I4)')oft_indent,'Time = ',elapsed_time,INFO
 !---Sort eigenvalues
 ALLOCATE(sort_tmp(N))
 sort_tmp=[(N+1-i,i=1,N)]
@@ -104,10 +104,10 @@ DO i=1,neigs
    eig_vec(:,i)=REAL(VR(:,j),8)
 END DO
 DEALLOCATE(WR,WI,VR,sort_tmp)
-WRITE(*,'(2A)')oft_indent,'Eigenvalues'
+WRITE(oft_ounit,'(2A)')oft_indent,'Eigenvalues'
 CALL oft_increase_indent
 DO i=1,MIN(neigs,5)
-  WRITE(*,'(A,ES14.6)')oft_indent,eig_rval(i)
+  WRITE(oft_ounit,'(A,ES14.6)')oft_indent,eig_rval(i)
 END DO
 CALL oft_decrease_indent
 CALL oft_decrease_indent
@@ -137,8 +137,8 @@ CLASS(oft_solver), POINTER :: linv
 TYPE(oft_irlm_eigsolver) :: arsolver
 TYPE(oft_timer) :: loctimer
 DEBUG_STACK_PUSH
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Starting eigenvalue solve (ARPACK)'
+WRITE(oft_ounit,*)
+WRITE(oft_ounit,'(2A)')oft_indent,'Starting eigenvalue solve (ARPACK)'
 CALL oft_increase_indent
 !---Setup local vectors
 CALL self%Uloc%new(uloc)
@@ -150,7 +150,7 @@ CALL create_native_solver(linv,'lu')
 SELECT TYPE(this=>linv)
 CLASS IS(oft_lusolver)
   IF(this%package(1:4)=='none')THEN
-    WRITE(*,'(2A)')oft_indent,'Note: LU solver not available, falling back to CG'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Note: LU solver not available, falling back to CG'
     CALL linv%delete
     DEALLOCATE(linv)
   END IF
@@ -185,7 +185,7 @@ pm_save=oft_env%pm; oft_env%pm=.false.
 CALL arsolver%apply(uloc,lam0)
 oft_env%pm=pm_save
 elapsed_time=loctimer%tock()
-WRITE(*,'(2A,ES12.4)')oft_indent,'Time = ',elapsed_time
+WRITE(oft_ounit,'(2A,ES12.4)')oft_indent,'Time = ',elapsed_time
 IF(arsolver%info>=0)THEN
   !---Sort eigenvalues
   ALLOCATE(sort_tmp(arsolver%nev),W_tmp(arsolver%nev))
@@ -205,10 +205,10 @@ IF(arsolver%info>=0)THEN
   ! DO i=1,self%nclosures
   !   eig_vec(self%closures(i),1:neigs)=0.d0
   ! END DO
-  WRITE(*,'(2A)')oft_indent,'Eigenvalues'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Eigenvalues'
   CALL oft_increase_indent
   DO i=1,MIN(neigs,5)
-    WRITE(*,'(A,ES14.6)')oft_indent,eig_rval(i)
+    WRITE(oft_ounit,'(A,ES14.6)')oft_indent,eig_rval(i)
   END DO
   CALL oft_decrease_indent
 END IF
@@ -246,8 +246,8 @@ TYPE(oft_tw_hodlr_bjpre), TARGET :: frinv_pre
 TYPE(oft_bin_file) :: floop_hist
 LOGICAL :: pm_save
 !---
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Starting frequency-domain run'
+WRITE(oft_ounit,*)
+WRITE(oft_ounit,'(2A)')oft_indent,'Starting frequency-domain run'
 CALL oft_increase_indent
 !---Setup matrix
 ALLOCATE(b(self%nelems))
@@ -255,19 +255,19 @@ b=(1.d0,0.d0)*driver(:,1) + (0.d0,1.d0)*driver(:,2)
 IF(PRESENT(hodlr_op))THEN
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
+    WRITE(oft_ounit,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)*freq*2.d0*pi
     aca_Fmat%alam=(1.d0,0.d0)
   CASE(1)
-    WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)
     aca_Fmat%alam=(0.d0,0.d0)
   CASE(2)
-    WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
     aca_Fmat%rJ=>self%Rmat
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,0.d0)
@@ -279,7 +279,7 @@ ELSE
   ALLOCATE(Mmat(self%nelems,self%nelems))
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
+    WRITE(oft_ounit,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
     Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -287,10 +287,10 @@ ELSE
       END DO
     END DO
   CASE(1)
-    WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
     Mmat=(0.d0,1.d0)*self%Lmat
   CASE(2)
-    WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
     Mmat=(0.d0,0.d0)
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -426,7 +426,7 @@ pm=oft_env%pm
 oft_env%pm=.FALSE.
 !---Preconditioner setup
 IF(nlocal>1)THEN
-  WRITE(*,"(A,I6)")" nLocal = ",nlocal
+  WRITE(oft_ounit,"(A,I6)")" nLocal = ",nlocal
   ALLOCATE(part(ncoils))
   CALL partition_graph(graph,nlocal,part)
   !---Create partition mappings
@@ -507,7 +507,7 @@ IF(nlocal>1)THEN
 END IF
 !---
 IF(pm)THEN
-  WRITE(*,'(2A)')oft_indent,'Starting complex GMRES solver'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Starting complex GMRES solver'
   CALL oft_increase_indent
   CALL stimer%tick
 END IF
@@ -523,7 +523,7 @@ IF(uu>0.d0)CALL mat_comp(ncoils,A,u,w)
 r=g-w
 gg = REAL(vec_comp_dot(ncoils,r,r),8)
 ggin=gg
-IF(pm)WRITE(*,'(A,I6,2ES14.6)')oft_indent,0,SQRT(uu),SQRT(gg)
+IF(pm)WRITE(oft_ounit,'(A,I6,2ES14.6)')oft_indent,0,SQRT(uu),SQRT(gg)
 nits=0
 DO j=1,ncoils
   IF(gg==0.d0)EXIT
@@ -574,7 +574,7 @@ DO j=1,ncoils
     nits=nits+1
     IF(i==nrits)EXIT
     IF(nits==its)EXIT
-    IF(pm)WRITE(*,'(A,I6,14X,ES14.6)')oft_indent,nits,ABS(res(i+1))
+    IF(pm)WRITE(oft_ounit,'(A,I6,14X,ES14.6)')oft_indent,nits,ABS(res(i+1))
   END DO
   k=i
   DO i=k,2,-1
@@ -592,7 +592,7 @@ DO j=1,ncoils
   ggold=gg; uuold=uu
   gg = REAL(vec_comp_dot(ncoils,r,r),8)
   uu = REAL(vec_comp_dot(ncoils,u,u),8)
-  IF(pm)WRITE(*,'(A,I6,3ES14.6)')oft_indent,nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
+  IF(pm)WRITE(oft_ounit,'(A,I6,3ES14.6)')oft_indent,nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
   IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
   IF(nits==its)EXIT
@@ -604,7 +604,7 @@ DEALLOCATE(v,z,r,w)
 !
 IF(pm)THEN
   elapsed_time=stimer%tock()
-  WRITE(*,'(2A,ES13.5)')oft_indent,'Time = ',elapsed_time
+  WRITE(oft_ounit,'(2A,ES13.5)')oft_indent,'Time = ',elapsed_time
   CALL oft_decrease_indent
 END IF
 IF(nlocal>1)THEN
@@ -655,10 +655,10 @@ LOGICAL :: exists,volt_full,pm_save
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
 CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Starting time-domain simulation'
+WRITE(oft_ounit,*)
+WRITE(oft_ounit,'(2A)')oft_indent,'Starting time-domain simulation'
 CALL oft_increase_indent
-WRITE(*,'(2A)')oft_indent,'timestep    time           sol_norm     nits    solver time'
+WRITE(oft_ounit,'(2A)')oft_indent,'timestep    time           sol_norm     nits    solver time'
 !---Setup coil waveform
 IF(ASSOCIATED(curr_waveform))THEN
   ncols=SIZE(curr_waveform,DIM=2)
@@ -756,7 +756,7 @@ ELSE
       Minv%M(i,self%Rmat%lc(j))=Minv%M(i,self%Rmat%lc(j)) + dt_op*self%Rmat%M(j)
     END DO
   END DO
-  WRITE(*,'(2A)')oft_indent,'Starting factorization'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Starting factorization'
   pm_save=oft_env%pm; oft_env%pm=.TRUE.
   ! CALL lapack_matinv(Minv%nr,Minv%M,info)
   CALL lapack_cholesky(Minv%nr,Minv%M,info)
@@ -936,7 +936,7 @@ DO i=1,nsteps
   elapsed_time=solve_timer%tock()
   uu=SQRT(u%dot(u))
   t=t+dt
-  IF(MOD(i,nstatus)==0)WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
+  IF(MOD(i,nstatus)==0)WRITE(oft_ounit,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
   IF(MOD(i,nplot)==0)THEN
     WRITE(pltnum,'(I4.4)')i
     rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
@@ -1043,8 +1043,8 @@ TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Post-processing time-domain simulation'
+WRITE(oft_ounit,*)
+WRITE(oft_ounit,'(2A)')oft_indent,'Post-processing time-domain simulation'
 CALL oft_increase_indent
 ALLOCATE(coil_vec(MAX(1,self%n_icoils)))
 CALL self%Uloc%new(u)

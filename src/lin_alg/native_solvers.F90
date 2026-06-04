@@ -309,7 +309,7 @@ A=>self%A
 its=self%its
 self%cits=0
 IF(.NOT.self%initialized)CALL solver_setup(self)
-if((oft_env%pm.AND.oft_env%head_proc))write(*,'(A)')'Starting CG solver'
+if((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,'(A)')'Starting CG solver'
 if(u%n/=g%n)call oft_abort('Vectors are not the same length','cgsolver_apply',__FILE__)
 call u%new(p)
 call u%new(q)
@@ -344,7 +344,7 @@ ggin = g%dot(g)
 uu=u%dot(u)
 100 FORMAT (I6,3ES14.6)
 110 FORMAT (I6,4ES14.6)
-if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,f,SQRT(uu),SQRT(ggin)
+if((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,100)0,f,SQRT(uu),SQRT(ggin)
 if(its==0.or.gg==0.d0)then
   call p%delete
   call q%delete
@@ -383,7 +383,7 @@ do k=1,max_its
   uu=u%dot(u)
   beta=gg/ggold
   if((k<=self%itplot.OR.MOD(k,self%itplot)==0).AND.(oft_env%pm.AND.oft_env%head_proc))THEN
-    write(*,110)k,f,SQRT(uu),SQRT(ggnew),SQRT(ggnew/uu)
+    WRITE(oft_ounit,110)k,f,SQRT(uu),SQRT(ggnew),SQRT(ggnew/uu)
   END IF
   if(k==its)exit
   if(its==-1.and.REAL(f,4)>=REAL(fold,4))exit
@@ -403,7 +403,7 @@ if(associated(self%pre))then
   call s%delete
   DEALLOCATE(s)
 end if
-if(k>=max_its)write(*,*)'Full Its: cgsolver_apply'
+if(k>=max_its)WRITE(oft_ounit,*)'Full Its: cgsolver_apply'
 self%cits=k
 DEBUG_STACK_POP
 end subroutine cg_solver_apply
@@ -469,9 +469,9 @@ IF(ierr==0)THEN
   END IF
 END IF
 IF(oft_debug_print(1))THEN
-  WRITE(*,*)'CG solver setup:'
-  WRITE(*,*)' - Iterations:  ',self%its
-  WRITE(*,*)' - Tolerance:   ',REAL(self%atol,4),REAL(self%rtol,4)
+  WRITE(oft_ounit,*)'CG solver setup:'
+  WRITE(oft_ounit,*)' - Iterations:  ',self%its
+  WRITE(oft_ounit,*)' - Tolerance:   ',REAL(self%atol,4),REAL(self%rtol,4)
 END IF
 DEBUG_STACK_POP
 end subroutine cg_setup_xml
@@ -534,7 +534,7 @@ IF(.NOT.self%initialized)THEN
   CALL u%new(self%w)
   CALL solver_setup(self)
 END IF
-if((oft_env%pm.AND.oft_env%head_proc))write(*,'(A)')'Starting GMRES solver'
+if((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,'(A)')'Starting GMRES solver'
 if(u%n/=g%n)call oft_abort('Vectors are not the same length','gmres_solver_apply',__FILE__)
 !
 if(associated(self%bc))call self%bc%apply(g)
@@ -559,7 +559,7 @@ gg = r%dot(r)
 ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
-if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
+if((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,100)0,SQRT(uu),SQRT(gg)
 if(self%its/=0.AND.self%nrits/=0)THEN
 nits=0
 do j=1,INT(u%ng,4)
@@ -612,7 +612,7 @@ do j=1,INT(u%ng,4)
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
     IF(oft_env%head_proc.AND.oft_env%pm.AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
-      WRITE(*,'(I6,14X,ES14.6)')nits,ABS(res(i+1))
+      WRITE(oft_ounit,'(I6,14X,ES14.6)')nits,ABS(res(i+1))
     END IF
   end do
   k=i
@@ -635,7 +635,7 @@ do j=1,INT(u%ng,4)
   gg = r%dot(r)
   uu = u%dot(u)
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
-    WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
+    WRITE(oft_ounit,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
   IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
   IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
@@ -731,11 +731,11 @@ IF(ierr==0)THEN
   END IF
 END IF
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(A)')'GMRES solver setup:'
-  WRITE(*,'(2X,A,I4)')    '- Iterations:  ',self%its
-  WRITE(*,'(2X,A,I4)')    '- Restart:     ',self%nrits
-  WRITE(*,'(2X,A,ES10.2)')'- Abs-Tol:     ',self%atol
-  WRITE(*,'(2X,A,ES10.2)')'- Rel-Tol:     ',self%rtol
+  WRITE(oft_ounit,'(A)')'GMRES solver setup:'
+  WRITE(oft_ounit,'(2X,A,I4)')    '- Iterations:  ',self%its
+  WRITE(oft_ounit,'(2X,A,I4)')    '- Restart:     ',self%nrits
+  WRITE(oft_ounit,'(2X,A,ES10.2)')'- Abs-Tol:     ',self%atol
+  WRITE(oft_ounit,'(2X,A,ES10.2)')'- Rel-Tol:     ',self%rtol
 END IF
 DEBUG_STACK_POP
 end subroutine gmres_setup_xml
@@ -791,7 +791,7 @@ IF(.NOT.self%initialized)THEN
   CALL u%new(self%w)
   CALL csolver_setup(self)
 END IF
-if((oft_env%pm.AND.oft_env%head_proc))write(*,'(A)')'Starting GMRES solver'
+if((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,'(A)')'Starting GMRES solver'
 if(u%n/=g%n)call oft_abort('Vectors are not the same length','gmres_solver_apply',__FILE__)
 !
 if(associated(self%bc))call self%bc%apply(g)
@@ -816,7 +816,7 @@ gg = REAL(r%dot(r))
 ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
-if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
+if((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,100)0,SQRT(uu),SQRT(gg)
 if(self%its/=0.AND.self%nrits/=0)THEN
 nits=0
 do j=1,INT(u%ng,4)
@@ -870,7 +870,7 @@ do j=1,INT(u%ng,4)
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
     IF(oft_env%head_proc.AND.oft_env%pm.AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
-      WRITE(*,'(I6,14X,ES14.6)')nits,ABS(res(i+1))
+      WRITE(oft_ounit,'(I6,14X,ES14.6)')nits,ABS(res(i+1))
     END IF
   end do
   k=i
@@ -893,7 +893,7 @@ do j=1,INT(u%ng,4)
   gg = REAL(r%dot(r))
   uu = REAL(u%dot(u))
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
-    WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
+    WRITE(oft_ounit,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
   IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
   IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
@@ -988,11 +988,11 @@ IF(ierr==0)THEN
   END IF
 END IF
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(A)')'GMRES solver setup:'
-  WRITE(*,'(2X,A,I4)')    '- Iterations:  ',self%its
-  WRITE(*,'(2X,A,I4)')    '- Restart:     ',self%nrits
-  WRITE(*,'(2X,A,ES10.2)')'- Abs-Tol:     ',self%atol
-  WRITE(*,'(2X,A,ES10.2)')'- Rel-Tol:     ',self%rtol
+  WRITE(oft_ounit,'(A)')'GMRES solver setup:'
+  WRITE(oft_ounit,'(2X,A,I4)')    '- Iterations:  ',self%its
+  WRITE(oft_ounit,'(2X,A,I4)')    '- Restart:     ',self%nrits
+  WRITE(oft_ounit,'(2X,A,ES10.2)')'- Abs-Tol:     ',self%atol
+  WRITE(oft_ounit,'(2X,A,ES10.2)')'- Rel-Tol:     ',self%rtol
 END IF
 DEBUG_STACK_POP
 end subroutine cgmres_setup_xml
@@ -1060,7 +1060,7 @@ M=>self%M
 its=self%its
 self%cits=0
 IF(.NOT.self%initialized)CALL eigsolver_setup(self)
-if((oft_env%pm.AND.oft_env%head_proc))write(*,'(A)')'Starting CG eigensolver'
+if((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,'(A)')'Starting CG eigensolver'
 call u%new(b)
 call u%new(c)
 call u%new(e)
@@ -1098,7 +1098,7 @@ gg = g%dot(f)
 ggnew = g%dot(g)
 alam=1.d0/ev
 100 FORMAT (I6,3ES14.6)
-if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,alam,ggnew
+if((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,100)0,alam,ggnew
 if(gg==0.d0.OR.self%its==0)then
   call b%delete
   call c%delete
@@ -1163,7 +1163,7 @@ do n=1,ninner
   ggnew = g%dot(g)
   alam=1.d0/ev
   beta=gg/gglast
-  if((n<=10.OR.MOD(n,self%itplot)==0).AND.(oft_env%pm.AND.oft_env%head_proc))write(*,100)n,alam,ggnew
+  if((n<=10.OR.MOD(n,self%itplot)==0).AND.(oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,100)n,alam,ggnew
   if(its==-1.AND.REAL(ev,4)==REAL(evlast,4))exit
   if(its==-2.AND.ev==evlast)exit
   if(gg==0.d0)exit
@@ -1181,7 +1181,7 @@ IF(associated(self%pre))THEN
     call s%delete
     deallocate(s)
   END IF
-IF(ir>self%nrestarts.AND.oft_env%head_proc)WRITE(*,*)'Full Its'
+IF(ir>self%nrestarts.AND.oft_env%head_proc)WRITE(oft_ounit,*)'Full Its'
 self%cits=n
 DEBUG_STACK_POP
 end subroutine cg_eigsolver_apply
@@ -1211,7 +1211,7 @@ DEBUG_STACK_PUSH
 met_time=0.d0
 up_time=0.d0
 inv_time=0.d0
-IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,'(A)')'Starting Newton solver'
+IF((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,'(A)')'Starting Newton solver'
 IF(.NOT.ASSOCIATED(self%du))THEN
   CALL u%new(self%du)
 END IF
@@ -1251,7 +1251,7 @@ outer: do i=0,its
     end if
   end do ! End of backtracking loop
   !---Print Newton residual
-  if((oft_env%pm.AND.oft_env%head_proc))WRITE(*,'(I6,3ES14.6)')i,SQRT(uu),SQRT(res),SQRT(res/uu)
+  if((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,'(I6,3ES14.6)')i,SQRT(uu),SQRT(res),SQRT(res/uu)
   IF(i==its)self%cits=-1
   !---If residual has reached an acceptable value exit
   IF(SQRT(res)<self%atol.AND.i>0)EXIT
@@ -1278,10 +1278,10 @@ outer: do i=0,its
   if(oft_env%head_proc)inv_time=inv_time+mytimer%tock()
 end do outer ! End of Newton loop
 IF((oft_env%pm.AND.oft_env%head_proc))THEN
-  WRITE(*,'(2X,A)')'Timing:'
-  WRITE(*,'(4X,A,ES11.3)')'Metric = ',met_time
-  WRITE(*,'(4X,A,ES11.3)')'Update = ',up_time
-  WRITE(*,'(4X,A,ES11.3)')'Invert = ',inv_time
+  WRITE(oft_ounit,'(2X,A)')'Timing:'
+  WRITE(oft_ounit,'(4X,A,ES11.3)')'Metric = ',met_time
+  WRITE(oft_ounit,'(4X,A,ES11.3)')'Update = ',up_time
+  WRITE(oft_ounit,'(4X,A,ES11.3)')'Invert = ',inv_time
 END IF
 self%nlits=i
 CALL v%delete
@@ -1543,9 +1543,9 @@ IF(ierr==0)THEN
   END IF
 END IF
 IF(oft_debug_print(1))THEN
-  WRITE(*,*)'S-Jacobi solver setup:'
-  WRITE(*,*)' - Iterations:  ',self%its
-  WRITE(*,*)' - Factor:      ',self%df
+  WRITE(oft_ounit,*)'S-Jacobi solver setup:'
+  WRITE(oft_ounit,*)' - Iterations:  ',self%its
+  WRITE(oft_ounit,*)' - Factor:      ',self%df
 END IF
 DEBUG_STACK_POP
 end subroutine jblock_setup_xml
@@ -1598,15 +1598,15 @@ class(oft_ml_precond), intent(inout) :: self !< Solver object
 IF(ASSOCIATED(self%base_solve))THEN
   CALL self%base_solve%view
 END IF
-WRITE(*,*)'Multi-Grid level = ',self%level
-WRITE(*,*)'  Timings: ',REAL(self%timings,4)
+WRITE(oft_ounit,*)'Multi-Grid level = ',self%level
+WRITE(oft_ounit,*)'  Timings: ',REAL(self%timings,4)
 self%timings=0.d0
 IF(ASSOCIATED(self%smooth_down))THEN
-  WRITE(*,*)'Down Smoother:'
+  WRITE(oft_ounit,*)'Down Smoother:'
   CALL self%smooth_down%view
 END IF
 IF(ASSOCIATED(self%smooth_up))THEN
-  WRITE(*,*)'Up Smoother:'
+  WRITE(oft_ounit,*)'Up Smoother:'
   CALL self%smooth_up%view
 END IF
 end subroutine ml_precond_view
@@ -1830,7 +1830,7 @@ IF(.NOT.self%initialized)THEN
       self%nlocal=self%nlocal*ncolors
       color_avail=.TRUE.
     ELSE IF((self%nlocal>=1).AND.(ncolors>1))THEN
-      IF(oft_env%head_proc.AND.self%nlocal/=ncolors)WRITE(*,'(A,X,I4)')' Updating number of local parts to match coloring',ncolors
+      IF(oft_env%head_proc.AND.self%nlocal/=ncolors)WRITE(oft_ounit,'(A,X,I4)')' Updating number of local parts to match coloring',ncolors
       self%nlocal=ncolors
       color_avail=.TRUE.
     END IF
@@ -2199,10 +2199,10 @@ IF(ierr==0)THEN
   IF(ierr/=0)CALL oft_xml_abort("Error reading `loverlap` node","bjprecond_setup_xml",__FILE__)
 END IF
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(A)')'Block Jacobi solver setup:'
-  WRITE(*,'(2X,A,I4)')  '- NLocal:    ',self%nlocal
-  WRITE(*,'(2X,A,3X,L1)')'- Boverlap:  ',self%boundary_overlap
-  WRITE(*,'(2X,A,3X,L1)')'- Loverlap:  ',self%loverlap
+  WRITE(oft_ounit,'(A)')'Block Jacobi solver setup:'
+  WRITE(oft_ounit,'(2X,A,I4)')  '- NLocal:    ',self%nlocal
+  WRITE(oft_ounit,'(2X,A,3X,L1)')'- Boverlap:  ',self%boundary_overlap
+  WRITE(oft_ounit,'(2X,A,3X,L1)')'- Loverlap:  ',self%loverlap
 END IF
 DEBUG_STACK_POP
 end subroutine bjprecond_setup_xml

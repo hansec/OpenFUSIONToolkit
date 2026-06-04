@@ -149,7 +149,7 @@ type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 ! ALLOCATE(Lmat(col_obj%nelems,row_obj%nelems))
 !
-! WRITE(*,*)'Building element<->element inductance matrix'
+! WRITE(oft_ounit,*)'Building element<->element inductance matrix'
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
@@ -280,7 +280,7 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 ! elapsed_time=mytimer%tock()
-! WRITE(*,*)'  Time = ',elapsed_time
+! WRITE(oft_ounit,*)'  Time = ',elapsed_time
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_LmatHole
 !---------------------------------------------------------------------------------
@@ -305,7 +305,7 @@ TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
-! WRITE(*,*)'Building element<->element inductance matrix block'
+! WRITE(oft_ounit,*)'Building element<->element inductance matrix block'
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
@@ -399,7 +399,7 @@ DO i=1,18
 END DO
 DEALLOCATE(quads) !,rpmap,cpmap)
 ! elapsed_time=mytimer%tock()
-! WRITE(*,*)'  Time = ',elapsed_time
+! WRITE(oft_ounit,*)'  Time = ',elapsed_time
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmatblock
 !---------------------------------------------------------------------------------
@@ -424,7 +424,7 @@ DO i=1,18
 END DO
 Bop=0.d0
 f=1.d0/3.d0
-! WRITE(*,*)'Building element->element magnetic reconstruction operator'
+! WRITE(oft_ounit,*)'Building element->element magnetic reconstruction operator'
 !$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,pt_j,evec_i, &
 !$omp atmp,i,area_i,dl_min,dl_max,norm_j,diffvec,is_neighbor,iquad)
 ALLOCATE(atmp(3,3,bmesh%np))
@@ -520,7 +520,7 @@ DO i=1,18
 END DO
 DEALLOCATE(quads)
 !
-! WRITE(*,*)'Building vcoil->element magnetic reconstruction operator'
+! WRITE(oft_ounit,*)'Building vcoil->element magnetic reconstruction operator'
 IF(self%n_vcoils>0)THEN
   !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
   DO i=1,bmesh%np
@@ -548,7 +548,7 @@ END IF
 Bop=Bop/(4.d0*pi)
 !
 Bop_dr=0.d0
-! WRITE(*,*)'Building icoil->element magnetic reconstruction operator'
+! WRITE(oft_ounit,*)'Building icoil->element magnetic reconstruction operator'
 IF(self%n_icoils>0)THEN
   !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
   DO i=1,bmesh%np
@@ -598,7 +598,7 @@ DO i=1,18
 END DO
 Bop=0.d0
 f=1.d0/3.d0
-!WRITE(*,*)'Building element->element magnetic reconstruction operator'
+!WRITE(oft_ounit,*)'Building element->element magnetic reconstruction operator'
 ALLOCATE(atmp(3,3,col_block%np))
 DO irow=1,row_block%ncells
     i = row_block%icell(irow)
@@ -719,7 +719,7 @@ NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,L_svd_tol,L_aca
   B_svd_tol,B_aca_rel_tol
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
-  WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
+  WRITE(oft_ounit,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
   CALL oft_abort( &
     "HODLR not supported with periodic grids","tw_hodlr_setup",__FILE__)
 END IF
@@ -732,7 +732,7 @@ if(ierr<0)THEN
     CALL oft_abort('No "thincurr_hodlr_options" found in input file.', &
       'tw_hodlr_setup',__FILE__)
   ELSE
-    WRITE(*,*)'No "thincurr_hodlr_options" found in input file, using full representation'
+    WRITE(oft_ounit,*)'No "thincurr_hodlr_options" found in input file, using full representation'
     RETURN
   END IF
 END IF
@@ -749,18 +749,18 @@ self%B_svd_tol=B_svd_tol
 IF(B_aca_rel_tol>0.d0)self%B_aca_tol=B_aca_rel_tol*self%B_svd_tol
 IF((self%L_svd_tol<0.d0).AND.(self%B_svd_tol<0.d0))RETURN
 !---Partition mesh
-WRITE(*,*)'Partitioning grid for block low rank compressed operators'
+WRITE(oft_ounit,*)'Partitioning grid for block low rank compressed operators'
 CALL tw_part_mesh(self%tw_obj,self%leaf_target,self%nlevels,self%levels)
 sparse_count=0
 DO i=1,self%nlevels
-  ! WRITE(*,*)i,self%levels(i)%nblocks
+  ! WRITE(oft_ounit,*)i,self%levels(i)%nblocks
   ALLOCATE(self%levels(i)%mat_mask(self%levels(i)%nblocks,self%levels(i)%nblocks))
   self%levels(i)%mat_mask = 0
   IF(i>1)THEN
     DO j=1,self%levels(i)%nblocks
       DO k=1,self%levels(i)%nblocks
         IF(self%levels(i-1)%mat_mask(self%levels(i)%blocks(j)%parent,self%levels(i)%blocks(k)%parent)/=0)THEN
-          ! WRITE(*,*)'Masking',i,j,k
+          ! WRITE(oft_ounit,*)'Masking',i,j,k
           self%levels(i)%mat_mask(j,k)=-1
           self%levels(i)%mat_mask(k,j)=-1
         END IF
@@ -769,7 +769,7 @@ DO i=1,self%nlevels
   END IF
   DO j=1,self%levels(i)%nblocks
     DO k=j+1,self%levels(i)%nblocks
-      ! WRITE(*,*)i,j,k,magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center), &
+      ! WRITE(oft_ounit,*)i,j,k,magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center), &
       ! (self%levels(i)%blocks(j)%extent+self%levels(i)%blocks(k)%extent)
       IF(self%levels(i)%mat_mask(j,k)/=0)CYCLE
       IF(magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center)/ &
@@ -793,12 +793,12 @@ DO i=1,self%nlevels
   counts(2) = SUM(COUNT(self%levels(i)%mat_mask==1,DIM=1))
   counts(3) = SUM(COUNT(self%levels(i)%mat_mask==2,DIM=1))
   counts(4) = SUM(COUNT(self%levels(i)%mat_mask==3,DIM=1))
-  ! WRITE(*,*)'  ',counts
+  ! WRITE(oft_ounit,*)'  ',counts
   self%ndense=self%ndense+counts(2)
   self%nsparse=self%nsparse+counts(3)+counts(4)
   sparse_count=sparse_count+counts(3:4)
 END DO
-! WRITE(*,*)self%ndense,self%nsparse
+! WRITE(oft_ounit,*)self%ndense,self%nsparse
 ALLOCATE(self%dense_blocks(3,self%ndense),self%sparse_blocks(3,self%nsparse))
 self%ndense=0
 self%nsparse=0
@@ -815,11 +815,11 @@ DO i=1,self%nlevels
     END DO
   END DO
 END DO
-! WRITE(*,*)self%ndense,self%nsparse
+! WRITE(oft_ounit,*)self%ndense,self%nsparse
 ! CALL oft_abort("","",__FILE__)
 self%nblocks=self%levels(self%nlevels)%nblocks
 self%blocks=>self%levels(self%nlevels)%blocks
-WRITE(*,*)'  nBlocks =        ',self%nblocks
+WRITE(oft_ounit,*)'  nBlocks =        ',self%nblocks
 ALLOCATE(point_block(self%tw_obj%mesh%np))
 point_block=0.d0
 avg_size=0.d0
@@ -832,17 +832,17 @@ DO i=1,self%nblocks
     point_block(self%blocks(i)%ipts)=i*1.d0
   END DO
 END DO
-WRITE(*,*)'  Avg block size = ',INT(avg_size/REAL(self%nblocks,8),4)
+WRITE(oft_ounit,*)'  Avg block size = ',INT(avg_size/REAL(self%nblocks,8),4)
 IF(self%L_aca_tol<=0.d0)THEN
   sparse_count=[0,sparse_count(1)+sparse_count(2)]
 END IF
-WRITE(*,*)'  # of SVD =       ',sparse_count(2)
-WRITE(*,*)'  # of ACA =       ',sparse_count(1)
+WRITE(oft_ounit,*)'  # of SVD =       ',sparse_count(2)
+WRITE(oft_ounit,*)'  # of ACA =       ',sparse_count(1)
 CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
 DO j=1,self%nlevels
   DO i=1,self%levels(j)%nblocks
-    IF(oft_debug_print(1))WRITE(*,*)i,self%levels(j)%blocks(i)%nelems
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)i,self%levels(j)%blocks(i)%nelems
     !
     IF(ASSOCIATED(self%levels(j)%blocks(i)%inv_map))CYCLE
     ALLOCATE(self%levels(j)%blocks(i)%inv_map(self%tw_obj%mesh%np))
@@ -890,7 +890,7 @@ REAL(8) :: corners_i(3,8),corners_j(3,8),rmin(3),elapsed_time,avg_size
 REAL(8), ALLOCATABLE, DIMENSION(:) :: point_block
 TYPE(oft_native_dense_matrix), POINTER :: mat_tmp => NULL()
 type(oft_timer) :: mytimer
-WRITE(*,*)'Building block low rank inductance operator'
+WRITE(oft_ounit,*)'Building block low rank inductance operator'
 IF(self%L_svd_tol<0.d0)CALL oft_abort('"L_svd_tol" must be > 0','tw_Lmat_MF_Lcompute',__FILE__)
 !---Build matrix with ACA+ or SVD compression of off-diagonal blocks
 CALL mytimer%tick()
@@ -898,7 +898,7 @@ ALLOCATE(self%dense_mats(self%ndense))
 ALLOCATE(self%aca_U_mats(self%nsparse))
 ALLOCATE(self%aca_V_mats(self%nsparse))
 ALLOCATE(self%aca_dense(self%nsparse))
-WRITE(*,*)'  Building hole and Vcoil columns'
+WRITE(oft_ounit,*)'  Building hole and Vcoil columns'
 IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
   ALLOCATE(self%hole_Vcoil_mat%M(self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils))
   CALL tw_compute_LmatHole(self%tw_obj,self%tw_obj,self%hole_Vcoil_mat%M)
@@ -906,7 +906,7 @@ END IF
 IF(PRESENT(save_file))CALL load_from_file()
 compressed_size=0
 mat_updated=.FALSE.
-WRITE(*,*)'  Building diagonal blocks'
+WRITE(oft_ounit,*)'  Building diagonal blocks'
 !$omp parallel private(i,level,j,k,size_out,avg_size) reduction(+:compressed_size) &
 !$omp reduction(.OR.:mat_updated)
 !$omp single
@@ -929,15 +929,15 @@ DO i=1,self%ndense
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
-  IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%'
+  IF(nblocks_complete==nblocks_progress(k))WRITE(oft_ounit,'(5X,I2,A1)')k*10,'%'
   END DO
   !$omp end critical
 END DO
 !$omp single
 IF(self%L_aca_tol>0.d0)THEN
-  WRITE(*,*)'  Building off-diagonal blocks using ACA+'
+  WRITE(oft_ounit,*)'  Building off-diagonal blocks using ACA+'
 ELSE
-  WRITE(*,*)'  Building off-diagonal blocks with SVD compression'
+  WRITE(oft_ounit,*)'  Building off-diagonal blocks with SVD compression'
 END IF
 nblocks_progress = INT(self%nsparse*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
@@ -958,7 +958,7 @@ DO i=1,self%nsparse
     IF((self%L_aca_tol>0.d0).AND.self%levels(level)%mat_mask(j,k)==2)THEN
       CALL aca_approx(i,self%L_aca_tol,size_out)
       IF(size_out>0)CALL compress_aca(i,self%L_svd_tol,size_out)
-      IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%nelems, &
+      IF(size_out==-1)WRITE(oft_ounit,*)'ACA+ failure',self%levels(level)%blocks(j)%nelems, &
         self%levels(level)%blocks(k)%nelems
     END IF
     !---IF ACA+ failed or diagonal compute dense matrix
@@ -973,15 +973,15 @@ DO i=1,self%nsparse
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
-    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%'
+    IF(nblocks_complete==nblocks_progress(k))WRITE(oft_ounit,'(5X,I2,A1)')k*10,'%'
   END DO
   !$omp end critical
 END DO
 !$omp end parallel
 elapsed_time=mytimer%tock()
-WRITE(*,'(5X,A,F6.1,A,ES9.2,A,ES9.2,A)')'Compression ratio:',compressed_size*1.d2/(REAL(self%tw_obj%np_active,8)**2), &
+WRITE(oft_ounit,'(5X,A,F6.1,A,ES9.2,A,ES9.2,A)')'Compression ratio:',compressed_size*1.d2/(REAL(self%tw_obj%np_active,8)**2), &
     "%  (",REAL(compressed_size,8),"/",REAL(self%tw_obj%np_active,8)**2,")"
-WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
+WRITE(oft_ounit,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 !
 IF(mat_updated.AND.PRESENT(save_file))CALL save_to_file()
 CONTAINS
@@ -996,7 +996,7 @@ IF(TRIM(save_file)/='none')THEN
   hash_tmp(4) = self%nsparse
   hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
-  WRITE(*,*)'  Saving HODLR matrix to file: ',TRIM(save_file)
+  WRITE(oft_ounit,*)'  Saving HODLR matrix to file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
   CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
   !
@@ -1053,7 +1053,7 @@ IF(TRIM(save_file)/='none')THEN
     hash_tmp(4) = self%nsparse
     hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
     hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
-    WRITE(*,*)'  Reading HODLR matrix from file: ',TRIM(save_file)
+    WRITE(oft_ounit,*)'  Reading HODLR matrix from file: ',TRIM(save_file)
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
     IF(exists.AND.ALL(file_counts==hash_tmp))THEN
       hash_tmp(6)=0
@@ -1101,7 +1101,7 @@ IF(TRIM(save_file)/='none')THEN
         END IF
       END DO
     ELSE
-      WRITE(*,*)'    Ignoring stored matrix, Model hashes do not match'
+      WRITE(oft_ounit,*)'    Ignoring stored matrix, Model hashes do not match'
     END IF
   END IF
 END IF
@@ -1166,10 +1166,10 @@ IF(i<full_size/INT(M+N,8))THEN
   self%aca_V_mats(isparse)%M(j,:)=VT(j,:)*S(j)
   END DO
   DEALLOCATE(self%aca_dense(isparse)%M)
-  ! WRITE(*,*)'Savings:',iblock,jblock,i,M,N
+  ! WRITE(oft_ounit,*)'Savings:',iblock,jblock,i,M,N
   size_out=INT(i,8)*INT(M+N,8)
 ELSE
-  ! WRITE(*,*)'No savings:',iblock,jblock
+  ! WRITE(oft_ounit,*)'No savings:',iblock,jblock
   size_out=full_size
 END IF
 !
@@ -1375,7 +1375,7 @@ DO k=1,max_iter
 
   ! How "large" was this update to the approximation?
   step_size = SQRT(SUM(us(:,nterms)**2)*SUM(vs(nterms,:)**2))
-  IF(oft_debug_print(2))WRITE(*,*)k,Istar,Jstar,step_size,tol
+  IF(oft_debug_print(2))WRITE(oft_ounit,*)k,Istar,Jstar,step_size,tol
 
   ! The convergence criteria will simply be whether the Frobenius norm of the
   ! step is smaller than the user provided tolerance.
@@ -1437,7 +1437,7 @@ DO k=1,max_iter
   END IF
 END DO
 IF(step_size > 0.d0)THEN
-  ! WRITE(*,*)'Savings:   ',iblock,jblock,nterms,MIN(M,N)
+  ! WRITE(oft_ounit,*)'Savings:   ',iblock,jblock,nterms,MIN(M,N)
   ! Return the left and right approximation matrices.
   ! The approximate is such that:
   ! M ~ U_ACA.dot(V_ACA)
@@ -1479,9 +1479,9 @@ ilevel=self%sparse_blocks(1,isparse)
 iblock=self%sparse_blocks(2,isparse)
 jblock=self%sparse_blocks(3,isparse)
 ! Get QR factorization of U and V matrices
-! WRITE(*,*)'QR U'
+! WRITE(oft_ounit,*)'QR U'
 CALL get_qr(self%aca_U_mats(isparse)%M,QU,RU)
-! WRITE(*,*)'QR VT'
+! WRITE(oft_ounit,*)'QR VT'
 ALLOCATE(Atmp(SIZE(self%aca_V_mats(isparse)%M,2),SIZE(self%aca_V_mats(isparse)%M,1)))
 Atmp = TRANSPOSE(self%aca_V_mats(isparse)%M)
 CALL get_qr(Atmp,QV,RV)
@@ -1489,7 +1489,7 @@ DEALLOCATE(Atmp)
 M=SIZE(QU,DIM=1)
 N=SIZE(QV,DIM=1)
 K=SIZE(RU,DIM=1)
-! WRITE(*,*)K
+! WRITE(oft_ounit,*)K
 ALLOCATE(Atmp(K,K))
 CALL DGEMM('N', 'T', K, K, K, 1.d0, RU, K, RV, K, 0.d0, Atmp, K)
 !
@@ -1522,7 +1522,7 @@ END DO
 i=MAX(MIN(self%min_rank,MIN_DIM),i)
 IF((i==MIN_DIM).AND.(MIN_DIM>self%aca_min_its))THEN
   i=MIN_DIM
-  WRITE(*,*)'SVD recompression failed'
+  WRITE(oft_ounit,*)'SVD recompression failed'
 END IF
 !i=MIN(i,MIN_DIM)
 !---Replace U and V matrices
@@ -1539,7 +1539,7 @@ CALL DGEMM('N', 'N', M, i, K, 1.d0, QU, M, U, K, 0.d0, self%aca_U_mats(isparse)%
 CALL DGEMM('N', 'T', i, N, K, 1.d0, VT, K, QV, N, 0.d0, self%aca_V_mats(isparse)%M, i)
 !self%aca_V_mats(isparse)%M = MATMUL(VT(1:i,:),TRANSPOSE(QV))
 size_out=INT(i,8)*INT(M+N,8)
-! WRITE(*,*)'Compressed:',iblock,jblock,i,MIN(M,N)
+! WRITE(oft_ounit,*)'Compressed:',iblock,jblock,i,MIN(M,N)
 DEALLOCATE(WORK,IWORK,S,U,VT,Atmp,QU,QV,RU,RV)
 END SUBROUTINE compress_aca
 END SUBROUTINE tw_hodlr_Lcompute
@@ -1561,7 +1561,7 @@ REAL(8) :: corners_i(3,8),corners_j(3,8),rmin(3),elapsed_time,avg_size
 REAL(8), ALLOCATABLE, DIMENSION(:) :: point_block
 TYPE(oft_native_dense_matrix), POINTER :: mat_tmp => NULL()
 type(oft_timer) :: mytimer
-WRITE(*,*)'Building block low rank magnetic field operator'
+WRITE(oft_ounit,*)'Building block low rank magnetic field operator'
 IF(self%B_svd_tol<0.d0)CALL oft_abort('"B_svd_tol" must be > 0','tw_Lmat_MF_Bcompute',__FILE__)
 !---Build matrix with SVD compression of off-diagonal blocks
 ! approximation with ACA+ planned
@@ -1571,7 +1571,7 @@ ALLOCATE(self%aca_BU_mats(2*self%nsparse,3))
 ALLOCATE(self%aca_BV_mats(2*self%nsparse,3))
 ALLOCATE(self%aca_B_dense(2*self%nsparse,3))
 !
-WRITE(*,*)'  Building hole and Vcoil columns'
+WRITE(oft_ounit,*)'  Building hole and Vcoil columns'
 IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   ALLOCATE(self%hole_Vcoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%nholes+self%tw_obj%n_vcoils),3))
   ALLOCATE(self%Icoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%n_icoils),3))
@@ -1580,7 +1580,7 @@ IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
 END IF
 !
 IF(PRESENT(save_file))CALL read_from_file()
-WRITE(*,*)'  Building diagonal blocks'
+WRITE(oft_ounit,*)'  Building diagonal blocks'
 compressed_size=0
 mat_updated=.FALSE.
 !$omp parallel private(i,ii,level,j,k,size_out,avg_size,dim,flip) reduction(+:compressed_size) &
@@ -1607,15 +1607,15 @@ DO i=1,self%ndense
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
-    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%'
+    IF(nblocks_complete==nblocks_progress(k))WRITE(oft_ounit,'(5X,I2,A1)')k*10,'%'
   END DO
   !$omp end critical
 END DO
 !$omp single
 IF(self%B_aca_tol>0.d0)THEN
-  WRITE(*,*)'  Building off-diagonal blocks using ACA+'
+  WRITE(oft_ounit,*)'  Building off-diagonal blocks using ACA+'
 ELSE
-  WRITE(*,*)'  Building off-diagonal blocks with SVD compression'
+  WRITE(oft_ounit,*)'  Building off-diagonal blocks with SVD compression'
 END IF
 nblocks_progress = INT(self%nsparse*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
@@ -1643,7 +1643,7 @@ DO i=1,self%nsparse
         IF((self%B_aca_tol>0.d0).AND.ABS(self%levels(level)%mat_mask(j,k))==2)THEN
         CALL aca_approx(ii,level,j,k,dim,self%B_aca_tol,size_out)
         IF(size_out>0)CALL compress_aca(ii,level,j,k,dim,self%B_svd_tol,size_out)
-        IF(size_out==-1)WRITE(*,*)'ACA+ failure',self%levels(level)%blocks(j)%np, &
+        IF(size_out==-1)WRITE(oft_ounit,*)'ACA+ failure',self%levels(level)%blocks(j)%np, &
           self%levels(level)%blocks(k)%nelems
         END IF
         !---IF ACA+ failed or diagonal compute dense matrix
@@ -1661,16 +1661,16 @@ DO i=1,self%nsparse
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
-    IF(nblocks_complete==nblocks_progress(k))WRITE(*,'(5X,I2,A1)')k*10,'%'
+    IF(nblocks_complete==nblocks_progress(k))WRITE(oft_ounit,'(5X,I2,A1)')k*10,'%'
   END DO
   !$omp end critical
 END DO
 !$omp end parallel
 elapsed_time=mytimer%tock()
-WRITE(*,'(5X,A,F6.1,A,ES9.2,A,ES9.2,A)')'Compression ratio:', &
+WRITE(oft_ounit,'(5X,A,F6.1,A,ES9.2,A,ES9.2,A)')'Compression ratio:', &
   compressed_size*1.d2/(3*REAL(self%tw_obj%np_active,8)*REAL(self%tw_obj%mesh%np,8)), &
   "%  (",REAL(compressed_size,8),"/",3*REAL(self%tw_obj%np_active,8)*REAL(self%tw_obj%mesh%np,8),")"
-WRITE(*,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
+WRITE(oft_ounit,'(5X,2A)')'Time = ',time_to_string(elapsed_time)
 !
 IF(mat_updated.AND.PRESENT(save_file))CALL save_to_file()
 CONTAINS
@@ -1686,7 +1686,7 @@ IF(TRIM(save_file)/='none')THEN
   hash_tmp(4) = self%nsparse
   hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
-  WRITE(*,*)'  Saving HODLR matrix from file: ',TRIM(save_file)
+  WRITE(oft_ounit,*)'  Saving HODLR matrix from file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
   CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
   !
@@ -1756,7 +1756,7 @@ IF(TRIM(save_file)/='none')THEN
     hash_tmp(4) = self%nsparse
     hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
     hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
-    WRITE(*,*)'  Reading HODLR matrix from file: ',TRIM(save_file)
+    WRITE(oft_ounit,*)'  Reading HODLR matrix from file: ',TRIM(save_file)
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
     ! OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
     ! READ(io_unit, IOSTAT=ierr)file_counts
@@ -1826,7 +1826,7 @@ IF(TRIM(save_file)/='none')THEN
       END DO
       ! CLOSE(io_unit)
     ELSE
-      WRITE(*,*)'  Ignoring stored matrix: Model hashes do not match'
+      WRITE(oft_ounit,*)'  Ignoring stored matrix: Model hashes do not match'
       ! CLOSE(io_unit)
     END IF
   END IF
@@ -1879,10 +1879,10 @@ IF(i<full_size/INT(M+N,8))THEN
       self%aca_BV_mats(isparse,dim)%M(j,:)=VT(j,:)*S(j)
   END DO
   DEALLOCATE(self%aca_B_dense(isparse,dim)%M)
-  ! WRITE(*,*)'Savings SVD:',isparse,dim,i,M,N
+  ! WRITE(oft_ounit,*)'Savings SVD:',isparse,dim,i,M,N
   size_out=INT(i,8)*INT(M+N,8)
 ELSE
-  ! WRITE(*,*)'No savings:',iblock,jblock
+  ! WRITE(oft_ounit,*)'No savings:',iblock,jblock
   size_out=full_size
 END IF
 !
@@ -2068,7 +2068,7 @@ DO k=1,max_iter
 
   ! How "large" was this update to the approximation?
   step_size = SQRT(SUM(us(:,nterms)**2)*SUM(vs(nterms,:)**2))
-  IF(oft_debug_print(2))WRITE(*,*)k,Istar,Jstar,step_size,tol
+  IF(oft_debug_print(2))WRITE(oft_ounit,*)k,Istar,Jstar,step_size,tol
 
   ! The convergence criteria will simply be whether the Frobenius norm of the
   ! step is smaller than the user provided tolerance.
@@ -2124,7 +2124,7 @@ DO k=1,max_iter
   END IF
 END DO
 IF(step_size > 0.d0)THEN
-  ! WRITE(*,*)'Savings:   ',iblock,jblock,nterms,MIN(M,N)
+  ! WRITE(oft_ounit,*)'Savings:   ',iblock,jblock,nterms,MIN(M,N)
   ! Return the left and right approximation matrices.
   ! The approximate is such that:
   ! M ~ U_ACA.dot(V_ACA)
@@ -2160,9 +2160,9 @@ REAL(8), ALLOCATABLE, DIMENSION(:) :: S,WORK
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: U,VT,Atmp,QU,QV,RU,RV
 !
 ! Get QR factorization of U and V matrices
-! WRITE(*,*)'QR U'
+! WRITE(oft_ounit,*)'QR U'
 CALL get_qr(self%aca_BU_mats(isparse,dim)%M,QU,RU)
-! WRITE(*,*)'QR VT'
+! WRITE(oft_ounit,*)'QR VT'
 ALLOCATE(Atmp(SIZE(self%aca_BV_mats(isparse,dim)%M,2),SIZE(self%aca_BV_mats(isparse,dim)%M,1)))
 Atmp = TRANSPOSE(self%aca_BV_mats(isparse,dim)%M)
 CALL get_qr(Atmp,QV,RV)
@@ -2170,7 +2170,7 @@ DEALLOCATE(Atmp)
 M=SIZE(QU,DIM=1)
 N=SIZE(QV,DIM=1)
 K=SIZE(RU,DIM=1)
-! WRITE(*,*)K
+! WRITE(oft_ounit,*)K
 ALLOCATE(Atmp(K,K))
 CALL DGEMM('N', 'T', K, K, K, 1.d0, RU, K, RV, K, 0.d0, Atmp, K)
 !
@@ -2203,7 +2203,7 @@ DO i=MIN_DIM,1,-1
 END DO
 i=MAX(MIN(self%min_rank,MIN_DIM),i)
 IF((i==MIN_DIM).AND.(MIN_DIM>self%min_rank))THEN
-  WRITE(*,*)'SVD recompression failed',S(1),S(MIN_DIM),tol_loc
+  WRITE(oft_ounit,*)'SVD recompression failed',S(1),S(MIN_DIM),tol_loc
 END IF
 !i=MIN(i,MIN_DIM)
 !---Replace U and V matrices
@@ -2220,7 +2220,7 @@ CALL DGEMM('N', 'N', M, i, K, 1.d0, QU, M, U, K, 0.d0, self%aca_BU_mats(isparse,
 CALL DGEMM('N', 'T', i, N, K, 1.d0, VT, K, QV, N, 0.d0, self%aca_BV_mats(isparse,dim)%M, i)
 !self%aca_BV_mats(isparse,dim)%M = MATMUL(VT(1:i,:),TRANSPOSE(QV))
 size_out=INT(i,8)*INT(M+N,8)
-! WRITE(*,*)'Compressed:',iblock,jblock,i,MIN(M,N)
+! WRITE(oft_ounit,*)'Compressed:',iblock,jblock,i,MIN(M,N)
 DEALLOCATE(WORK,IWORK,S,U,VT,Atmp,QU,QV,RU,RV)
 END SUBROUTINE compress_aca
 END SUBROUTINE tw_hodlr_Bcompute
@@ -2669,7 +2669,7 @@ REAL(8) :: xm,ym,zm,rleft(3),rdenom(3),locs(3),xs,extents(2,3),split_center(3)
 REAL(8), ALLOCATABLE, DIMENSION(:) :: vals
 REAL(8), PARAMETER :: pt_tol=0.d-6
 TYPE(tw_oct_tree) :: child_tmp(2)
-! WRITE(*,*)'Subdividing block',leaf%ncells,nblocks
+! WRITE(oft_ounit,*)'Subdividing block',leaf%ncells,nblocks
 IF(nlevels>20)CALL oft_abort("Maximum recursion", "subdivide_leaf", __FILE__)
 nlevels=MAX(nlevels,depth)
 ALLOCATE(vals(leaf%npts),child_mark(leaf%npts))
@@ -2696,19 +2696,19 @@ child_tmp(1)%bounds=leaf%bounds
 child_tmp(2)%bounds=leaf%bounds
 sep_max=MAXLOC(locs)
 j=sep_max(1)
-!WRITE(*,*)'Split',j,locs
+!WRITE(oft_ounit,*)'Split',j,locs
 locs=[xm,ym,zm]
 child_tmp(1)%bounds(1,j)=locs(j)
 child_tmp(2)%bounds(2,j)=locs(j)
-! WRITE(*,*)0
-! WRITE(*,*)leaf%bounds(:,1)
-! WRITE(*,*)leaf%bounds(:,2)
-! WRITE(*,*)leaf%bounds(:,3)
+! WRITE(oft_ounit,*)0
+! WRITE(oft_ounit,*)leaf%bounds(:,1)
+! WRITE(oft_ounit,*)leaf%bounds(:,2)
+! WRITE(oft_ounit,*)leaf%bounds(:,3)
 ! DO j=1,8
-!   WRITE(*,*)j
-!   WRITE(*,*)child_tmp(j)%bounds(:,1)
-!   WRITE(*,*)child_tmp(j)%bounds(:,2)
-!   WRITE(*,*)child_tmp(j)%bounds(:,3)
+!   WRITE(oft_ounit,*)j
+!   WRITE(oft_ounit,*)child_tmp(j)%bounds(:,1)
+!   WRITE(oft_ounit,*)child_tmp(j)%bounds(:,2)
+!   WRITE(oft_ounit,*)child_tmp(j)%bounds(:,3)
 ! END DO
 !---
 ALLOCATE(child_mark(leaf%npts))
@@ -2726,7 +2726,7 @@ DO j=1,2
   END DO
   child_tmp(j)%npts=COUNT(child_mark==j)
   IF(child_tmp(j)%npts==0)CYCLE
-  ! IF(child_tmp(j)%npts<200)WRITE(*,*)'Small leaf',child_tmp(j)%npts
+  ! IF(child_tmp(j)%npts<200)WRITE(oft_ounit,*)'Small leaf',child_tmp(j)%npts
   leaf%nchildren=leaf%nchildren+1
   ALLOCATE(child_tmp(j)%pts(child_tmp(j)%npts))
   extents(1,:)=1.d99
@@ -2762,18 +2762,18 @@ DO j=1,2
   END DO
 END DO
 IF(ANY(child_mark==0))THEN
-  WRITE(*,*)leaf%depth
-  WRITE(*,*)leaf%bounds(1,:)
-  WRITE(*,*)leaf%bounds(2,:)
-  WRITE(*,*)"---"
+  WRITE(oft_ounit,*)leaf%depth
+  WRITE(oft_ounit,*)leaf%bounds(1,:)
+  WRITE(oft_ounit,*)leaf%bounds(2,:)
+  WRITE(oft_ounit,*)"---"
   DO k=1,leaf%npts
     IF(child_mark(k)==0)THEN
-      WRITE(*,*)active_pts(:,leaf%pts(k))
+      WRITE(oft_ounit,*)active_pts(:,leaf%pts(k))
       DO j=1,2!8
         rleft = child_tmp(j)%bounds(1,:)
         rdenom = child_tmp(j)%bounds(2,:)-child_tmp(j)%bounds(1,:)
         locs = (active_pts(:,leaf%pts(k))-rleft)/rdenom
-        WRITE(*,*)j,locs
+        WRITE(oft_ounit,*)j,locs
       END DO
     END IF
   END DO
@@ -2782,16 +2782,16 @@ END IF
 DEALLOCATE(child_mark)
 !---Subdivide further
 IF(leaf%nchildren==0)RETURN
-! WRITE(*,*)'Parent',depth,leaf%nchildren,leaf%ncells,branch_target==0
+! WRITE(oft_ounit,*)'Parent',depth,leaf%nchildren,leaf%ncells,branch_target==0
 ALLOCATE(leaf%children(leaf%nchildren))
 leaf%nchildren=0
 DO j=1,2
   IF(child_tmp(j)%npts>0)THEN
     leaf%nchildren=leaf%nchildren+1
     CALL clone_tree(child_tmp(j),leaf%children(leaf%nchildren))
-    ! WRITE(*,*)'  Child block',child_tmp(j)%ncells,child_tmp(j)%ncells<=branch_target
+    ! WRITE(oft_ounit,*)'  Child block',child_tmp(j)%ncells,child_tmp(j)%ncells<=branch_target
     ! DO kk=1,3
-    !   WRITE(*,*)'    ',child_tmp(j)%bounds(:,kk)
+    !   WRITE(oft_ounit,*)'    ',child_tmp(j)%bounds(:,kk)
     ! END DO
     IF(leaf%children(leaf%nchildren)%npts>leaf_target)THEN
       CALL subdivide_leaf(leaf%children(leaf%nchildren),depth+1)
@@ -2800,7 +2800,7 @@ DO j=1,2
     END IF
   END IF
 END DO
-! WRITE(*,*)'Exit',depth
+! WRITE(oft_ounit,*)'Exit',depth
 END SUBROUTINE subdivide_leaf
 SUBROUTINE clone_tree(in_tree,out_tree)
 TYPE(tw_oct_tree), INTENT(inout) :: in_tree,out_tree
@@ -2955,7 +2955,7 @@ DO i=1,self%mf_obj%ndense
   DO j=1,n
     utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = uloc(j)
   END DO
-  ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
+  ! WRITE(oft_ounit,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
 END DO
 !$omp end do nowait
 !$omp single
@@ -3097,7 +3097,7 @@ DO i=1,self%mf_obj%ndense
   DO j=1,n
     utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = uloc(j)
   END DO
-  ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
+  ! WRITE(oft_ounit,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
 END DO
 !$omp end do nowait
 !$omp single

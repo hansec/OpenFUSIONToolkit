@@ -487,7 +487,7 @@ logical :: periodic
 logical, allocatable, dimension(:) :: glob_irow,glob_icol
 logical, allocatable, dimension(:,:) :: row_skips,col_skips
 DEBUG_STACK_PUSH
-IF(oft_debug_print(2))WRITE(*,'(2A)')oft_indent,'Filling local graph'
+IF(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Filling local graph'
 CALL oft_increase_indent
 periodic=(row%map%per.OR.col%map%per)
 !---Create sorted global list
@@ -564,7 +564,7 @@ END IF
 nbe=nbetmp
 nbemax=nbetmp
 IF(.NOT.row%linkage%full)nbemax=oft_mpi_max(nbetmp)
-IF(oft_debug_print(3))WRITE(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
+IF(oft_debug_print(3))WRITE(oft_ounit,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 !---Allocate temporary Send/Recv arrays
 ALLOCATE(lerecv(0:row%linkage%nproc_con),lesend(0:row%linkage%nproc_con))
 ALLOCATE(lesend(0)%le(nbemax,2))
@@ -881,7 +881,7 @@ DEALLOCATE(new_graph%kr)
 DEALLOCATE(lee)
 lee=>new_graph%lc
 NULLIFY(new_graph%lc)
-! IF(oft_debug_print(3))WRITE(*,'(2A)')oft_indent,'Done'
+! IF(oft_debug_print(3))WRITE(oft_ounit,'(2A)')oft_indent,'Done'
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine afem_fill_lgraph
@@ -906,7 +906,7 @@ integer(i4) :: mycounts(4)
 integer(i4), allocatable :: lcx(:,:),nr(:)
 class(oft_mesh), pointer :: mesh
 DEBUG_STACK_PUSH
-if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Starting FE setup'
+if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Starting FE setup'
 CALL oft_increase_indent
 !---
 mesh=>self%mesh
@@ -1043,12 +1043,12 @@ do i=1,mesh%nc
 end do
 !$omp end parallel
 self%necmax=necmax
-if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Creating interaction graph'
+if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Creating interaction graph'
 ! call fem_self_linkage(self)
 call afem_self_linkage(self)
-if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Creating cell mapping'
+if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Creating cell mapping'
 call fem_ncdofs_map(self)
-if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Constructing MPI linkage'
+if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Constructing MPI linkage'
 call fem_global_linkage(self)
 CALL afem_fill_lgraph(self,self,self%nee,self%kee,self%lee)
 CALL oft_decrease_indent
@@ -1172,7 +1172,7 @@ linktmp=0
 nbetmp=self%nbe
 nbemax=self%nbe
 IF(.NOT.mesh%fullmesh)nbemax=oft_mpi_max(nbetmp)
-if(oft_debug_print(3))write(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
+if(oft_debug_print(3))WRITE(oft_ounit,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 self%linkage%nbemax=nbemax
 !---Allocate temporary Send/Recv arrays
 ALLOCATE(lesend(self%linkage%nproc_con+1),lerecv(self%linkage%nproc_con+1))
@@ -1526,7 +1526,7 @@ IF(oft_env%head_proc)THEN
 END IF
 !---
 NULLIFY(valtmp)
-IF(oft_debug_print(1))WRITE(*,'(6A)')oft_indent,'Writing "',TRIM(path), &
+IF(oft_debug_print(1))WRITE(oft_ounit,'(6A)')oft_indent,'Writing "',TRIM(path), &
   '" to file "',TRIM(filename),'"'
 CALL self%vec_create(outfield,native=.TRUE.)
 IF(.NOT.native_vector_cast(outvec,outfield))CALL oft_abort('Failed to create "outfield".', &
@@ -1571,7 +1571,7 @@ IF(.NOT.success)THEN
 END IF
 !---
 NULLIFY(valtmp)
-IF(oft_env%head_proc.AND.oft_env%pm)WRITE(*,*)'Reading "',TRIM(path), &
+IF(oft_env%head_proc.AND.oft_env%pm)WRITE(oft_ounit,*)'Reading "',TRIM(path), &
   '" from file "',TRIM(filename),'"'
 CALL self%vec_create(infield,native=.TRUE.)
 IF(.NOT.native_vector_cast(invec,infield))CALL oft_abort('Failed to create "infield".', &
@@ -1662,7 +1662,7 @@ class(oft_ml_fem_type), intent(inout) :: self
 integer(i4), intent(in) :: level !< Desired level
 DEBUG_STACK_PUSH
 IF(level>self%nlevels.OR.level<=0)THEN
-  WRITE(*,*)level,self%nlevels
+  WRITE(oft_ounit,*)level,self%nlevels
   CALL oft_abort('Invalid FE level change requested', &
   'ml_fem_set_level',__FILE__)
 END IF
@@ -1779,14 +1779,14 @@ integer(i4) :: mycounts(3)
 integer(i4), allocatable :: lcx(:,:),nr(:)
 class(oft_bmesh), pointer :: mesh
 DEBUG_STACK_PUSH
-if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Starting boundary FE setup'
+if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Starting boundary FE setup'
 CALL oft_increase_indent
 !---
 mesh=>self%mesh
 IF(mesh%skip)THEN
-  if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Creating interaction graph: skip'
-  if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Creating cell mapping: skip'
-  if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Constructing MPI Linkage: skip'
+  if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Creating interaction graph: skip'
+  if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Creating cell mapping: skip'
+  if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Constructing MPI Linkage: skip'
   call bfem_global_linkage(self)
   CALL oft_decrease_indent
   DEBUG_STACK_POP
@@ -1899,11 +1899,11 @@ do i=1,mesh%nc
 end do
 !$omp end parallel
 self%necmax=nefmax
-if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Creating interaction graph'
+if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Creating interaction graph'
 call afem_self_linkage(self)
-if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Creating cell mapping'
+if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Creating cell mapping'
 call bfem_nfdofs_map(self)
-if(oft_debug_print(2))write(*,'(2A)')oft_indent,'Constructing MPI Linkage'
+if(oft_debug_print(2))WRITE(oft_ounit,'(2A)')oft_indent,'Constructing MPI Linkage'
 call bfem_global_linkage(self)
 call afem_fill_lgraph(self,self,self%nee,self%kee,self%lee)
 CALL oft_decrease_indent
@@ -1982,7 +1982,7 @@ IF(mesh%skip)THEN
   self%linkage%kle=0
   nbetmp=0_i4
   nbemax=oft_mpi_max(nbetmp)
-  if(oft_debug_print(3))write(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
+  if(oft_debug_print(3))WRITE(oft_ounit,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
   self%linkage%nbemax=nbemax
   !---Allocate temporary Send/Recv arrays
   ALLOCATE(lesend(self%linkage%nproc_con+1),lerecv(self%linkage%nproc_con+1))
@@ -2152,7 +2152,7 @@ linktmp=0
 nbetmp=self%nbe
 nbemax=self%nbe
 IF(.NOT.mesh%fullmesh)nbemax=oft_mpi_max(nbetmp)
-if(oft_debug_print(3))write(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
+if(oft_debug_print(3))WRITE(oft_ounit,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 self%linkage%nbemax=nbemax
 !---Allocate temporary Send/Recv arrays
 ALLOCATE(lesend(self%linkage%nproc_con+1),lerecv(self%linkage%nproc_con+1))

@@ -41,7 +41,7 @@ INTEGER(i4) :: sol_type = 1
 LOGICAL :: use_ilu = .FALSE.
 NAMELIST/test_bj_options/nlocal,sol_type,use_ilu
 IF(use_petsc)THEN
-  WRITE(*,*)'SKIP TEST'
+  WRITE(oft_ounit,*)'SKIP TEST'
   STOP
 END IF
 !---Initialize enviroment
@@ -53,31 +53,31 @@ CLOSE(io_unit)
 !---Check available solvers
 #if !defined( HAVE_SUPERLU )
 IF(sol_type==1)THEN
-  WRITE(*,*)'SKIP TEST: 1'
+  WRITE(oft_ounit,*)'SKIP TEST: 1'
   CALL oft_finalize
 END IF
 #endif
 #if !defined( HAVE_SUPERLU_DIST )
 IF(sol_type==2)THEN
-  WRITE(*,*)'SKIP TEST: 2'
+  WRITE(oft_ounit,*)'SKIP TEST: 2'
   CALL oft_finalize
 END IF
 #endif
 #if !defined( HAVE_MUMPS )
 IF(sol_type==3)THEN
-  WRITE(*,*)'SKIP TEST: 3'
+  WRITE(oft_ounit,*)'SKIP TEST: 3'
   CALL oft_finalize
 END IF
 #endif
 #if !defined( HAVE_UMFPACK )
 IF(sol_type==4)THEN
-  WRITE(*,*)'SKIP TEST: 4'
+  WRITE(oft_ounit,*)'SKIP TEST: 4'
   CALL oft_finalize
 END IF
 #endif
 #if !defined( HAVE_MKL )
 IF(sol_type==5)THEN
-  WRITE(*,*)'SKIP TEST: 5'
+  WRITE(oft_ounit,*)'SKIP TEST: 5'
   CALL oft_finalize
 END IF
 #endif
@@ -177,9 +177,9 @@ CALL u%set(1.d0)
 CALL mop%apply(u,v)
 CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
-WRITE(*,*)'Solve In'
+WRITE(oft_ounit,*)'Solve In'
 CALL linv%apply(u,v)
-WRITE(*,*)'Solve Out'
+WRITE(oft_ounit,*)'Solve Out'
 uu=SQRT(u%dot(u))
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='bjacobi.results')
@@ -187,22 +187,22 @@ IF(oft_env%head_proc)THEN
   WRITE(io_unit,*)uu
   CLOSE(io_unit)
 END IF
-WRITE(*,*)'Cleanup Vec'
+WRITE(oft_ounit,*)'Cleanup Vec'
 !---Destroy vectors
 CALL u%delete
 CALL v%delete
 DEALLOCATE(u,v)
-WRITE(*,*)'Cleanup Mat'
+WRITE(oft_ounit,*)'Cleanup Mat'
 !---Destroy matrices
 CALL lop%delete
 CALL mop%delete
 DEALLOCATE(lop,mop)
-WRITE(*,*)'Cleanup Pre'
+WRITE(oft_ounit,*)'Cleanup Pre'
 !---Destory preconditioner
 CALL linv_pre%delete
-WRITE(*,*)'Cleanup Solver'
+WRITE(oft_ounit,*)'Cleanup Solver'
 !---Destory solver
 CALL linv%delete
-WRITE(*,*)'Done'
+WRITE(oft_ounit,*)'Done'
 END SUBROUTINE test_lap
 END PROGRAM test_native_bjacobi

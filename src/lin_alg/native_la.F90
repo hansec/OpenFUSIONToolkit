@@ -2357,7 +2357,7 @@ logical, allocatable, dimension(:,:) :: skips
 IF(ASSOCIATED(self%linkage))RETURN
 DEBUG_STACK_PUSH
 !---
-IF(oft_debug_print(2))WRITE(*,*)'Creating CRS stitching structures'
+IF(oft_debug_print(2))WRITE(oft_ounit,*)'Creating CRS stitching structures'
 SELECT TYPE(u)
 CLASS IS(oft_native_vector)
   uv=>u
@@ -2426,7 +2426,7 @@ self%linkage%nbe=nbetmp
 self%linkage%full=uv%stitch_info%full
 nbemax=nbetmp
 IF(.NOT.uv%stitch_info%full)nbemax=oft_mpi_max(nbetmp)
-IF(oft_debug_print(3))WRITE(*,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
+IF(oft_debug_print(3))WRITE(oft_ounit,'(2A,I8)')oft_indent,'Max # of boundary elements',nbemax
 self%linkage%nbemax=nbemax
 !---Allocate temporary Send/Recv arrays
 ALLOCATE(lerecv(0:self%linkage%nproc_con),lesend(0:self%linkage%nproc_con),lrmaps(0:self%linkage%nproc_con))
@@ -2720,7 +2720,7 @@ END IF
 CALL oft_stitch_check(self%linkage)
 !---Flag redundant rows (from periodicity)
 IF(periodic)THEN
-  IF(oft_debug_print(3))WRITE(*,*)'  Flagging redundant rows'
+  IF(oft_debug_print(3))WRITE(oft_ounit,*)'  Flagging redundant rows'
   ALLOCATE(glob_inc(uv%n))
   glob_inc=.FALSE.
   DO i=uv%stitch_info%kle(0),uv%stitch_info%kle(1)-1
@@ -2739,7 +2739,7 @@ IF(periodic)THEN
   END DO
   DEALLOCATE(glob_inc)
 END IF
-! IF(oft_debug_print(3))WRITE(*,*)'  Done'
+! IF(oft_debug_print(3))WRITE(oft_ounit,*)'  Done'
 DEBUG_STACK_POP
 end subroutine native_matrix_setup_full
 !---------------------------------------------------------------------------------
@@ -2750,7 +2750,7 @@ class(oft_native_matrix), intent(inout) :: self
 integer(i4) :: i,j,k
 IF(self%full_current)RETURN
 DEBUG_STACK_PUSH
-IF(oft_debug_print(3))WRITE(*,*)'  Get local slice'
+IF(oft_debug_print(3))WRITE(oft_ounit,*)'  Get local slice'
 IF(.NOT.ASSOCIATED(self%Mfull))ALLOCATE(self%Mfull(self%nnz))
 !---Get values
 DO i=1,self%nnz
@@ -2769,7 +2769,7 @@ IF(ASSOCIATED(self%redind))THEN
   END DO
 END IF
 self%full_current=.TRUE.
-! IF(oft_debug_print(3))WRITE(*,*)'  Done'
+! IF(oft_debug_print(3))WRITE(oft_ounit,*)'  Done'
 DEBUG_STACK_POP
 end subroutine matrix_update_slice
 !---------------------------------------------------------------------------------
@@ -2812,7 +2812,7 @@ self%j_map(1)%n=self%nr
 !---
 CALL native_matrix_setup_full(self%parent,u)
 CALL self%update_slice
-! IF(oft_debug_print(3))WRITE(*,*)'  Done'
+! IF(oft_debug_print(3))WRITE(oft_ounit,*)'  Done'
 DEBUG_STACK_POP
 end subroutine submatrix_setup
 !---------------------------------------------------------------------------------
@@ -2824,7 +2824,7 @@ class(oft_native_matrix), pointer :: parent
 integer(i4) :: i,j,k,jp,jn
 integer(i4), allocatable, dimension(:) :: slice_map
 DEBUG_STACK_PUSH
-IF(oft_debug_print(3))WRITE(*,*)'  Get local slice'
+IF(oft_debug_print(3))WRITE(oft_ounit,*)'  Get local slice'
 parent=>self%parent
 !---Get graph
 IF(.NOT.ASSOCIATED(self%lcmap))THEN
@@ -2897,7 +2897,7 @@ DO i=1,self%nnz
   self%M(i)=parent%Mfull(self%lcmap(i))
 END DO
 self%full_current=.FALSE.
-! IF(oft_debug_print(3))WRITE(*,*)'  Done'
+! IF(oft_debug_print(3))WRITE(oft_ounit,*)'  Done'
 DEBUG_STACK_POP
 end subroutine submatrix_update_slice
 !---------------------------------------------------------------------------------

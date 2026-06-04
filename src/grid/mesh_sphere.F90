@@ -53,9 +53,9 @@ IF(oft_env%head_proc)THEN
   CLOSE(io_unit)
   !IF(ierr<0)CALL oft_abort('No "sphere_options" found in input file.','mesh_sphere_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "sphere_options" in input file.','mesh_sphere_load',__FILE__)
-  WRITE(*,'(2A)')oft_indent,'Sphere volume mesh:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Sphere volume mesh:'
   CALL oft_increase_indent
-  WRITE(*,'(2A,I4)')oft_indent,'Mesh Type = ',mesh_type
+  WRITE(oft_ounit,'(2A,I4)')oft_indent,'Mesh Type = ',mesh_type
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -183,7 +183,7 @@ pmesh=>mg_mesh%meshes(mg_mesh%level-1)
 IF(pmesh%fullmesh.AND.(.NOT.mesh%fullmesh))THEN
   ! Do nothing
 ELSE
-  if(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Adjusting points to sphere boundary'
+  if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Adjusting points to sphere boundary'
   !---Locate edge end points and place daughter point
   !$omp parallel do private(pt)
   do i=1,mesh%nbp
@@ -209,7 +209,7 @@ class(oft_mesh), intent(inout) :: mesh
 integer(i4) :: i,j,k
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting Sphere Quadratic Nodes'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting Sphere Quadratic Nodes'
 !---Setup quadratic mesh
 ! CALL mesh%set_order(2)
 ! CALL mesh_global_set_curved(mesh,2)
@@ -272,9 +272,9 @@ IF(oft_env%head_proc)THEN
   CLOSE(io_unit)
   !IF(ierr<0)CALL oft_abort('No "sphere_options" found in input file.','smesh_circle_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "sphere_options" in input file.','smesh_circle_load',__FILE__)
-  WRITE(*,'(2A)')oft_indent,'Circle surface mesh:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Circle surface mesh:'
   CALL oft_increase_indent
-  WRITE(*,'(2A,I4)')oft_indent,'Mesh Type = ',mesh_type
+  WRITE(oft_ounit,'(2A,I4)')oft_indent,'Mesh Type = ',mesh_type
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -364,7 +364,7 @@ pmesh=>mg_mesh%smeshes(mg_mesh%level-1)
 IF(pmesh%fullmesh.AND.(.NOT.smesh%fullmesh))THEN
   ! Do nothing
 ELSE
-  if(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Adjusting points to circle boundary'
+  if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Adjusting points to circle boundary'
   !---Locate edge end points and place daughter point
   !$omp parallel do private(pt)
   do i=1,smesh%nbp
@@ -384,7 +384,7 @@ class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j,k
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting circle quadratic nodes'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting circle quadratic nodes'
 !---Setup quadratic mesh
 CALL smesh%set_order(2)
 !---Locate edge end points and place daughter point

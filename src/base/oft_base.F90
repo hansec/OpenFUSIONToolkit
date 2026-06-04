@@ -21,7 +21,6 @@
 !! @ingroup doxy_oft_base
 !--------------------------------------------------------------------------------
 MODULE oft_base
-USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit
 USE omp_lib
 USE oft_local
 USE oft_xml, ONLY: xml_doc,xml_node,xml_nodelist,xml_parsefile,xml_get_element,xml_hasAttribute, &
@@ -170,7 +169,9 @@ INTERFACE
 !------------------------------------------------------------------------------
 !> Interface for printing git information in "oft_local.c"
 !------------------------------------------------------------------------------
-  SUBROUTINE oft_print_git() BIND(C)
+  SUBROUTINE oft_print_git(fd) BIND(C)
+    IMPORT c_int
+    INTEGER(KIND=c_int), VALUE, INTENT(in) :: fd ! File descriptor to print git information to
   END SUBROUTINE oft_print_git
 !------------------------------------------------------------------------------
 !> Prototype for abort callback to override usual abort process
@@ -196,10 +197,13 @@ INTEGER(i4) :: debug=0
 INTEGER(i4) :: nparts=1
 INTEGER(i4) :: omp_nthreads=-1
 LOGICAL :: test_run,from_api
+CHARACTER(LEN=OFT_PATH_SLEN) :: ofile,efile
 CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
 LOGICAL :: rst,print_header
-NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,test_run,nparts
+NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,test_run,nparts,ofile,efile
+oft_ounit=output_unit
+oft_eunit=error_unit
 !---Initialize MPI
 #ifdef HAVE_MPI
 CALL MPI_INIT_THREAD(MPI_THREAD_FUNNELED,thrdtype,ierr)
@@ -240,11 +244,23 @@ INQUIRE(file=oft_env%ifile,exist=rst)
 IF(.NOT.rst)CALL oft_abort('Input file does not exist.','oft_init',__FILE__)
 !---Read in node options
 test_run=.FALSE.
+ofile=''
+efile=''
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,runtime_options,IOSTAT=ierr)
 CLOSE(io_unit)
 IF(ierr<0)CALL oft_abort('No runtime options found in input file.','oft_init',__FILE__)
 IF(ierr>0)CALL oft_abort('Error parsing runtime options.','oft_init',__FILE__)
+IF(LEN_TRIM(ofile)>0)THEN
+  OPEN(NEWUNIT=oft_ounit,FILE=TRIM(ofile),STATUS='REPLACE')
+END IF
+IF(LEN_TRIM(efile)>0)THEN
+  IF(TRIM(ofile)==TRIM(efile))THEN
+    oft_eunit=oft_ounit
+  ELSE
+    OPEN(NEWUNIT=oft_eunit,FILE=TRIM(efile),STATUS='REPLACE')
+  END IF
+END IF
 !---Seed pRNG if test run for repeatability (does not work on < GCC 9)
 #if !defined(__GNUC__) || (__GNUC__ > 9)
 IF(test_run)THEN
@@ -259,7 +275,7 @@ IF(use_petsc)THEN
 #ifdef HAVE_PETSC
   CALL PetscInitialize(PETSC_NULL_CHARACTER,ierr)
 #else
-  IF(oft_env%head_proc)WRITE(*,*)'ERROR: Not compiled with PETSc'
+  IF(oft_env%head_proc)WRITE(oft_ounit,*)'ERROR: Not compiled with PETSc'
   CALL oft_finalize()
 #endif
 END IF
@@ -313,35 +329,36 @@ END IF
 print_header=(oft_env%rank==0)
 IF(PRESENT(quiet))print_header=print_header.AND.(.NOT.quiet)
 IF(print_header)THEN
-  WRITE(*,'(A)')    '#----------------------------------------------'
-  WRITE(*,'(A)')    'Open FUSION Toolkit Initialized'
-  CALL oft_print_git()
-  WRITE(*,'(2A)')   'Parallelization Info:'
+  WRITE(oft_ounit,'(A)')    '#----------------------------------------------'
+  WRITE(oft_ounit,'(A)')    'Open FUSION Toolkit Initialized'
+  FLUSH(oft_ounit)
+  CALL oft_print_git(FNUM(oft_ounit))
+  WRITE(oft_ounit,'(2A)')   'Parallelization Info:'
 #ifdef HAVE_MPI
-  WRITE(*,'(A,I4)') '  # of MPI tasks      = ',oft_env%nprocs
-  WRITE(*,'(A,I4)') '  # of NUMA nodes     = ',oft_env%nnodes
+  WRITE(oft_ounit,'(A,I4)') '  # of MPI tasks      = ',oft_env%nprocs
+  WRITE(oft_ounit,'(A,I4)') '  # of NUMA nodes     = ',oft_env%nnodes
 #else
-  WRITE(*,'(A)')    '  Not compiled with MPI'
+  WRITE(oft_ounit,'(A)')    '  Not compiled with MPI'
 #endif
 #if defined(_OPENMP)
-  WRITE(*,'(A,I4)') '  # of OpenMP threads = ',oft_env%nthreads
+  WRITE(oft_ounit,'(A,I4)') '  # of OpenMP threads = ',oft_env%nthreads
 #else
-  WRITE(*,'(A)')    '  Not compiled with OpenMP'
+  WRITE(oft_ounit,'(A)')    '  Not compiled with OpenMP'
 #endif
 IF(.NOT.from_api)THEN
-  WRITE(*,'(2A)')   'Fortran input file    = ',TRIM(oft_env%ifile)
-  WRITE(*,'(2A)')   'XML input file        = ',TRIM(oft_env%xml_file)
+  WRITE(oft_ounit,'(2A)')   'Fortran input file    = ',TRIM(oft_env%ifile)
+  WRITE(oft_ounit,'(2A)')   'XML input file        = ',TRIM(oft_env%xml_file)
 END IF
-  WRITE(*,'(A,3I4)')'Integer Precisions    = ',i4,i8
-  WRITE(*,'(A,3I4)')'Float Precisions      = ',r4,r8,r10
-  WRITE(*,'(A,3I4)')'Complex Precisions    = ',c4,c8
+  WRITE(oft_ounit,'(A,3I4)')'Integer Precisions    = ',i4,i8
+  WRITE(oft_ounit,'(A,3I4)')'Float Precisions      = ',r4,r8,r10
+  WRITE(oft_ounit,'(A,3I4)')'Complex Precisions    = ',c4,c8
 IF(use_petsc)THEN
-  WRITE(*,'(A)')    'LA backend            = PETSc'
+  WRITE(oft_ounit,'(A)')    'LA backend            = PETSc'
 ELSE
-  WRITE(*,'(A)')    'LA backend            = native'
+  WRITE(oft_ounit,'(A)')    'LA backend            = native'
 END IF
-  WRITE(*,'(A)')    '#----------------------------------------------'
-  WRITE(*,*)
+  WRITE(oft_ounit,'(A)')    '#----------------------------------------------'
+  WRITE(oft_ounit,*)
 END IF
 END SUBROUTINE oft_init
 !------------------------------------------------------------------------------
@@ -363,23 +380,23 @@ CALL MPI_ALLREDUCE(comm_times,comm_avg,4,OFT_MPI_I8,MPI_SUM,oft_env%COMM,ierr)
 !---Print timing information
 IF(oft_env%rank==0)THEN
   CALL system_clock(countnew,crate,cmax)
-  WRITE(*,*)
-  WRITE(*,'(A)')         '#----------------------------------------------'
-  WRITE(*,'(A)')         'Run Complete'
-  WRITE(*,'(A,ES11.3)')  'Run Duration = ',omp_get_wtime()-start_time
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(A)')         '#----------------------------------------------'
+  WRITE(oft_ounit,'(A)')         'Run Complete'
+  WRITE(oft_ounit,'(A,ES11.3)')  'Run Duration = ',omp_get_wtime()-start_time
 #ifdef HAVE_MPI
-  WRITE(*,*)
-  WRITE(*,'(A)')         '====== MPI Times (Avg, Min, Max) ======'
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(A)')         '====== MPI Times (Avg, Min, Max) ======'
   tmp=(/comm_avg(1),comm_min(1),comm_max(1)/)/REAL(crate,8)
-  WRITE(*,'(A,3ES11.3)') 'Barrier   = ',tmp(1)/oft_env%nprocs,tmp(2),tmp(3)
+  WRITE(oft_ounit,'(A,3ES11.3)') 'Barrier   = ',tmp(1)/oft_env%nprocs,tmp(2),tmp(3)
   tmp=(/comm_avg(2),comm_min(2),comm_max(2)/)/REAL(crate,8)
-  WRITE(*,'(A,3ES11.3)') 'WaitAny   = ',tmp(1)/oft_env%nprocs,tmp(2),tmp(3)
+  WRITE(oft_ounit,'(A,3ES11.3)') 'WaitAny   = ',tmp(1)/oft_env%nprocs,tmp(2),tmp(3)
   tmp=(/comm_avg(3),comm_min(3),comm_max(3)/)/REAL(crate,8)
-  WRITE(*,'(A,3ES11.3)') 'WaitAll   = ',tmp(1)/oft_env%nprocs,tmp(2),tmp(3)
+  WRITE(oft_ounit,'(A,3ES11.3)') 'WaitAll   = ',tmp(1)/oft_env%nprocs,tmp(2),tmp(3)
   tmp=(/comm_avg(4),comm_min(4),comm_max(4)/)/REAL(crate,8)
-  WRITE(*,'(A,3ES11.3)') 'AllReduce = ',tmp(1)/oft_env%nprocs,tmp(2),tmp(3)
+  WRITE(oft_ounit,'(A,3ES11.3)') 'AllReduce = ',tmp(1)/oft_env%nprocs,tmp(2),tmp(3)
 #endif
-  WRITE(*,'(A)')         '#----------------------------------------------'
+  WRITE(oft_ounit,'(A)')         '#----------------------------------------------'
 END IF
 !---
 CALL oft_prof_print
@@ -390,6 +407,14 @@ IF(use_petsc)CALL PetscFinalize(ierr)
 #ifdef HAVE_MPI
 CALL MPI_FINALIZE(ierr)
 #endif
+IF(oft_ounit/=output_unit)THEN
+  IF(oft_ounit/=oft_eunit)THEN
+    IF(oft_eunit/=error_unit)CLOSE(oft_eunit)
+  END IF
+  CLOSE(oft_ounit)
+ELSE
+  IF(oft_eunit/=error_unit)CLOSE(oft_eunit)
+END IF
 STOP
 END SUBROUTINE oft_finalize
 !------------------------------------------------------------------------------
@@ -405,7 +430,7 @@ INTEGER(i4) :: ierr,errcode,outunit
 #ifdef OFT_ABORT_FILES
 CHARACTER(LEN=5) :: proc
 #endif
-outunit=error_unit
+outunit=oft_eunit
 #ifdef OFT_ABORT_FILES
 WRITE(proc,'(I5.5)')oft_env%rank
 OPEN(outunit,FILE='abort_'//proc//'.err')
@@ -434,6 +459,14 @@ CALL oft_stack_print
 !---
 IF(ASSOCIATED(oft_abort_cb))CALL oft_abort_cb
 !---Abort run
+IF(oft_ounit/=output_unit)THEN
+  IF(oft_ounit/=oft_eunit)THEN
+    IF(oft_eunit/=error_unit)CLOSE(oft_eunit)
+  END IF
+  CLOSE(oft_ounit)
+ELSE
+  IF(oft_eunit/=error_unit)CLOSE(oft_eunit)
+END IF
 errcode=99
 #ifdef HAVE_MPI
 CALL MPI_ABORT(oft_env%comm,errcode,ierr)
@@ -462,9 +495,9 @@ CHARACTER(LEN=*) :: error_str
 100 FORMAT (A,I5,2A)
 101 FORMAT (2A)
 IF(oft_env%nprocs>1)THEN
-  WRITE(error_unit,100)'[',oft_env%rank,'] WARNING: ',TRIM(error_str)
+  WRITE(oft_eunit,100)'[',oft_env%rank,'] WARNING: ',TRIM(error_str)
 ELSE
-  WRITE(error_unit,101)'WARNING: ',TRIM(error_str)
+  WRITE(oft_eunit,101)'WARNING: ',TRIM(error_str)
 END IF
 END SUBROUTINE oft_warn
 !------------------------------------------------------------------------------
@@ -1256,11 +1289,11 @@ IF(oft_env%rank==0)THEN
   ind(0)=1
   CALL sort_array(cft,ind,stack_nfuns+1)
   !---
-  WRITE(*,'(A)') ""
-  WRITE(*,'(A)') "Performance Summary:"
-  WRITE(*,'(A)') " Rank  |        Module/Context        ::        Function/Region        |    NFC    |    CFT   "
+  WRITE(oft_ounit,'(A)') ""
+  WRITE(oft_ounit,'(A)') "Performance Summary:"
+  WRITE(oft_ounit,'(A)') " Rank  |        Module/Context        ::        Function/Region        |    NFC    |    CFT   "
   !                    1  tetmesh_mapping               ::             tetmesh_log_grad2    10239680         1.7
-  WRITE(*,'(A)') "#----------------------------------------------------------------------------------------------"
+  WRITE(oft_ounit,'(A)') "#----------------------------------------------------------------------------------------------"
   100 FORMAT (I6,2X,A40,A2,A40,2X,F9.2,A1,2X,ES12.2)
   DO i=0,20
     j=stack_nfuns-i
@@ -1279,10 +1312,10 @@ IF(oft_env%rank==0)THEN
       suffix="B"
       ntmp=REAL(nfc(k)/1E9,8)
     END IF
-    WRITE(*,100)  i+1,ADJUSTR(stack_mods(stack_fun_mods(k))), &
+    WRITE(oft_ounit,100)  i+1,ADJUSTR(stack_mods(stack_fun_mods(k))), &
       "::",ADJUSTL(stack_funs(k)),ntmp,suffix,REAL(cft(j),8)/crate
   END DO
-  WRITE(*,'(A)')  ""
+  WRITE(oft_ounit,'(A)')  ""
   DEALLOCATE(ind)
 END IF
 CALL oft_mpi_barrier(ierr)

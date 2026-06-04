@@ -395,7 +395,7 @@ IF(.NOT.self%initialized)THEN
   self%initialized=.TRUE.
 END IF
 !---Apply solver
-IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting PETSc CG solver'
+IF((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,*)'Starting PETSc CG solver'
 IF(oft_env%pm)CALL petsc_solver_setup_pm(self%solver)
 CALL KSPSolve(self%solver,gv%v,uv%v,ierr)
 CALL KSPGetIterationNumber(self%solver,self%cits,ierr)
@@ -477,9 +477,9 @@ IF(ierr==0)THEN
 END IF
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,*)'CG solver setup:'
-  WRITE(*,*)' - Iterations:  ',self%its
-  WRITE(*,*)' - Tolerance:   ',REAL(self%atol,4),REAL(self%rtol,4)
+  WRITE(oft_ounit,*)'CG solver setup:'
+  WRITE(oft_ounit,*)' - Iterations:  ',self%its
+  WRITE(oft_ounit,*)' - Tolerance:   ',REAL(self%atol,4),REAL(self%rtol,4)
 END IF
 DEBUG_STACK_POP
 end subroutine cg_setup_xml
@@ -489,10 +489,10 @@ end subroutine cg_setup_xml
 subroutine cg_view(self)
 class(oft_petsc_cg_solver), intent(inout) :: self !< Solver object
 !---
-WRITE(*,*)'PETSc CG:'
-WRITE(*,*)'  Max its = ',self%its
+WRITE(oft_ounit,*)'PETSc CG:'
+WRITE(oft_ounit,*)'  Max its = ',self%its
 IF(ASSOCIATED(self%pre))THEN
-  WRITE(*,*)'Preconditioner:'
+  WRITE(oft_ounit,*)'Preconditioner:'
   CALL self%pre%view
 END IF
 end subroutine cg_view
@@ -575,7 +575,7 @@ IF(.NOT.self%initialized)THEN
   self%initialized=.TRUE.
 END IF
 !---
-IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting PETSc GMRES solver'
+IF((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,*)'Starting PETSc GMRES solver'
 IF(oft_env%pm)CALL petsc_solver_setup_pm(self%solver)
 CALL KSPSolve(self%solver,gv%v,uv%v,ierr)
 CALL KSPGetIterationNumber(self%solver,self%cits,ierr)
@@ -672,10 +672,10 @@ IF(ierr==0)THEN
 END IF
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,*)'GMRES solver setup:'
-  WRITE(*,*)' - Iterations:  ',self%its
-  WRITE(*,*)' - Restart:     ',self%nrits
-  WRITE(*,*)' - Tolerance:   ',REAL(self%atol,4),REAL(self%rtol,4)
+  WRITE(oft_ounit,*)'GMRES solver setup:'
+  WRITE(oft_ounit,*)' - Iterations:  ',self%its
+  WRITE(oft_ounit,*)' - Restart:     ',self%nrits
+  WRITE(oft_ounit,*)' - Tolerance:   ',REAL(self%atol,4),REAL(self%rtol,4)
 END IF
 DEBUG_STACK_POP
 end subroutine gmres_setup_xml
@@ -685,11 +685,11 @@ end subroutine gmres_setup_xml
 subroutine gmres_view(self)
 class(oft_petsc_gmres_solver), intent(inout) :: self !< Solver object
 !---
-WRITE(*,*)'PETSc GMRES:'
-WRITE(*,*)'  Max its = ',self%its
-WRITE(*,*)'  Restart = ',self%nrits
+WRITE(oft_ounit,*)'PETSc GMRES:'
+WRITE(oft_ounit,*)'  Max its = ',self%its
+WRITE(oft_ounit,*)'  Restart = ',self%nrits
 IF(ASSOCIATED(self%pre))THEN
-  WRITE(*,*)'Preconditioner:'
+  WRITE(oft_ounit,*)'Preconditioner:'
   CALL self%pre%view
 END IF
 end subroutine gmres_view
@@ -816,7 +816,7 @@ IF(.NOT.self%initialized)THEN
   self%initialized=.TRUE.
 END IF
 !---
-IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting PETSc Jacobi solver'
+IF((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,*)'Starting PETSc Jacobi solver'
 IF(oft_env%pm)CALL petsc_solver_setup_pm(self%solver)
 CALL KSPSolve(self%solver,gv%v,uv%v,ierr)
 CALL KSPGetIterationNumber(self%solver,self%cits,ierr)
@@ -963,9 +963,9 @@ IF(ierr==0)THEN
   END IF
 END IF
 IF(oft_debug_print(1))THEN
-  WRITE(*,*)'S-Jacobi solver setup:'
-  WRITE(*,*)' - Iterations:  ',self%its
-  WRITE(*,*)' - Factor:      ',self%df
+  WRITE(oft_ounit,*)'S-Jacobi solver setup:'
+  WRITE(oft_ounit,*)' - Iterations:  ',self%its
+  WRITE(oft_ounit,*)' - Factor:      ',self%df
 END IF
 DEBUG_STACK_POP
 end subroutine sjacobi_setup_xml
@@ -1013,7 +1013,7 @@ IF(.NOT.self%initialized)THEN
   self%initialized=.TRUE.
 END IF
 !---Apply solver
-IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting PETSc LU solver'
+IF((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,*)'Starting PETSc LU solver'
 IF(oft_env%pm)CALL petsc_solver_setup_pm(self%solver)
 CALL KSPSolve(self%solver,gv%v,uv%v,ierr)
 CALL KSPSetReusePreconditioner(self%solver,PETSC_TRUE,ierr)
@@ -1050,9 +1050,9 @@ IF(PRESENT(level))val_level=level
 !---
 CALL lu_pc_load_xml(self%pre_factor,solver_node,val_level)
 IF(oft_debug_print(1))THEN
-  WRITE(*,*)'LU solver setup:'
-  WRITE(*,*)' - Factor type:    ',self%pre_factor%type
-  WRITE(*,*)' - Factor package: ',self%pre_factor%package
+  WRITE(oft_ounit,*)'LU solver setup:'
+  WRITE(oft_ounit,*)' - Factor type:    ',self%pre_factor%type
+  WRITE(oft_ounit,*)' - Factor package: ',self%pre_factor%package
 END IF
 DEBUG_STACK_POP
 end subroutine direct_setup_xml
@@ -1062,11 +1062,11 @@ end subroutine direct_setup_xml
 subroutine direct_view(self)
 class(oft_petsc_direct_solver), intent(inout) :: self !< Solver object
 !---
-WRITE(*,*)'PETSc LU:'
-WRITE(*,*)'  Factor Type    = ',self%pre_factor%type
-WRITE(*,*)'  Factor Package = ',self%pre_factor%package
+WRITE(oft_ounit,*)'PETSc LU:'
+WRITE(oft_ounit,*)'  Factor Type    = ',self%pre_factor%type
+WRITE(oft_ounit,*)'  Factor Package = ',self%pre_factor%package
 IF(ASSOCIATED(self%pre))THEN
-  WRITE(*,*)'Preconditioner:'
+  WRITE(oft_ounit,*)'Preconditioner:'
   CALL self%pre%view
 END IF
 end subroutine direct_view
@@ -1241,7 +1241,7 @@ end subroutine diagprecond_setup
 !------------------------------------------------------------------------------
 subroutine diagprecond_view(self)
 class(oft_petsc_diagprecond), intent(inout) :: self !< Solver object
-WRITE(*,*)'PETSc Point-Jacobi'
+WRITE(oft_ounit,*)'PETSc Point-Jacobi'
 end subroutine diagprecond_view
 !---------------------------------------------------------------------------------
 !> Setup LU factorization preconditioner
@@ -1487,9 +1487,9 @@ IF(self%n_local==-1)self%overlap=0
 CALL xml_get_element(solver_node,"boverlap",current_node,ierr)
 IF(ierr==0)CALL oft_abort("Boundary overlap not supported with PETSc","asprecond_setup_xml",__FILE__)
 IF(oft_debug_print(1))THEN
-  WRITE(*,*)'Additive Schwartz solver setup:'
-  WRITE(*,*)' - Overlap:    ',self%overlap
-  WRITE(*,*)' - NLocal:     ',self%n_local
+  WRITE(oft_ounit,*)'Additive Schwartz solver setup:'
+  WRITE(oft_ounit,*)' - Overlap:    ',self%overlap
+  WRITE(oft_ounit,*)' - NLocal:     ',self%n_local
 END IF
 DEBUG_STACK_POP
 end subroutine asprecond_setup_xml

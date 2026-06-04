@@ -463,7 +463,7 @@ type(oft_timer) :: mytimer
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing H(Curl)::MOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing H(Curl)::MOP'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getmop",__FILE__)
@@ -537,7 +537,7 @@ CALL oft_hcurl_vec%delete
 DEALLOCATE(oft_hcurl_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getmop
@@ -562,7 +562,7 @@ type(oft_timer) :: mytimer
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing H(Curl)::KOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing H(Curl)::KOP'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getkop",__FILE__)
@@ -639,7 +639,7 @@ CALL oft_hcurl_vec%delete
 DEALLOCATE(oft_hcurl_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getkop
@@ -664,7 +664,7 @@ type(oft_timer) :: mytimer
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing H(Curl)::WOP'
+  WRITE(oft_ounit,'(2X,A)')'Constructing H(Curl)::WOP'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getwop",__FILE__)
@@ -739,7 +739,7 @@ CALL oft_hcurl_vec%delete
 DEALLOCATE(oft_hcurl_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getwop
@@ -765,7 +765,7 @@ type(oft_timer) :: mytimer
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing H(Curl)::JMLB'
+  WRITE(oft_ounit,'(2X,A)')'Constructing H(Curl)::JMLB'
   CALL mytimer%tick()
 END IF
 IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_hcurl_getjmlb",__FILE__)
@@ -842,7 +842,7 @@ CALL oft_hcurl_vec%delete
 DEALLOCATE(oft_hcurl_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine oft_hcurl_getjmlb
@@ -1560,7 +1560,7 @@ DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
 !------------------------------------------------------------------------------
-IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H(Curl)::WOP'
+IF(oft_env%head_proc)WRITE(oft_ounit,*)'Optimizing Jacobi damping for H(Curl)::WOP'
 bc_tmp%ML_hcurl_rep=>ML_hcurl_rep
 ALLOCATE(df(ML_hcurl_rep%nlevels))
 df=0.d0
@@ -1587,7 +1587,7 @@ DO i=minlev,ML_hcurl_rep%nlevels
   CALL create_native_pre(arsolver%Minv, "jacobi")
   arsolver%Minv%A=>wop
   !---
-  IF(oft_debug_print(1))WRITE(*,*)'  optimizing level = ',i
+  IF(oft_debug_print(1))WRITE(oft_ounit,*)'  optimizing level = ',i
   CALL arsolver%max(u,lam0)
   df(i) = 1.8d0/lam0
   !---
@@ -1597,11 +1597,11 @@ DO i=minlev,ML_hcurl_rep%nlevels
 END DO
 !---Output
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(A)',ADVANCE='NO')' df_wop = '
+  WRITE(oft_ounit,'(A)',ADVANCE='NO')' df_wop = '
   DO i=1,ML_hcurl_rep%nlevels-1
-    WRITE(*,'(F5.3,A)',ADVANCE='NO')df(i),', '
+    WRITE(oft_ounit,'(F5.3,A)',ADVANCE='NO')df(i),', '
   END DO
-  WRITE(*,'(F5.3,A)')df(ML_hcurl_rep%nlevels)
+  WRITE(oft_ounit,'(F5.3,A)')df(ML_hcurl_rep%nlevels)
 END IF
 DEALLOCATE(df)
 DEBUG_STACK_POP

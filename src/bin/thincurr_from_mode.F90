@@ -84,11 +84,11 @@ DO i=1,tw_sim%np_active
   END DO
 END DO
 !---Save B-normal field
-WRITE(*,*)'Flux chk',SUM(vtmp(:,1)),SUM(vtmp(:,2))
+WRITE(oft_ounit,*)'Flux chk',SUM(vtmp(:,1)),SUM(vtmp(:,2))
 CALL tw_sim%mesh%save_vertex_scalar(bnorm(:,1),tw_sim%xdmf,'BSin')
 CALL tw_sim%mesh%save_vertex_scalar(bnorm(:,2),tw_sim%xdmf,'BCos')
 DEALLOCATE(bnorm)
-WRITE(*,*)'Flux chk',SUM(vtmp(:,1)),SUM(vtmp(:,2))
+WRITE(oft_ounit,*)'Flux chk',SUM(vtmp(:,1)),SUM(vtmp(:,2))
 !---Compute current potential
 ALLOCATE(utmp(tw_sim%nelems,2))
 utmp=0.d0
@@ -164,8 +164,8 @@ REAL(8) :: theta,r0(2),rhat(2),nmode
 REAL(8), ALLOCATABLE :: mode_in(:,:),mode_resample(:,:),resample_grid(:)
 REAL(8), ALLOCATABLE :: phi_grid(:),mode_tmp(:,:),theta_tmp(:)
 TYPE(spline_type) :: mode_spline
-WRITE(*,'(2A)')oft_indent,'Loading plasma mode'
-WRITE(*,'(3A)')oft_indent,'  filename = ',TRIM(filename)
+WRITE(oft_ounit,'(2A)')oft_indent,'Loading plasma mode'
+WRITE(oft_ounit,'(3A)')oft_indent,'  filename = ',TRIM(filename)
 !---Allocate mesh
 ALLOCATE(oft_trimesh::bmesh)
 CALL bmesh%setup(-1,.FALSE.)
@@ -186,9 +186,9 @@ IF(MAXVAL(ABS(mode_in(:,npts+1)-mode_in(:,2)))<1.d-6)THEN
   r0=r0-mode_in(1:2,npts+1) ! Remove one copy from center sum
 END IF
 r0=r0/REAL(npts,8)
-WRITE(*,'(2A,I3)')oft_indent,'  N        = ',INT(nmode,4)
-WRITE(*,'(2A,I6)')oft_indent,'  # of pts = ',npts
-WRITE(*,'(2A,2ES12.4)')oft_indent,'  R0       = ',r0
+WRITE(oft_ounit,'(2A,I3)')oft_indent,'  N        = ',INT(nmode,4)
+WRITE(oft_ounit,'(2A,I6)')oft_indent,'  # of pts = ',npts
+WRITE(oft_ounit,'(2A,2ES12.4)')oft_indent,'  R0       = ',r0
 !---Sort input grid to consistent ordering
 ALLOCATE(theta_tmp(npts),ind_reorder(npts))
 DO i=2,npts+1
@@ -232,7 +232,7 @@ CASE("arc_len")
     resample_grid(i)=(i-1)*mode_in(4,npts+1)/REAL(nsample,8)
   END DO
 END SELECT
-WRITE(*,*)
+WRITE(oft_ounit,*)
 IF(use_spline)THEN
   CALL spline_alloc(mode_spline,npts+1,6)
   DO i=1,npts+2
@@ -258,7 +258,7 @@ ELSE
 END IF
 !mode_resample(3,:)=mode_resample(3,:)-SUM(mode_resample(3,:))/REAL(nsample,8)
 !mode_resample(6,:)=mode_resample(6,:)-SUM(mode_resample(6,:))/REAL(nsample,8)
-WRITE(*,*)SUM(mode_resample(3,:)),SUM(mode_resample(6,:))
+WRITE(oft_ounit,*)SUM(mode_resample(3,:)),SUM(mode_resample(6,:))
 DEALLOCATE(mode_in)
 ALLOCATE(phi_grid(nphi))
 DO i=1,nphi
@@ -318,12 +318,12 @@ CALL create_diag_pre(linv%pre)
 DO i=1,2
   CALL uloc%restore_local(u(:,i))
   CALL gloc%restore_local(g(:,i))
-  WRITE(*,*)
-  WRITE(*,*)'Starting linear solve'
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,*)'Starting linear solve'
   CALL mytimer%tick
   CALL linv%apply(uloc,gloc)
   elapsed_time=mytimer%tock()
-  WRITE(*,*)'  Time = ',elapsed_time
+  WRITE(oft_ounit,*)'  Time = ',elapsed_time
   tmp=>u(:,i)
   CALL uloc%get_local(tmp)
   tmp=>g(:,i)
@@ -375,7 +375,7 @@ END SUBROUTINE get_torus_loop
 ! TYPE(oft_timer) :: stimer
 ! !---
 ! IF(oft_env%pm)THEN
-!   WRITE(*,*)'Computing SVD'
+!   WRITE(oft_ounit,*)'Computing SVD'
 !   CALL stimer%tick
 ! END IF
 ! minsize = MIN(M,N)
@@ -383,15 +383,15 @@ END SUBROUTINE get_torus_loop
 ! LWORK=-1
 ! CALL dgesdd( JOBU, M, N, A, M, S, U, M, VT, minsize, WORK, LWORK, IWORK, info )
 ! LWORK=INT(WORK(1),4)
-! IF(oft_debug_print(1).AND.oft_env%pm)WRITE(*,*)'  Work size = ',N*N,LWORK
+! IF(oft_debug_print(1).AND.oft_env%pm)WRITE(oft_ounit,*)'  Work size = ',N*N,LWORK
 ! DEALLOCATE(WORK)
 ! ALLOCATE(WORK(LWORK))
 ! CALL dgesdd( JOBU, M, N, A, M, S, U, M, VT, minsize, WORK, LWORK, IWORK, info )
-! IF(info/=0)WRITE(*,*)info
+! IF(info/=0)WRITE(oft_ounit,*)info
 ! DEALLOCATE(S,U,VT,WORK)
 ! IF(oft_env%pm)THEN
 !   elapsed_time=stimer%tock()
-!   WRITE(*,*)'  Time = ',elapsed_time
+!   WRITE(oft_ounit,*)'  Time = ',elapsed_time
 ! END IF
 ! END SUBROUTINE svd_mat
 END PROGRAM thincurr_from_mode

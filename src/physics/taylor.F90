@@ -332,11 +332,11 @@ IF(PRESENT(rst_filename))THEN
   IF(TRIM(rst_filename)/='')save_rst=.TRUE.
 END IF
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(A)')'============================'
-  WRITE(*,'(A)')'Starting calculation of Taylor states'
-  WRITE(*,'(A)')'============================'
-  WRITE(*,*)
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(A)')'============================'
+  WRITE(oft_ounit,'(A)')'Starting calculation of Taylor states'
+  WRITE(oft_ounit,'(A)')'============================'
+  WRITE(oft_ounit,*)
   CALL mytimer%tick
 END IF
 !---Deallocate storage if exists
@@ -437,7 +437,7 @@ do k=1,self%nm
         WRITE(field_name,'(A6,A2,A2,I2.2,A2,I2.2)')'hffa_g',self%ML_hcurl%ml_mesh%rlevel,'_p',self%ML_hcurl%current_level%order,'_m',k
         IF(hdf5_field_exist(rst_filename,field_name))THEN
           CALL self%ML_hcurl%current_level%vec_load(u,rst_filename,field_name,ierr)
-          IF(ierr/=0)WRITE(*,*)'Error reading field, skipping'
+          IF(ierr/=0)WRITE(oft_ounit,*)'Error reading field, skipping'
         END IF
       end if
     end if
@@ -500,14 +500,14 @@ do k=1,self%nm
 end do ! End mode loop
 if(oft_env%head_proc)then
   DO i=self%minlev,self%ML_hcurl%nlevels
-    WRITE(*,'(2X,A,I3)')'Level =',i
+    WRITE(oft_ounit,'(2X,A,I3)')'Level =',i
     DO k=1,self%nm
-      WRITE(*,'(4X,A,I4,A,ES14.6)')'Mode =',k,'   Lambda = ',self%hlam(k,i)
+      WRITE(oft_ounit,'(4X,A,I4,A,ES14.6)')'Mode =',k,'   Lambda = ',self%hlam(k,i)
     END DO
   END DO
   elapsed_time=mytimer%tock()
-  WRITE(*,*)
-  WRITE(*,'(2X,A,F12.3)')'Time Elapsed = ',elapsed_time
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(2X,A,F12.3)')'Time Elapsed = ',elapsed_time
 end if
 !------------------------------------------------------------------------------
 ! Deallocate ML matrices
@@ -640,8 +640,8 @@ DO i=1,self%nh
   venergy=u%dot(tmp)
   CALL u%scale(1.d0/venergy)
   IF(oft_env%head_proc)THEN
-    WRITE(*,*)'Injector      = ',self%htag(i)
-    WRITE(*,*)'Vacuum Energy = ',1.d0/venergy
+    WRITE(oft_ounit,*)'Injector      = ',self%htag(i)
+    WRITE(oft_ounit,*)'Vacuum Energy = ',1.d0/venergy
   END IF
   IF(PRESENT(energy))energy(i)=1.d0/venergy
 END DO
@@ -806,7 +806,7 @@ DO i=1,self%nh
   DO j=1,hmodes%nm
     CALL wop%apply(hmodes%hffa(j,self%ML_hcurl%level)%f,b)
     venergy = u%dot(b)
-    IF(oft_env%head_proc)WRITE(*,'(A,I3,A,E10.3)')'Mode ',j,' Coupling = ',venergy
+    IF(oft_env%head_proc)WRITE(oft_ounit,'(A,I3,A,E10.3)')'Mode ',j,' Coupling = ',venergy
   END DO
 !------------------------------------------------------------------------------
 ! Write restart file
@@ -879,7 +879,7 @@ IF(.NOT.ASSOCIATED(self%hcpc))CALL oft_abort("Vacuum fields not available", &
 "taylor_injectors", __FILE__)
 !
 IF(.NOT.ASSOCIATED(self%hcur))CALL taylor_vac_curr(self,hmodes,rst_filename)
-WRITE(*,*)'Inj curr done'
+WRITE(oft_ounit,*)'Inj curr done'
 !
 save_rst=.FALSE.
 IF(PRESENT(rst_filename))save_rst=.TRUE.

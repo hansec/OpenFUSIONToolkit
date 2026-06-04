@@ -110,7 +110,7 @@ END DO
 IF(oft_env%head_proc)CLOSE(iounit)
 END SUBROUTINE test_lop_eig
 #else
-WRITE(*,*)'SKIP TEST'
+WRITE(oft_ounit,*)'SKIP TEST'
 STOP
 #endif
 END PROGRAM test_arpack

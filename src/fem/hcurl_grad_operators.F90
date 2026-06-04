@@ -974,7 +974,7 @@ CLASS(oft_h1_fem), POINTER :: hgrad_rep
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2X,A)')'Constructing H(Curl) + Grad(H^1) mass matrix'
+  WRITE(oft_ounit,'(2X,A)')'Constructing H(Curl) + Grad(H^1) mass matrix'
   CALL mytimer%tick()
 END IF
 !---
@@ -1108,7 +1108,7 @@ CALL oft_hcurl_grad_vec%delete
 DEALLOCATE(oft_hcurl_grad_vec)
 IF(oft_debug_print(1))THEN
   elapsed_time=mytimer%tock()
-  WRITE(*,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
+  WRITE(oft_ounit,'(4X,A,ES11.4)')'Assembly time = ',elapsed_time
 END IF
 DEBUG_STACK_POP
 end subroutine hcurl_grad_getmop
@@ -1812,7 +1812,7 @@ DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Compute optimal smoother coefficients
 !------------------------------------------------------------------------------
-IF(oft_env%head_proc)WRITE(*,*)'Optimizing Jacobi damping for H(Curl) + Grad(H^1) mass matrix'
+IF(oft_env%head_proc)WRITE(oft_ounit,*)'Optimizing Jacobi damping for H(Curl) + Grad(H^1) mass matrix'
 bc_tmp%ML_hcurl_grad_rep=>ML_hcurl_aug_obj
 ALLOCATE(df(ML_hcurl_aug_obj%nlevels))
 df=0.d0
@@ -1833,7 +1833,7 @@ DO i=minlev,ML_hcurl_aug_obj%nlevels
   CALL create_native_pre(arsolver%Minv, "jacobi")
   arsolver%Minv%A=>mop
   !---
-  IF(oft_debug_print(1))WRITE(*,*)'  optimizing level = ',i
+  IF(oft_debug_print(1))WRITE(oft_ounit,*)'  optimizing level = ',i
   CALL arsolver%max(u,lam0)
   df(i) = 1.8d0/lam0
   !---
@@ -1843,11 +1843,11 @@ DO i=minlev,ML_hcurl_aug_obj%nlevels
 END DO
 !---Output
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(A)',ADVANCE='NO')' df_mop = '
+  WRITE(oft_ounit,'(A)',ADVANCE='NO')' df_mop = '
   DO i=1,ML_hcurl_aug_obj%nlevels-1
-    WRITE(*,'(F5.3,A)',ADVANCE='NO')df(i),', '
+    WRITE(oft_ounit,'(F5.3,A)',ADVANCE='NO')df(i),', '
   END DO
-  WRITE(*,'(F5.3,A)')df(ML_hcurl_aug_obj%nlevels)
+  WRITE(oft_ounit,'(F5.3,A)')df(ML_hcurl_aug_obj%nlevels)
 END IF
 DEALLOCATE(df)
 DEBUG_STACK_POP

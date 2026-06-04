@@ -83,9 +83,9 @@ IF(oft_env%head_proc)THEN
         IF(ierr>0)CALL oft_abort('Error parsing "native_mesh_options" in input file.','native_load_vmesh',__FILE__)
         IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','native_load_vmesh',__FILE__)
         !
-        WRITE(*,'(2A)')oft_indent,'Native volume mesh:'
+        WRITE(oft_ounit,'(2A)')oft_indent,'Native volume mesh:'
         CALL oft_increase_indent
-        WRITE(*,'(3A)')oft_indent,'Filename = ',TRIM(filename)
+        WRITE(oft_ounit,'(3A)')oft_indent,'Filename = ',TRIM(filename)
     END IF
 ELSE
     CALL oft_increase_indent
@@ -196,7 +196,7 @@ ELSE
         CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
         ALLOCATE(per_nodes(dim_sizes(1)))
         CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
-        WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
+        WRITE(oft_ounit,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
 END IF
 !---
@@ -240,9 +240,9 @@ IF(oft_env%head_proc)THEN
         IF(ierr>0)CALL oft_abort('Error parsing "native_mesh_options" in input file.','native_load_smesh',__FILE__)
         IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','native_load_smesh',__FILE__)
         !
-        WRITE(*,'(2A)')oft_indent,'Native surface mesh:'
+        WRITE(oft_ounit,'(2A)')oft_indent,'Native surface mesh:'
         CALL oft_increase_indent
-        WRITE(*,'(3A)')oft_indent,'Filename = ',TRIM(filename)
+        WRITE(oft_ounit,'(3A)')oft_indent,'Filename = ',TRIM(filename)
     END IF
 ELSE
     CALL oft_increase_indent
@@ -366,7 +366,7 @@ ELSE
         CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
         ALLOCATE(per_nodes(dim_sizes(1)))
         CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
-        WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
+        WRITE(oft_ounit,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
 END IF
 !---
@@ -447,7 +447,7 @@ subroutine native_hobase(self)
 CLASS(oft_amesh), INTENT(inout) :: self
 IF(np_ho==0)RETURN
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Importing quadratic mesh nodes'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Importing quadratic mesh nodes'
 SELECT CASE(self%type)
 CASE(1) ! Tet/Tri
     CALL native_hobase_simplex(self)
@@ -594,14 +594,14 @@ SELECT TYPE(self)
 CLASS IS(oft_bmesh)
   IF(self%dim==2)THEN
     ref_index=1
-    IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting 2D surface mesh -> x'
+    IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Reflecting 2D surface mesh -> x'
   ELSE
     ref_index=3
-    IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting 3D surface mesh -> z'
+    IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Reflecting 3D surface mesh -> z'
   END IF
 CLASS IS(oft_mesh)
   ref_index=3
-  IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting 3D volume mesh -> z'
+  IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Reflecting 3D volume mesh -> z'
 END SELECT
 CALL oft_increase_indent
 !---Reflect points that are not on reflection plane
@@ -734,7 +734,7 @@ IF(ALLOCATED(per_nodes))THEN
     END DO
 END IF
 deallocate(newindex)
-! IF(oft_debug_print(3))write(*,'(A)')oft_indent,'Done'
+! IF(oft_debug_print(3))WRITE(oft_ounit,'(A)')oft_indent,'Done'
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine native_reflect
@@ -747,7 +747,7 @@ integer(i4) :: i,j,pt_e(2),ind,k,kk,np_per
 integer(i4), ALLOCATABLE :: pt_f(:)
 IF(.NOT.ALLOCATED(per_nodes))RETURN
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting native volume mesh periodicity'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting native volume mesh periodicity'
 CALL oft_increase_indent
 IF(.NOT.ASSOCIATED(mesh%periodic%lp))THEN
     ALLOCATE(mesh%periodic%lp(mesh%np))
@@ -784,7 +784,7 @@ DO i=1,mesh%nbe
     pt_e=mesh%periodic%lp(mesh%le(:,j))
     IF(ALL(pt_e>0))THEN
     ind=ABS(mesh_local_findedge(mesh,pt_e))
-    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad edge',i,ind
+    IF(ind==0)WRITE(oft_ounit,'(2A,2I8)')oft_indent,'Bad edge',i,ind
     mesh%periodic%le(j)=ind
     END IF
 END DO
@@ -795,7 +795,7 @@ DO i=1,mesh%nbf
     pt_f=mesh%periodic%lp(mesh%lf(:,j))
     IF(ALL(pt_f>0))THEN
     ind=ABS(mesh_local_findface(mesh,pt_f))
-    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad face',i,ind
+    IF(ind==0)WRITE(oft_ounit,'(2A,2I8)')oft_indent,'Bad face',i,ind
     mesh%periodic%lf(j)=ind
     END IF
 END DO
@@ -818,7 +818,7 @@ IF(mesh%dim==2)THEN
 ELSE
   ref_index=3
 END IF
-IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting native surface mesh periodicity'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2A)')oft_indent,'Setting native surface mesh periodicity'
 CALL oft_increase_indent
 IF(.NOT.ASSOCIATED(mesh%periodic%lp))THEN
   ALLOCATE(mesh%periodic%lp(mesh%np))
@@ -856,7 +856,7 @@ DO i=1,mesh%nbe
   pt_e=mesh%periodic%lp(mesh%le(:,j))
   IF(ALL(pt_e>0))THEN
     ind=ABS(mesh_local_findedge(mesh,pt_e))
-    IF(ind==0)WRITE(*,'(2A,2I8)')oft_indent,'Bad edge',i,ind
+    IF(ind==0)WRITE(oft_ounit,'(2A,2I8)')oft_indent,'Bad edge',i,ind
     mesh%periodic%le(j)=ind
   END IF
 END DO

@@ -760,7 +760,7 @@ select type(self=>func)
   self%xmin=self%func%xs(0)
   self%xmax=self%func%xs(self%npsi-1)
   !---
-  ! WRITE(*,*)'Fitting',self%func%xs
+  ! WRITE(oft_ounit,*)'Fitting',self%func%xs
   !CALL spline_fit(self%func,"extrap")
   CALL spline_fit(self%func,"not-a-knot")
   DO i=1,omp_get_max_threads()
@@ -770,7 +770,7 @@ select type(self=>func)
   CALL self%get_cofs(c)
   ierr=self%set_cofs(c)
   DEALLOCATE(c)
-  ! WRITE(*,*)'Spline Created',self%ndofs,self%func%xs
+  ! WRITE(oft_ounit,*)'Spline Created',self%ndofs,self%func%xs
 class default
   CALL oft_abort('Invalid flux function type in create_spline_ff','create_spline_ff',__FILE__)
 end select
@@ -1021,7 +1021,7 @@ SELECT TYPE(self=>func)
   ELSE
     ierr=self%set_cofs(yvals)
   END IF
-  IF(oft_debug_print(1))WRITE(*,*)'Linear interpolator Created',self%ndofs,self%x,self%y0
+  IF(oft_debug_print(1))WRITE(oft_ounit,*)'Linear interpolator Created',self%ndofs,self%x,self%y0
 class default
   CALL oft_abort('Invalid flux function type in create_linterp_ff','create_linterp_ff',__FILE__)
 END SELECT
@@ -1188,12 +1188,12 @@ DO i=1,self%npsi
   END IF
 END DO
 IF(oft_debug_print(2))THEN
-  WRITE(*,'(2A)')oft_indent,'Update Linterp:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Update Linterp:'
   CALL oft_increase_indent
-  WRITE(*,'(2A,100ES11.3)')oft_indent,' x  =',self%x
-  WRITE(*,'(2A,100ES11.3)')oft_indent,' yp =',self%yp
-  WRITE(*,'(2A,100ES11.3)')oft_indent,' y  =',self%y
-  WRITE(*,'(2A,ES11.3)')oft_indent,' y0  =',self%y0
+  WRITE(oft_ounit,'(2A,100ES11.3)')oft_indent,' x  =',self%x
+  WRITE(oft_ounit,'(2A,100ES11.3)')oft_indent,' yp =',self%yp
+  WRITE(oft_ounit,'(2A,100ES11.3)')oft_indent,' y  =',self%y
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,' y0  =',self%y0
   CALL oft_decrease_indent
 END IF
 ierr=0

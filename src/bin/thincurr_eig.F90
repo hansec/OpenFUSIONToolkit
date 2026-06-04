@@ -123,7 +123,7 @@ IF(oft_debug_print(1))CALL tw_sim%save_debug()
 ! Eigenvalue run
 !------------------------------------------------------------------------------
 !---Compute inductances
-WRITE(*,*)
+WRITE(oft_ounit,*)
 IF(plot_run)THEN
   !---Load sensors
   CALL tw_load_sensors('floops.loc',tw_sim,sensors)
@@ -171,13 +171,13 @@ ELSE
   CALL tw_compute_Rmat(tw_sim,.TRUE.)
   !---Run eigenvalue analysis
   ALLOCATE(eig_rval(neigs),eig_ival(neigs),eig_vec(tw_sim%nelems,neigs))
-  WRITE(*,*)
+  WRITE(oft_ounit,*)
   IF(direct)THEN
     CALL lr_eigenmodes_direct(tw_sim,neigs,eig_rval,eig_vec,eig_ival)
   ELSE
 #if !defined(HAVE_ARPACK)
     IF(oft_env%test_run)THEN
-      WRITE(*,*)'SKIP TEST'
+      WRITE(oft_ounit,*)'SKIP TEST'
       CALL oft_finalize
     END IF
 #endif
@@ -187,7 +187,7 @@ ELSE
       CALL lr_eigenmodes_arpack(tw_sim,neigs,eig_rval,eig_vec,eig_ival)
     END IF
   END IF
-  WRITE(*,*)
+  WRITE(oft_ounit,*)
   !---Save plot files
   CALL tw_sim%Uloc%new(uio)
   OPEN(NEWUNIT=io_unit, FILE="thincurr_eigs.dat")
@@ -232,7 +232,7 @@ LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=2) :: eig_tag
 DEBUG_STACK_PUSH
-WRITE(*,*)'Post-processing eigenmode run'
+WRITE(oft_ounit,*)'Post-processing eigenmode run'
 CALL self%Uloc%new(uio)
 ALLOCATE(vals(self%nelems))
 IF(nsensors>0)ALLOCATE(senout(nsensors,neigs))

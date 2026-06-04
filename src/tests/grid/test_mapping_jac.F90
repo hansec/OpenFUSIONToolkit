@@ -77,7 +77,7 @@ REAL(r8), ALLOCATABLE :: pt_loc(:,:),g2op(:,:),Kmat(:,:)
 CLASS(oft_scalar_fem), POINTER :: lag_rep
 TYPE(oft_quad_type), POINTER :: quad
 CHARACTER(LEN=1), PARAMETER :: coords(0:3)=(/'s','x','y','z'/)
-WRITE(*,*)'Testing ',coords(xi),coords(xj)
+WRITE(oft_ounit,*)'Testing ',coords(xi),coords(xj)
 !---
 fail_count=0
 IF(.NOT.oft_3D_lagrange_cast(lag_rep,ML_oft_lagrange%current_level))CALL oft_abort("Invalid FE type","check_jac2",__FILE__)

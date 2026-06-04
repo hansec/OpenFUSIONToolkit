@@ -225,14 +225,14 @@ real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell
 !
 IF(oft_debug_print(2))THEN
-  WRITE(*,'(2A)')oft_indent,'Updating Mercier Pressure:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Updating Mercier Pressure:'
   CALL oft_increase_indent
 END IF
 psi_int%u=>gseq%psi
 CALL psi_int%setup(gseq%device%fe_rep)
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
-IF(oft_debug_print(2))WRITE(*,'(2A,3ES11.3)')oft_indent,'Axis Position = ',raxis,zaxis
+IF(oft_debug_print(2))WRITE(oft_ounit,'(2A,3ES11.3)')oft_indent,'Axis Position = ',raxis,zaxis
 !---
 x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
@@ -249,7 +249,7 @@ DO j=1,100
   IF( psi_surf(1) < x1)EXIT
   rmax=pt(1)
 END DO
-IF(oft_debug_print(2))WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
+IF(oft_debug_print(2))WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
 !---Trace
 call set_tracer(1)
 !$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
@@ -277,7 +277,7 @@ do j=1,self%npsi-1
     call tracinginv_fs(gseq%device%mesh,pt(1:2))
     !---Exit if trace fails
     if(active_tracer%status/=1)THEN
-      WRITE(*,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
+      WRITE(oft_ounit,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
       call oft_abort('Trace did not complete.','mercier_update',__FILE__)
     end if
     !------------------------------------------------------------------------------
@@ -305,7 +305,7 @@ do j=1,self%npsi-1
     !---
     self%funcp%xs(j)=psi_surf(1)
     self%funcp%fs(j,1)=pp
-    !WRITE(*,*)psi_surf(1),pp
+    !WRITE(oft_ounit,*)psi_surf(1),pp
 end do
 !$omp end parallel
 self%funcp%xs(0)=x1
@@ -481,7 +481,7 @@ SELECT TYPE(self=>func)
   END DO
   self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
   ierr=self%set_cofs(self%yp)
-  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ndofs,self%x,self%j0
+  IF(oft_debug_print(1))WRITE(oft_ounit,*)'Jphi linear interpolator Created',self%ndofs,self%x,self%j0
 class default
   CALL oft_abort('Invalid flux function type in create_jphi_ff','create_jphi_ff',__FILE__)
 END SELECT
@@ -541,8 +541,8 @@ ELSE
   psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
   CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
 END IF
-! WRITE(*,*)'  <R>     = ',ravgs(2,1),ravgs(self%ngeom-2,1)
-! WRITE(*,*)'  <1/R>   = ',ravgs(2,2),ravgs(self%ngeom-2,2)
+! WRITE(oft_ounit,*)'  <R>     = ',ravgs(2,1),ravgs(self%ngeom-2,1)
+! WRITE(oft_ounit,*)'  <1/R>   = ',ravgs(2,2),ravgs(self%ngeom-2,2)
 CALL spline_alloc(R_spline,self%ngeom-1,2)
 R_spline%xs(0:self%ngeom-2)=psi_q; R_spline%xs(self%ngeom-1)=1.d0
 R_spline%fs(0:self%ngeom-2,1)=ravgs(1:self%ngeom-1,1); R_spline%fs(self%ngeom-1,1)=gseq%o_point(1)
@@ -715,14 +715,14 @@ real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell
 !
 IF(oft_debug_print(2))THEN
-  WRITE(*,'(2A)')oft_indent,'Updating Dipole B0 profile:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Updating Dipole B0 profile:'
   CALL oft_increase_indent
 END IF
 psi_int%u=>gseq%psi
 CALL psi_int%setup(gseq%device%fe_rep)
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
-IF(oft_debug_print(2))WRITE(*,'(2A,3ES11.3)')oft_indent,'Axis Position = ',raxis,zaxis
+IF(oft_debug_print(2))WRITE(oft_ounit,'(2A,3ES11.3)')oft_indent,'Axis Position = ',raxis,zaxis
 !---
 x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
@@ -744,7 +744,7 @@ DO j=1,100
   IF( psi_surf(1) > x1)EXIT
   rmax=pt(1)
 END DO
-IF(oft_debug_print(2))WRITE(*,'(2A,ES11.3)')oft_indent,'Rmin = ',rmax
+IF(oft_debug_print(2))WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Rmin = ',rmax
 !---Trace
 call set_tracer(1)
 !$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
@@ -768,13 +768,13 @@ do j=1,self%npsi+1
   call tracinginv_fs(gseq%device%mesh,pt(1:2))
   !---Exit if trace fails
   if(active_tracer%status/=1)THEN
-    WRITE(*,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
+    WRITE(oft_ounit,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
     call oft_abort('Trace did not complete.','dipole_b0_update',__FILE__)
   end if
   !---Get surface minB
   self%func%xs(j-1)=psi_surf(1)
   self%func%fs(j-1,1)=field%minB
-  ! WRITE(*,*)psi_surf(1),field%minB
+  ! WRITE(oft_ounit,*)psi_surf(1),field%minB
 end do
 CALL active_tracer%delete
 CALL field%delete()
@@ -1020,7 +1020,7 @@ real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell
 !
 IF(oft_debug_print(2))THEN
-  WRITE(*,'(2A)')oft_indent,'Updating Mirror B0 profile:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Updating Mirror B0 profile:'
   CALL oft_increase_indent
 END IF
 psi_int%u=>gseq%psi

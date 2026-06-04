@@ -60,13 +60,13 @@ IF(oft_env%head_proc)THEN
   CLOSE(io_unit)
   IF(ierr<0)CALL oft_abort('No "cube_options" found in input file.','mesh_cube_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cube_options" in input file.','mesh_cube_load',__FILE__)
-  WRITE(*,'(2A)')oft_indent,'Cube volume mesh:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Cube volume mesh:'
   CALL oft_increase_indent
-  WRITE(*,'(2A,I4)')oft_indent,     'Mesh Type   = ',mesh_type
-  WRITE(*,'(2A,3I4)')oft_indent,    'nx, ny, nz  = ',ni
-  WRITE(*,'(2A,3ES11.3)')oft_indent,'Scale facs  = ',rscale
-  WRITE(*,'(2A,3L2)')oft_indent,    'Periodicity = ',ref_per
-  WRITE(*,'(2A,3ES11.3)')oft_indent,'Packing     = ',packing
+  WRITE(oft_ounit,'(2A,I4)')oft_indent,     'Mesh Type   = ',mesh_type
+  WRITE(oft_ounit,'(2A,3I4)')oft_indent,    'nx, ny, nz  = ',ni
+  WRITE(oft_ounit,'(2A,3ES11.3)')oft_indent,'Scale facs  = ',rscale
+  WRITE(oft_ounit,'(2A,3L2)')oft_indent,    'Periodicity = ',ref_per
+  WRITE(oft_ounit,'(2A,3ES11.3)')oft_indent,'Packing     = ',packing
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -212,7 +212,7 @@ integer(i4), intent(in) :: ref_index
 integer(i4) :: npold,ncold,i,j
 integer(i4), allocatable :: newindex(:),ltemp(:,:)
 real(r8), allocatable :: rtemp(:,:)
-IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Reflecting to support periodicity'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Reflecting to support periodicity'
 npold=mesh%np
 allocate(newindex(2*mesh%np),rtemp(3,2*mesh%np))
 rtemp(:,1:mesh%np)=mesh%r
@@ -280,7 +280,7 @@ real(r8) :: pt_i(3),pt_j(3),d_plane,per_dir(3),i_cc(3),j_cc(3)
 real(r8), parameter :: tol=1.d-6
 logical :: flag(4)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Setting Cube periodicity'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Setting Cube periodicity'
 !---Find periodic faces
 mesh%periodic%nper=COUNT(ref_per)
 ALLOCATE(mesh%periodic%lf(mesh%nf))
@@ -408,13 +408,13 @@ IF(oft_env%head_proc)THEN
   IF(ierr<0)CALL oft_abort('No "cube_options" found in input file.','smesh_square_load',__FILE__)
   IF(ierr>0)CALL oft_abort('Error parsing "cube_options" in input file.','smesh_square_load',__FILE__)
   ni(3)=1
-  WRITE(*,'(2A)')oft_indent,'Square surface mesh:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Square surface mesh:'
   CALL oft_increase_indent
-  WRITE(*,'(2A,I4)')oft_indent,     'Mesh Type   = ',mesh_type
-  WRITE(*,'(2A,2I4)')oft_indent,    'nx, ny      = ',ni(1:2)
-  WRITE(*,'(2A,2ES11.3)')oft_indent,'Scale facs  = ',rscale(1:2)
-  WRITE(*,'(2A,2L2)')oft_indent,    'Periodicity = ',ref_per(1:2)
-  WRITE(*,'(2A,3ES11.3)')oft_indent,'Packing     = ',packing
+  WRITE(oft_ounit,'(2A,I4)')oft_indent,     'Mesh Type   = ',mesh_type
+  WRITE(oft_ounit,'(2A,2I4)')oft_indent,    'nx, ny      = ',ni(1:2)
+  WRITE(oft_ounit,'(2A,2ES11.3)')oft_indent,'Scale facs  = ',rscale(1:2)
+  WRITE(oft_ounit,'(2A,2L2)')oft_indent,    'Periodicity = ',ref_per(1:2)
+  WRITE(oft_ounit,'(2A,3ES11.3)')oft_indent,'Packing     = ',packing
 END IF
 !---Broadcast input information
 #ifdef HAVE_MPI
@@ -560,7 +560,7 @@ class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j
 real(r8) :: pt(3)
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,*)'Setting square quadratic nodes'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Setting square quadratic nodes'
 !---Setup quadratic mesh
 CALL smesh%set_order(2)
 !---Locate edge end points and place daughter node
@@ -581,7 +581,7 @@ IF(smesh%ho_info%ncp>0)THEN
     smesh%ho_info%r(:,i+smesh%ne)=pt/REAL(smesh%cell_np,8)
   enddo
 END IF
-if(oft_debug_print(1))write(*,*)'Complete'
+if(oft_debug_print(1))WRITE(oft_ounit,*)'Complete'
 DEBUG_STACK_POP
 end subroutine smesh_square_add_quad
 !---------------------------------------------------------------------------------
@@ -594,7 +594,7 @@ real(r8) :: pt_i(3),pt_j(3),d_plane,per_dir(3),i_cc(3),j_cc(3)
 real(r8), parameter :: tol=1.d-6
 logical :: flag(4)
 DEBUG_STACK_PUSH
-IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Setting square periodicity'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Setting square periodicity'
 !---Find periodic faces
 smesh%periodic%nper=COUNT(ref_per(1:2))
 ALLOCATE(smesh%periodic%le(smesh%ne))

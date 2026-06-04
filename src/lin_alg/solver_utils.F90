@@ -98,17 +98,17 @@ SELECT CASE(smoother)
     IF(.NOT.(PRESENT(df).AND.PRESENT(nu)))THEN
       CALL oft_abort('Jacobi smoother requires (df, nu)!','create_native_mlpre',__FILE__)
     END IF
-    IF(oft_debug_print(1))WRITE(*,*)'Creating MG-Jacobi',df,nu
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)'Creating MG-Jacobi',df,nu
   CASE(2)
     IF(.NOT.PRESENT(nu))THEN
       CALL oft_abort('GMRES smoother requires (nu)!','create_native_mlpre',__FILE__)
     END IF
-    IF(oft_debug_print(1))WRITE(*,*)'Creating MG-GMRES',nu
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)'Creating MG-GMRES',nu
   CASE(3)
     IF(.NOT.PRESENT(nu))THEN
       CALL oft_abort('CG smoother requires (nu)!','create_native_mlpre',__FILE__)
     END IF
-    IF(oft_debug_print(1))WRITE(*,*)'Creating MG-CG',nu
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)'Creating MG-CG',nu
   CASE DEFAULT
     CALL oft_abort('Unknown smoother type!','create_native_mlpre',__FILE__)
 END SELECT
@@ -248,17 +248,17 @@ SELECT CASE(smoother)
     IF(.NOT.(PRESENT(df).AND.PRESENT(nu)))THEN
       CALL oft_abort('Jacobi smoother requires (df, nu)!','create_petsc_mlpre',__FILE__)
     END IF
-    IF(oft_debug_print(1))WRITE(*,*)'Creating MG-Jacobi',df,nu
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)'Creating MG-Jacobi',df,nu
   CASE(2)
     IF(.NOT.PRESENT(nu))THEN
       CALL oft_abort('GMRES smoother requires (nu)!','create_petsc_mlpre',__FILE__)
     END IF
-    IF(oft_debug_print(1))WRITE(*,*)'Creating MG-GMRES',nu
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)'Creating MG-GMRES',nu
   CASE(3)
     IF(.NOT.PRESENT(nu))THEN
       CALL oft_abort('CG smoother requires (nu)!','create_petsc_mlpre',__FILE__)
     END IF
-    IF(oft_debug_print(1))WRITE(*,*)'Creating MG-CG',nu
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)'Creating MG-CG',nu
   CASE DEFAULT
     CALL oft_abort('Unknown smoother type!','create_petsc_mlpre',__FILE__)
 END SELECT
@@ -498,7 +498,7 @@ native_solver=.FALSE.
 !---
 CALL xml_read_attribute(solver_node,"type",solver_type,iostat=ierr)
 IF(ierr/=0)CALL oft_xml_abort("Error reading solver type.","create_solver_xml",__FILE__)
-IF(oft_debug_print(2))WRITE(*,*)'Found solver: ',solver_type
+IF(oft_debug_print(2))WRITE(oft_ounit,*)'Found solver: ',solver_type
 force_native=.FALSE.
 IF(xml_hasAttribute(solver_node,"native"))THEN
   CALL xml_read_attribute(solver_node,"native",force_native,iostat=ierr)
@@ -684,7 +684,7 @@ IF(PRESENT(level))val_level=level
 !---
 CALL xml_read_attribute(pre_node,"type",pre_type,iostat=ierr)
 IF(ierr/=0)CALL oft_xml_abort("Error reading preconditioner type.","create_pre_xml",__FILE__)
-IF(oft_debug_print(2))WRITE(*,*)'Found preconditioner: ',pre_type
+IF(oft_debug_print(2))WRITE(oft_ounit,*)'Found preconditioner: ',pre_type
 !---
 SELECT CASE(pre_type)
   CASE("jacobi")
@@ -761,7 +761,7 @@ symmetric=.FALSE.
 up_present=.FALSE.
 down_present=.FALSE.
 coarse_present=.FALSE.
-IF(oft_debug_print(1))WRITE(*,*)'Creating MG smoother'
+IF(oft_debug_print(1))WRITE(oft_ounit,*)'Creating MG smoother'
 !---
 CALL xml_get_element(pre_node,"smoother",current_nodes,ierr)
 IF(current_nodes%n==0)CALL oft_abort("Object contains no smoother definitions.","create_ml_xml",__FILE__)
@@ -769,7 +769,7 @@ DO i=1,current_nodes%n
   current_node=>current_nodes%nodes(i)
   CALL xml_read_attribute(current_node,"direction",dir_type,iostat=ierr)
   IF(ierr/=0)CALL oft_xml_abort("Error reading direction attribute.","create_ml_xml",__FILE__)
-  IF(oft_debug_print(2))WRITE(*,*)'Found smoother: ',dir_type
+  IF(oft_debug_print(2))WRITE(oft_ounit,*)'Found smoother: ',dir_type
   SELECT CASE(dir_type)
     CASE("up")
       up_present=.TRUE.
@@ -791,7 +791,7 @@ IF(ASSOCIATED(current_nodes%nodes))DEALLOCATE(current_nodes%nodes)
 !---
 CALL xml_get_element(pre_node,"coarse",current_node,ierr)
 IF(ierr==0)THEN
-  IF(oft_debug_print(2))WRITE(*,*)'Found coarse solver'
+  IF(oft_debug_print(2))WRITE(oft_ounit,*)'Found coarse solver'
   coarse_present=.TRUE.
   CALL xml_get_element(current_node,"solver",coarse_node,ierr)
 END IF

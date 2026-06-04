@@ -219,11 +219,11 @@ IF(oft_env%head_proc)THEN
 END IF
 NULLIFY(valtmp)
 !---
-IF(oft_debug_print(1))WRITE(*,'(6A)')oft_indent,'Writing "',TRIM(path), &
+IF(oft_debug_print(1))WRITE(oft_ounit,'(6A)')oft_indent,'Writing "',TRIM(path), &
   '" to file "',TRIM(filename),'"'
 !---
 DO i=1,self%nfields
-  IF(oft_debug_print(2))WRITE(*,'(4X,3A)')'Field -> "', &
+  IF(oft_debug_print(2))WRITE(oft_ounit,'(4X,3A)')'Field -> "', &
   TRIM(path)//'_'//TRIM(self%field_tags(i)),'"'
   CALL self%fields(i)%fe%vec_create(outfield,native=.TRUE.)
   IF(.NOT.native_vector_cast(outvec,outfield))CALL oft_abort('Failed to create "outfield".', &
@@ -269,10 +269,10 @@ IF(.NOT.success)THEN
 END IF
 !---
 NULLIFY(valtmp)
-IF(oft_debug_print(1))WRITE(*,'(2X,5A)')'Reading "',TRIM(path), &
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,5A)')'Reading "',TRIM(path), &
   '" from file "',TRIM(filename),'"'
 DO i=1,self%nfields
-  IF(oft_debug_print(2))WRITE(*,'(4X,3A)')'  Field -> "', &
+  IF(oft_debug_print(2))WRITE(oft_ounit,'(4X,3A)')'  Field -> "', &
     TRIM(path)//'_'//TRIM(self%field_tags(i)),'"'
   CALL self%fields(i)%fe%vec_create(infield,native=.TRUE.)
   IF(.NOT.native_vector_cast(invec,infield))CALL oft_abort('Failed to create "infield".', &
@@ -317,7 +317,7 @@ CLASS(oft_vector), POINTER :: tmp_vec
 TYPE(oft_graph_ptr), ALLOCATABLE :: graphs(:,:),known_graphs(:)
 DEBUG_STACK_PUSH
 !---
-IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Building composite FE matrix'
+IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'Building composite FE matrix'
 ALLOCATE(mat_mask(self%nfields,self%nfields))
 mat_mask=1
 IF(PRESENT(mask))mat_mask=mask
@@ -333,7 +333,7 @@ DO i=1,self%nfields
   END DO
   IF(k<=nknown_graphs)CYCLE
   !---
-  IF(oft_debug_print(3))WRITE(*,'(4X,A,2I4)')'Building graph',i,i
+  IF(oft_debug_print(3))WRITE(oft_ounit,'(4X,A,2I4)')'Building graph',i,i
   nknown_graphs=nknown_graphs+1
   graph_ids(:,nknown_graphs)=(/self%fields(i)%fe%type,self%fields(i)%fe%type/)
   ALLOCATE(known_graphs(nknown_graphs)%g)
@@ -364,10 +364,10 @@ DO i=1,self%nfields
       self%fields(j)%fe%type/)))EXIT
     END DO
     IF(k<=nknown_graphs)THEN
-      IF(oft_debug_print(3))WRITE(*,'(4X,A,2I4)')'Using known graph ',i,j
+      IF(oft_debug_print(3))WRITE(oft_ounit,'(4X,A,2I4)')'Using known graph ',i,j
       graphs(i,j)%g=>known_graphs(k)%g
     ELSE
-      IF(oft_debug_print(3))WRITE(*,'(4X,A,2I4)')'Building graph ',i,j
+      IF(oft_debug_print(3))WRITE(oft_ounit,'(4X,A,2I4)')'Building graph ',i,j
       nknown_graphs=nknown_graphs+1
       graph_ids(:,nknown_graphs)=(/self%fields(i)%fe%type, &
       self%fields(j)%fe%type/)

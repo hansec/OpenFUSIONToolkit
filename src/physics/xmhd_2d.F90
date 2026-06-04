@@ -305,8 +305,8 @@ DO i=1,self%nsteps
     hist_i4=[self%rst_base+i-1,nksolver%lits,nksolver%nlits]
     hist_r4=REAL([self%t,self%nlfun%diag_vals(1), self%nlfun%diag_vals(2), n_avg, T_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,2X,I4,F12.3,ES12.2)
-    WRITE(*,103)self%rst_base+i,self%t+self%dt,nksolver%lits,nksolver%nlits,elapsed_time,self%dt
-    IF(oft_debug_print(1))WRITE(*,*)
+    WRITE(oft_ounit,103)self%rst_base+i,self%t+self%dt,nksolver%lits,nksolver%nlits,elapsed_time,self%dt
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)
     CALL hist_file%write(data_i4=hist_i4, data_r4=hist_r4)
   END IF
   !---------------------------------------------------------------------------
@@ -323,7 +323,7 @@ DO i=1,self%nsteps
     CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
-      WRITE(*,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
+      WRITE(oft_ounit,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
       CALL hist_file%flush
     END IF
     !---
@@ -488,8 +488,8 @@ DO i=1,self%nsteps
     hist_i4=(/self%rst_base+i-1,solver%cits,0/)
     hist_r4=REAL([self%t,self%mfun%diag_vals(1), self%mfun%diag_vals(2), n_avg, T_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,F12.3,ES12.2)
-    WRITE(*,103)self%rst_base+i,self%t,solver%cits,elapsed_time,self%dt
-    IF(oft_debug_print(1))WRITE(*,*)
+    WRITE(oft_ounit,103)self%rst_base+i,self%t,solver%cits,elapsed_time,self%dt
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)
     CALL hist_file%write(data_i4=hist_i4, data_r4=hist_r4)
   END IF
   !---------------------------------------------------------------------------
@@ -506,7 +506,7 @@ DO i=1,self%nsteps
     CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
     IF(oft_env%head_proc)THEN
       elapsed_time=mytimer%tock()
-      WRITE(*,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
+      WRITE(oft_ounit,'(2X,A,F12.3)')'I/O Time = ',elapsed_time
       CALL hist_file%flush
     END IF
     !---
@@ -687,7 +687,7 @@ DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,&
           vel_weights_loc, psi_weights_loc, by_weights_loc,cell_dofs,res_loc)
 !$omp end parallel
 END BLOCK
-IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
+IF(oft_debug_print(2))WRITE(oft_ounit,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%parent_sim%n_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(1, :),velx_res,self%parent_sim%velx_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(2, :),vely_res,self%parent_sim%vely_bc)
@@ -983,7 +983,7 @@ DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,&
 !$omp end parallel
 END BLOCK
 !!$omp end parallel
-IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
+IF(oft_debug_print(2))WRITE(oft_ounit,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%parent_sim%n_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(1, :),velx_res,self%parent_sim%velx_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(2, :),vely_res,self%parent_sim%vely_bc)
@@ -1499,7 +1499,7 @@ DO i=1,self%fe_rep%nfields
   CALL omp_destroy_lock(tlocks(i))
 END DO
 DEALLOCATE(tlocks)
-IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
+IF(oft_debug_print(2))WRITE(oft_ounit,'(4X,A)')'Setting BCs'
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%n_bc,1)
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%velx_bc,2)
 CALL fem_dirichlet_diag(oft_blagrange,self%jacobian,self%vely_bc,3)
@@ -1520,7 +1520,7 @@ end subroutine build_approx_jacobian
 !---------------------------------------------------------------------------
 subroutine mfnk_update(uin)
 class(oft_vector), target, intent(inout) :: uin !< Current field
-IF(oft_debug_print(1))write(*,*)'Updating 2D MUG MF-Jacobian'
+IF(oft_debug_print(1))WRITE(oft_ounit,*)'Updating 2D MUG MF-Jacobian'
 CALL current_sim%mf_mat%update(uin)
 END SUBROUTINE mfnk_update
 !---------------------------------------------------------------------------
@@ -1528,7 +1528,7 @@ END SUBROUTINE mfnk_update
 !---------------------------------------------------------------------------
 subroutine update_jacobian(uin)
 class(oft_vector), target, intent(inout) :: uin !< Current solution
-IF(oft_debug_print(1))write(*,*)'Updating 2D MUG approximate Jacobian'
+IF(oft_debug_print(1))WRITE(oft_ounit,*)'Updating 2D MUG approximate Jacobian'
 CALL build_approx_jacobian(current_sim,uin)
 END SUBROUTINE update_jacobian
 !---------------------------------------------------------------------------
@@ -1561,12 +1561,12 @@ END IF
 #endif
 
 !---Setup FE representation
-IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Building lagrange FE space'
 CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
 IF(.NOT.oft_2D_lagrange_cast(oft_blagrange,ML_oft_blagrange%current_level))CALL oft_abort("Invalid lagrange FE object","setup",__FILE__)
 
 !---Build composite FE definition for solution field
-IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Creating FE type'
+IF(oft_debug_print(1))WRITE(oft_ounit,'(2X,A)')'Creating FE type'
 ALLOCATE(self%fe_rep)
 self%fe_rep%nfields=7
 ALLOCATE(self%fe_rep%fields(self%fe_rep%nfields))

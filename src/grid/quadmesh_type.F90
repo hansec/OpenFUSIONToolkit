@@ -239,12 +239,12 @@ IF(np>0)THEN
     DO j=1,order-1
       inode(ind1) = inode(ind1) + inc1
       inodese(:,j,i) = inode
-      ! WRITE(*,*)i,j,inode
+      ! WRITE(oft_ounit,*)i,j,inode
     END DO
   END DO
   !---Cell
   ALLOCATE(inodesf(2,np*np))
-  ! WRITE(*,*)
+  ! WRITE(oft_ounit,*)
   DO i=1,np
     DO j=1,np
       inodesf(:,(i-1)*np+j) = (/1+i,1+j/)
@@ -423,7 +423,7 @@ ELSE
     IF(ANY(pmap<0))THEN
       DO i=1,order+1
         DO j=1,order+1
-          WRITE(*,*)i,j,pmap(i,j)
+          WRITE(oft_ounit,*)i,j,pmap(i,j)
         END DO
       END DO
       CALL oft_abort("Bad pmap","",__FILE__)

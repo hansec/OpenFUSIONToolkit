@@ -189,7 +189,7 @@ DO i=1,npts
   READ(pt_file_unit,*,IOSTAT=io_stat)pt
   IF(io_stat/=0)THEN
     IF(oft_env%head_proc.AND.io_stat/=IOSTAT_END)THEN
-      WRITE(*,*)'Error reading launch point at line ',INT(i+1,2)
+      WRITE(oft_ounit,*)'Error reading launch point at line ',INT(i+1,2)
     END IF
     EXIT
   END IF

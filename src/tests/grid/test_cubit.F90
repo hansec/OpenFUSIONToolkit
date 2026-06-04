@@ -51,7 +51,7 @@ IF(ierr>0)CALL oft_abort('Error parsing "cubit_test_options" in input file.', &
   'test_cubit',__FILE__)
 #if !defined(HAVE_NCDF)
 IF(cad_type==2)THEN
-  WRITE(*,*)'SKIP TEST'
+  WRITE(oft_ounit,*)'SKIP TEST'
   CALL oft_finalize
 END IF
 #endif
@@ -60,7 +60,7 @@ IF(test_surf)THEN
   IF(mg_mesh%smesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
 #if !defined(HAVE_ONURBS)
   IF(TRIM(inpname)/='none')THEN
-    WRITE(*,*)'SKIP TEST'
+    WRITE(oft_ounit,*)'SKIP TEST'
     CALL oft_finalize
   END IF
 #endif
@@ -82,7 +82,7 @@ ELSE
   IF(mg_mesh%mesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
 #if !defined(HAVE_ONURBS)
   IF(TRIM(inpname)/='none')THEN
-    WRITE(*,*)'SKIP TEST'
+    WRITE(oft_ounit,*)'SKIP TEST'
     CALL oft_finalize
   END IF
 #endif
@@ -122,7 +122,7 @@ END DO
 CALL quad%delete
 volume=oft_mpi_sum(volume)
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)'Mesh Volume =',volume
+  WRITE(oft_ounit,*)'Mesh Volume =',volume
   WRITE(io_unit,*)volume
 END IF
 END SUBROUTINE compute_volume
@@ -148,7 +148,7 @@ END DO
 CALL quad%delete
 area=oft_mpi_sum(area)
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)'Mesh Area   =',area
+  WRITE(oft_ounit,*)'Mesh Area   =',area
   WRITE(io_unit,*)area
 END IF
 END SUBROUTINE compute_area

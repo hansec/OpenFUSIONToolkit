@@ -67,7 +67,7 @@ END DO
 CALL quad%delete
 volume=oft_mpi_sum(volume)
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)'Mesh Volume =',volume
+  WRITE(oft_ounit,*)'Mesh Volume =',volume
   WRITE(io_unit,*)volume
 END IF
 END SUBROUTINE compute_volume
@@ -92,7 +92,7 @@ END DO
 CALL quad%delete
 area=oft_mpi_sum(area)
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)'Mesh Area   =',area
+  WRITE(oft_ounit,*)'Mesh Area   =',area
   WRITE(io_unit,*)area
 END IF
 END SUBROUTINE compute_area

@@ -573,18 +573,18 @@ logical, ALLOCATABLE, DIMENSION(:,:,:) :: flags
 IF(order<1)RETURN
 ALLOCATE(inds(2,order*order))
 m=0
-! WRITE(*,*)'2D'
+! WRITE(oft_ounit,*)'2D'
 DO k=1,order
   DO i=1,k
     DO j=1,k
       IF(i<k.AND.j<k)CYCLE
       m=m+1
       inds(:,m)=(/i,j/)
-      ! WRITE(*,*)m,i,j
+      ! WRITE(oft_ounit,*)m,i,j
     END DO
   END DO
 END DO
-! WRITE(*,*)
+! WRITE(oft_ounit,*)
 end subroutine hpoly_2d_grid
 !---------------------------------------------------------------------------------
 !> Need docs
@@ -655,7 +655,7 @@ logical, ALLOCATABLE, DIMENSION(:,:,:,:) :: flags
 IF(order<1)RETURN
 ALLOCATE(inds(3,order**3))
 m=0
-! WRITE(*,*)'3D'
+! WRITE(oft_ounit,*)'3D'
 DO k=1,order
   DO i=1,k
     DO j=1,k
@@ -663,11 +663,11 @@ DO k=1,order
         IF(i<k.AND.j<k.AND.l<k)CYCLE
         m=m+1
         inds(:,m)=(/i,j,l/)
-        ! WRITE(*,*)m,i,j,l
+        ! WRITE(oft_ounit,*)m,i,j,l
       END DO
     END DO
   END DO
 END DO
-! WRITE(*,*)
+! WRITE(oft_ounit,*)
 end subroutine hpoly_3d_grid
 END MODULE oft_lag_poly

@@ -155,9 +155,9 @@ DO i=1,self%nprobes
     ftol=fout(i)
 #endif
     IF(oft_env%rank==0)THEN
-      WRITE(*,*)'Field probe point ',INT(i,2),' offmesh'
-      WRITE(*,*)'  fout = ',REAL(ftol,4),REAL(self%tol,4)
-      WRITE(*,*)'  r    = ',REAL(self%pts(:,i),4)
+      WRITE(oft_ounit,*)'Field probe point ',INT(i,2),' offmesh'
+      WRITE(oft_ounit,*)'  fout = ',REAL(ftol,4),REAL(self%tol,4)
+      WRITE(oft_ounit,*)'  r    = ',REAL(self%pts(:,i),4)
     END IF
   END IF
   IF(self%cells(i)==0)CYCLE

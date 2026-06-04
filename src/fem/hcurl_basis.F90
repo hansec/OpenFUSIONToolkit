@@ -111,10 +111,10 @@ DEBUG_STACK_PUSH
 minlev_out=1
 IF(PRESENT(minlev))minlev_out=minlev
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Creating H(Curl) FE space'
-  WRITE(*,'(2X,A,I4)')'Order  = ',order
-  WRITE(*,'(2X,A,I4)')'Minlev = ',minlev_out
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(A)')'**** Creating H(Curl) FE space'
+  WRITE(oft_ounit,'(2X,A,I4)')'Order  = ',order
+  WRITE(oft_ounit,'(2X,A,I4)')'Minlev = ',minlev_out
 END IF
 !---Allocate multigrid operators
 nlevels=mg_mesh%mgdim+(order-1)
@@ -126,7 +126,7 @@ IF(PRESENT(ML_hcurl_obj))THEN
   ML_hcurl_obj%ml_mesh=>mg_mesh
 ELSE
   IF(.NOT.PRESENT(ML_bhcurl_obj))THEN
-    WRITE(*,*)'No HCurl FE objects requested, returning'
+    WRITE(oft_ounit,*)'No HCurl FE objects requested, returning'
     DEBUG_STACK_POP
     RETURN
   END IF
@@ -166,7 +166,7 @@ do i=1,order
 end do
 IF(PRESENT(ML_hcurl_obj))CALL ML_hcurl_obj%set_level(ML_hcurl_obj%nlevels)
 IF(PRESENT(ML_bhcurl_obj))CALL ML_bhcurl_obj%set_level(ML_bhcurl_obj%nlevels)
-IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(oft_ounit,*)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_setup
 !------------------------------------------------------------------------------
@@ -184,10 +184,10 @@ minlev_out=1
 IF(PRESENT(minlev))minlev_out=minlev
 order = ML_hcurl_obj%levels(ML_hcurl_obj%nlevels)%fe%order
 IF(oft_env%head_proc)THEN
-  WRITE(*,*)
-  WRITE(*,'(A)')'**** Creating H(Curl) + Grad(H^1) FE space'
-  WRITE(*,'(2X,A,I4)')'Order  = ',order
-  WRITE(*,'(2X,A,I4)')'Minlev = ',minlev_out
+  WRITE(oft_ounit,*)
+  WRITE(oft_ounit,'(A)')'**** Creating H(Curl) + Grad(H^1) FE space'
+  WRITE(oft_ounit,'(2X,A,I4)')'Order  = ',order
+  WRITE(oft_ounit,'(2X,A,I4)')'Minlev = ',minlev_out
 END IF
 ML_h1grad_obj%ml_mesh=>ML_hcurl_obj%ml_mesh
 !---Allocate multigrid operators
@@ -229,7 +229,7 @@ ML_hcurl_grad_obj%ml_fields(2)%ml=>ML_h1grad_obj
 ML_hcurl_grad_obj%field_tags(2)='g'
 call ML_hcurl_grad_obj%setup
 CALL ML_hcurl_grad_obj%set_level(ML_hcurl_grad_obj%nlevels,propogate=.TRUE.)
-IF(oft_env%head_proc)WRITE(*,*)
+IF(oft_env%head_proc)WRITE(oft_ounit,*)
 DEBUG_STACK_POP
 end subroutine oft_hcurl_grad_setup
 !------------------------------------------------------------------------------
@@ -241,8 +241,8 @@ class(oft_mesh), target, intent(in) :: tmesh !< Needs docs
 integer(i4), intent(in) :: order !< Order of representation desired
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A)')oft_indent,'Creating 3D H(Curl) FE space'
-  WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
+  WRITE(oft_ounit,'(2A)')oft_indent,'Creating 3D H(Curl) FE space'
+  WRITE(oft_ounit,'(A,2X,A,I4)')oft_indent,'Order  = ',order
 END IF
 CALL oft_increase_indent
 !---
@@ -302,8 +302,8 @@ class(oft_bmesh), target, intent(in) :: tmesh !< Needs docs
 integer(i4), intent(in) :: order !< Order of representation desired
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A)')oft_indent,'Creating 2D H(Curl) FE space'
-  WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
+  WRITE(oft_ounit,'(2A)')oft_indent,'Creating 2D H(Curl) FE space'
+  WRITE(oft_ounit,'(A,2X,A,I4)')oft_indent,'Order  = ',order
 END IF
 CALL oft_increase_indent
 !---

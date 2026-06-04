@@ -122,9 +122,9 @@ IF(.NOT.ASSOCIATED(self%pcell))THEN
 END IF
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,*)'G-S Equilibrium loaded: ',self%field_file
-  WRITE(*,*)'  Order:    ',self%order
-  WRITE(*,*)'  Pressure: ',pmin,self%pmax
+  WRITE(oft_ounit,*)'G-S Equilibrium loaded: ',self%field_file
+  WRITE(oft_ounit,*)'  Order:    ',self%order
+  WRITE(oft_ounit,*)'  Pressure: ',pmin,self%pmax
 END IF
 DEBUG_STACK_POP
 END SUBROUTINE gs_setup

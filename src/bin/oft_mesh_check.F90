@@ -83,9 +83,9 @@ IF(order>0)THEN
 ! Compute smoother coefficients
 !------------------------------------------------------------------------------
   IF(oft_env%head_proc)THEN
-    WRITE(*,*)'=============================================='
-    WRITE(*,*)'Computing optimized smoother coefficients:'
-    WRITE(*,*)'  NP = ',INT(order,2)
+    WRITE(oft_ounit,*)'=============================================='
+    WRITE(oft_ounit,*)'Computing optimized smoother coefficients:'
+    WRITE(oft_ounit,*)'  NP = ',INT(order,2)
   END IF
   oft_env%pm=.FALSE.
   CALL lag_lop_eigs(ML_oft_lagrange,minlev)

@@ -619,7 +619,7 @@ IF(self%full)THEN
 END IF
 !---Check linkage pointer
 IF(ANY(self%kle>self%nle+1))THEN
-  WRITE(*,*)'ERROR: ',oft_env%rank,MAXVAL(self%kle),MAXLOC(self%kle),self%nle
+  WRITE(oft_ounit,*)'ERROR: ',oft_env%rank,MAXVAL(self%kle),MAXLOC(self%kle),self%nle
   CALL oft_abort('BAD LINKAGE PTR','oft_stitch_check',__FILE__)
 END IF
 !---Check local sizes
@@ -642,7 +642,7 @@ CALL oft_mpi_waitall(self%nproc_con,self%recv_reqs,ierr)
 CALL oft_mpi_waitall(self%nproc_con,self%send_reqs,ierr)
 DO j=1,self%nproc_con
   IF((le_size(1,j)/=self%recv(j)%n).OR.(le_size(2,j)/=self%send(j)%n))THEN
-    WRITE(*,*)'STITCH ERROR: ',[self%send(j)%n,self%recv(j)%n],le_size(:,j)
+    WRITE(oft_ounit,*)'STITCH ERROR: ',[self%send(j)%n,self%recv(j)%n],le_size(:,j)
     CALL oft_abort('BAD ARRAY SIZE MATCH','oft_stitch_check',__FILE__)
   END IF
 END DO

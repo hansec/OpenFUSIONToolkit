@@ -367,7 +367,7 @@ TYPE(oft_graph) :: csr_graph
 TYPE(oft_graph) :: csc_graph
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
-IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting LU solver: ',self%package,self%refactor
+IF((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,*)'Starting LU solver: ',self%package,self%refactor
 IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'lusolver_apply',__FILE__)
 !---Check call threading for MUMPS
@@ -687,8 +687,8 @@ IF(ierr==0)THEN
   END IF
 END IF
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(A)')'LU solver setup:'
-  WRITE(*,'(2X,2A)')'- Package:  ',self%package
+  WRITE(oft_ounit,'(A)')'LU solver setup:'
+  WRITE(oft_ounit,'(2X,2A)')'- Package:  ',self%package
 END IF
 DEBUG_STACK_POP
 end subroutine lusolver_setup_xml
@@ -791,7 +791,7 @@ TYPE(oft_graph) :: csr_graph
 TYPE(oft_graph) :: csc_graph
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
-IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting ILU solver: ',self%package,self%refactor
+IF((oft_env%pm.AND.oft_env%head_proc))WRITE(oft_ounit,*)'Starting ILU solver: ',self%package,self%refactor
 IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'ilusolver_apply',__FILE__)
 IF(ASSOCIATED(A_native%Mfull))THEN
@@ -867,7 +867,7 @@ SELECT CASE(TRIM(self%package))
 !         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
 !         self%superlu_struct%f_factors,self%superlu_struct%col_perm,1.d-1,ierr)
 !       IF(ierr/=0)THEN
-!         WRITE(*,*)ierr,A_native%nr
+!         WRITE(oft_ounit,*)ierr,A_native%nr
 !         IF(.NOT.((ierr>=0).AND.(ierr<=A_native%nr)))THEN
 !           CALL oft_abort('Factorization failed','ilusolver_apply',__FILE__)
 !         END IF
@@ -886,7 +886,7 @@ SELECT CASE(TRIM(self%package))
 !       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
 !       self%superlu_struct%f_factors,self%superlu_struct%col_perm,1.d3,ierr)
 !       IF(ierr/=0)THEN
-!         WRITE(*,*)ierr
+!         WRITE(oft_ounit,*)ierr
 !         CALL oft_abort('Solve failed','ilusolver_apply',__FILE__)
 !       END IF
 ! #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
@@ -900,7 +900,7 @@ SELECT CASE(TRIM(self%package))
       CALL ilu0(A_native%nr,mat_vals,A_native%lc,A_native%kr,self%native_struct%alu, &
         self%native_struct%jlu,self%native_struct%ju, ierr)
       IF(ierr/=0)THEN
-        WRITE(*,*)ierr
+        WRITE(oft_ounit,*)ierr
         CALL oft_abort('Factorization failed','ilusolver_apply',__FILE__)
       END IF
       self%refactor=.FALSE.
@@ -955,8 +955,8 @@ IF(ierr==0)THEN
   END IF
 END IF
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(A)')'LU solver setup:'
-  WRITE(*,'(2X,2A)')'- Package:  ',self%package
+  WRITE(oft_ounit,'(A)')'LU solver setup:'
+  WRITE(oft_ounit,'(2X,2A)')'- Package:  ',self%package
 END IF
 DEBUG_STACK_POP
 end subroutine ilusolver_setup_xml
@@ -1021,14 +1021,14 @@ REAL(8), ALLOCATABLE, DIMENSION(:) :: rwork
 TYPE(oft_timer) :: stimer
 !---Invert Mmat
 IF(oft_env%pm)THEN
-  WRITE(*,*)'Inverting real matrix'
+  WRITE(oft_ounit,*)'Inverting real matrix'
   CALL stimer%tick
 END IF
 N = nrows
 ALLOCATE(ipiv(N),rwork(1))
 CALL dgetrf(N,N,Amat,N,ipiv,info)
 IF(info/=0)THEN
-  WRITE(*,*)'DGETRF',info
+  WRITE(oft_ounit,*)'DGETRF',info
   error=info
   DEALLOCATE(ipiv,rwork)
   RETURN
@@ -1036,16 +1036,16 @@ END IF
 lwork=-1
 CALL dgetri(N,Amat,N,ipiv,rwork,lwork,info)
 lwork=INT(rwork(1),4)
-IF(oft_debug_print(1).AND.oft_env%pm)WRITE(*,*)'  Block size = ',lwork/N
+IF(oft_debug_print(1).AND.oft_env%pm)WRITE(oft_ounit,*)'  Block size = ',lwork/N
 DEALLOCATE(rwork)
 ALLOCATE(rwork(lwork))
 CALL dgetri(N,Amat,N,ipiv,rwork,lwork,info)
 error=info
-IF(info/=0)WRITE(*,*)'DGETRI',info
+IF(info/=0)WRITE(oft_ounit,*)'DGETRI',info
 DEALLOCATE(ipiv,rwork)
 IF(oft_env%pm)THEN
   elapsed_time=stimer%tock()
-  WRITE(*,*)'  Time = ',elapsed_time
+  WRITE(oft_ounit,*)'  Time = ',elapsed_time
 END IF
 END SUBROUTINE lapack_matinv_real
 !---------------------------------------------------------------------------------
@@ -1063,7 +1063,7 @@ DOUBLE COMPLEX, ALLOCATABLE, DIMENSION(:) :: rwork
 TYPE(oft_timer) :: stimer
 !---Invert Mmat
 IF(oft_env%pm)THEN
-  WRITE(*,*)'Inverting complex matrix'
+  WRITE(oft_ounit,*)'Inverting complex matrix'
   CALL stimer%tick
 END IF
 N = nrows
@@ -1077,7 +1077,7 @@ END IF
 lwork=-1
 CALL zgetri(N,Amat,N,ipiv,rwork,lwork,info)
 lwork=INT(rwork(1),4)
-IF(oft_debug_print(1).AND.oft_env%pm)WRITE(*,*)'  Block size = ',lwork/N
+IF(oft_debug_print(1).AND.oft_env%pm)WRITE(oft_ounit,*)'  Block size = ',lwork/N
 DEALLOCATE(rwork)
 ALLOCATE(rwork(lwork))
 CALL zgetri(N,Amat,N,ipiv,rwork,lwork,info)
@@ -1085,7 +1085,7 @@ error=info
 DEALLOCATE(ipiv,rwork)
 IF(oft_env%pm)THEN
   elapsed_timer=stimer%tock()
-  WRITE(*,*)'  Time = ',elapsed_timer
+  WRITE(oft_ounit,*)'  Time = ',elapsed_timer
 END IF
 END SUBROUTINE lapack_matinv_complex
 !---------------------------------------------------------------------------------
@@ -1101,7 +1101,7 @@ REAL(8) :: elapsed_time
 TYPE(oft_timer) :: stimer
 !---Invert Mmat
 IF(oft_env%pm)THEN
-  WRITE(*,*)'Inverting real matrix'
+  WRITE(oft_ounit,*)'Inverting real matrix'
   CALL stimer%tick
 END IF
 N = nrows
@@ -1119,7 +1119,7 @@ END DO
 error=info
 IF(oft_env%pm)THEN
   elapsed_time=stimer%tock()
-  WRITE(*,*)'  Time = ',elapsed_time
+  WRITE(oft_ounit,*)'  Time = ',elapsed_time
 END IF
 END SUBROUTINE lapack_cholesky_real
 !---------------------------------------------------------------------------------

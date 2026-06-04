@@ -318,8 +318,8 @@ IF(fit_Pscale.AND.gs%pax_target>0.d0)THEN
 END IF
 !---Load constraints
 gs_active=>gs
-WRITE(*,*)
-WRITE(*,'(A)')'*** Loading fit constraints ***'
+WRITE(oft_ounit,*)
+WRITE(oft_ounit,'(A)')'*** Loading fit constraints ***'
 CALL fit_load(inpath,conlist)
 !---Count coefficients
 ncofs=0
@@ -410,13 +410,13 @@ END IF
 ncons=SIZE(conlist)
 ALLOCATE(error(ncons))
 error=1.d99
-WRITE(*,*)
-WRITE(*,'(A)')'========================================'
-WRITE(*,'(2A)')oft_indent,'Starting Fit:'
+WRITE(oft_ounit,*)
+WRITE(oft_ounit,'(A)')'========================================'
+WRITE(oft_ounit,'(2A)')oft_indent,'Starting Fit:'
 CALL oft_increase_indent
-WRITE(*,'(2A,I4)')oft_indent,'# of free parameters   = ',ncofs
-WRITE(*,'(2A,I4)')oft_indent,'# of constraints       = ',ncons
-WRITE(*,*)
+WRITE(oft_ounit,'(2A,I4)')oft_indent,'# of free parameters   = ',ncofs
+WRITE(oft_ounit,'(2A,I4)')oft_indent,'# of constraints       = ',ncons
+WRITE(oft_ounit,*)
 CALL oft_decrease_indent
 !---
 allocate(fjac(ncons,ncofs))
@@ -473,13 +473,13 @@ IF(maxfev>0)THEN
   call lmder(fit_error_grad,ncons,ncofs,cofs,error,fjac,ldfjac, &
              ftol,xtol,gtol,maxfev,cofs_scale,mode,factor,nprint,info,nfev,njev, &
              ipvt,qtf,wa1,wa2,wa3,wa4)
-  WRITE(*,'(A)')'========================================'
-  WRITE(*,'(2A)')oft_indent,'Fit Complete '
+  WRITE(oft_ounit,'(A)')'========================================'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Fit Complete '
   CALL oft_increase_indent
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Final error          =',SQRT(SUM(error**2))
-  WRITE(*,'(3A)')oft_indent,'Termination reason:  ',minpack_exit_reason(info)
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Final error          =',SQRT(SUM(error**2))
+  WRITE(oft_ounit,'(3A)')oft_indent,'Termination reason:  ',minpack_exit_reason(info)
   CALL oft_decrease_indent
-  WRITE(*,*)
+  WRITE(oft_ounit,*)
   IF(SQRT(SUM(error**2))>chi_best)THEN
     cofs=cofs_best
     gs_active%p_scale=p_scale_best
@@ -595,9 +595,9 @@ sigma=SUM(err0**2)/REAL(m-n,8)
 inv_mat=MATMUL(TRANSPOSE(jac_mat),jac_mat)
 CALL lapack_matinv(n,inv_mat,info)
 inv_mat = sigma*inv_mat
-WRITE(*,*)'Confidence intervals'
+WRITE(oft_ounit,*)'Confidence intervals'
 DO i=1,n
-  WRITE(*,'(4X,I3,2ES11.3)')i,cofs(i),inv_mat(i,i)
+  WRITE(oft_ounit,'(4X,I3,2ES11.3)')i,cofs(i),inv_mat(i,i)
 END DO
 END SUBROUTINE fit_confidence
 !---------------------------------------------------------------------------------
@@ -652,13 +652,13 @@ IF(iflag==1)THEN
   feval_count=feval_count+1
   IF(oft_env%pm)THEN
     IF(feval_count>0)THEN
-      WRITE(*,'(2A,I5)')oft_indent,'Function evaluation',feval_count
+      WRITE(oft_ounit,'(2A,I5)')oft_indent,'Function evaluation',feval_count
     END IF
   END IF
   CALL oft_increase_indent
   IF(ANY(isnan(cofs)))THEN
-    WRITE(*,'(2A)')oft_indent,'Step failed: Bad parameters!'
-    WRITE(*,*)
+    WRITE(oft_ounit,'(2A)')oft_indent,'Step failed: Bad parameters!'
+    WRITE(oft_ounit,*)
     CALL oft_decrease_indent
     err=1.d99
     RETURN
@@ -685,12 +685,12 @@ IF(iflag==1)THEN
     js = offset; je = offset+gs_active%I%ndofs
     ierr=gs_active%I%set_cofs(cofs(js+1:je))
     IF(ierr<0)THEN
-      WRITE(*,'(2A)')oft_indent,'Invalid I coefficients'
+      WRITE(oft_ounit,'(2A)')oft_indent,'Invalid I coefficients'
       CALL oft_increase_indent
       DO i=js+1,je
-        WRITE(*,'(A,ES11.3)')oft_indent,cofs(i)
+        WRITE(oft_ounit,'(A,ES11.3)')oft_indent,cofs(i)
       END DO
-      WRITE(*,*)
+      WRITE(oft_ounit,*)
       CALL oft_decrease_indent
       DO i=1,m
         err(i)=conlist(i)%con%val*conlist(i)%con%wt
@@ -717,12 +717,12 @@ IF(iflag==1)THEN
     js = offset; je = offset+gs_active%P%ndofs
     ierr=gs_active%P%set_cofs(cofs(js+1:je))
     IF(ierr<0)THEN
-      WRITE(*,'(2A)')oft_indent,'Invalid P coefficients'
+      WRITE(oft_ounit,'(2A)')oft_indent,'Invalid P coefficients'
       CALL oft_increase_indent
       DO i=js+1,je
-        WRITE(*,'(A,ES11.3)')oft_indent,cofs(i)
+        WRITE(oft_ounit,'(A,ES11.3)')oft_indent,cofs(i)
       END DO
-      WRITE(*,*)
+      WRITE(oft_ounit,*)
       CALL oft_decrease_indent
       DO i=1,m
         err(i)=conlist(i)%con%val*conlist(i)%con%wt
@@ -788,92 +788,92 @@ IF(iflag==1)THEN
   IF(oft_env%pm)THEN
     offset=0
     IF(ierr<0)THEN
-      WRITE(*,'(3A)')oft_indent,'Step Failed: ',TRIM(err_reason)
+      WRITE(oft_ounit,'(3A)')oft_indent,'Step Failed: ',TRIM(err_reason)
     END IF
-    WRITE(*,'(2A,ES11.3)')oft_indent,'FFp_scale         =',gs_active%ffp_scale
-    WRITE(*,'(2A,ES11.3)')oft_indent,'P_scale           =',gs_active%p_scale
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'FFp_scale         =',gs_active%ffp_scale
+    WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'P_scale           =',gs_active%p_scale
     IF(gs_active%R0_target>0.d0)THEN
-      WRITE(*,'(2A,ES11.3)')oft_indent,'R0_target         =',gs_active%R0_target
+      WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'R0_target         =',gs_active%R0_target
     END IF
     IF(gs_active%Z0_target>-1.d98)THEN
-      WRITE(*,'(2A,ES11.3)')oft_indent,'Z0_target         =',gs_active%Z0_target
+      WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Z0_target         =',gs_active%Z0_target
     END IF
     IF(gs_active%device%free)THEN
       IF(fit_FFPscale)THEN
         offset=offset+1
       ELSE IF(gs_active%Itor_target>0.d0)THEN
-        WRITE(*,'(2A,ES11.3)')oft_indent,'Itor_target       =',gs_active%Itor_target/mu0
+        WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Itor_target       =',gs_active%Itor_target/mu0
         offset=offset+1
       END IF
     ELSE
       IF(gs_active%Itor_target>0.d0)THEN
-        WRITE(*,'(2A,ES11.3)')oft_indent,'Itor_target       =',gs_active%Itor_target/mu0
+        WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Itor_target       =',gs_active%Itor_target/mu0
       ELSE
-        WRITE(*,'(2A,ES11.3)')oft_indent,'Psi_scale         =',gs_active%psiscale
+        WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Psi_scale         =',gs_active%psiscale
       END IF
       offset=offset+1
     END IF
     IF(gs_active%I%ndofs>0.AND.fit_I)THEN
       js = offset; je = offset+gs_active%I%ndofs
-      WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'F_cofs            ='
+      WRITE(oft_ounit,'(2A)',ADVANCE="NO")oft_indent,'F_cofs            ='
       DO i=js+1,je
-        WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)
+        WRITE(oft_ounit,'(ES11.3)',ADVANCE="NO")cofs(i)
       END DO
-      WRITE(*,*)
+      WRITE(oft_ounit,*)
       offset = je
     END IF
     IF(fit_Pscale.OR.fit_R0.OR.(gs_active%estore_target>0.d0))offset=offset+1
     IF(fit_Z0)offset=offset+1
     IF(gs_active%P%ndofs>0.AND.fit_P)THEN
       js = offset; je = offset+gs_active%P%ndofs
-      WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'P_cofs            ='
+      WRITE(oft_ounit,'(2A)',ADVANCE="NO")oft_indent,'P_cofs            ='
       DO i=js+1,je
-        WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)
+        WRITE(oft_ounit,'(ES11.3)',ADVANCE="NO")cofs(i)
       END DO
-      WRITE(*,*)
+      WRITE(oft_ounit,*)
       offset=je
     END IF
     IF(ncond_active>0)THEN
       js = offset; je = offset+ncond_active
-      WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'Cond weights      ='
+      WRITE(oft_ounit,'(2A)',ADVANCE="NO")oft_indent,'Cond weights      ='
       DO i=js+1,je
-        WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)
+        WRITE(oft_ounit,'(ES11.3)',ADVANCE="NO")cofs(i)
       END DO
-      WRITE(*,*)
+      WRITE(oft_ounit,*)
       offset=je
     END IF
     IF(fit_coils)THEN
       js = offset; je = offset+gs_active%device%ncoils
-      WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'Coil currents [%]  ='
+      WRITE(oft_ounit,'(2A)',ADVANCE="NO")oft_indent,'Coil currents [%]  ='
       DO i=js+1,je
-        WRITE(*,'(100ES11.3)',ADVANCE="NO")cofs(i)/curr_in(i-js)
+        WRITE(oft_ounit,'(100ES11.3)',ADVANCE="NO")cofs(i)/curr_in(i-js)
       END DO
-      WRITE(*,*)
+      WRITE(oft_ounit,*)
       offset = je
     END IF
     IF(fit_F0)THEN
       js = offset; je = offset+1
-      WRITE(*,'(2A,ES11.3)')oft_indent,'f_offset          =',cofs(js+1)
+      WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'f_offset          =',cofs(js+1)
       offset = je
     END IF
     IF(ierr==0)THEN
-      WRITE(*,'(2A,ES11.3)')oft_indent,'Maximum Rel Error =',MAXVAL(ABS(rel_err))
-      WRITE(*,'(2A,ES11.3)')oft_indent,'Maximum Abs Error =',MAXVAL(ABS(abs_err))
-      WRITE(*,'(2A,ES11.3)')oft_indent,'Total Weighted Error   =',SQRT(SUM(err**2))
-      WRITE(*,'(2A,ES11.3)')oft_indent,'RMS Weighted Error     =',SQRT(SUM(err**2)/REAL(m,4))
+      WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Maximum Rel Error =',MAXVAL(ABS(rel_err))
+      WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Maximum Abs Error =',MAXVAL(ABS(abs_err))
+      WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Total Weighted Error   =',SQRT(SUM(err**2))
+      WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'RMS Weighted Error     =',SQRT(SUM(err**2)/REAL(m,4))
     END IF
-    WRITE(*,*)
+    WRITE(oft_ounit,*)
   END IF
   CALL oft_decrease_indent
   IF(ANY(isnan(err)))THEN
-    WRITE(*,'(2A)')oft_indent,'Evaluation failed: NaN detected'
+    WRITE(oft_ounit,'(2A)')oft_indent,'Evaluation failed: NaN detected'
     err=1.d99
   END IF
 ELSE
   IF(oft_env%pm)THEN
     geval_count=geval_count+1
     IF(geval_count>0)THEN
-      WRITE(*,'(2A,I5)')oft_indent,'Gradient evaluation ',geval_count
+      WRITE(oft_ounit,'(2A,I5)')oft_indent,'Gradient evaluation ',geval_count
     END IF
   END IF
   CALL oft_increase_indent
@@ -922,12 +922,12 @@ ELSE
       ierr=gs_active%I%set_cofs(cof_tmp(1:je-js))
       cof_tmp(j)=cofs(js+j)
       IF(ierr<0)THEN
-        WRITE(*,'(2A)')oft_indent,'Invalid I coefficients'
+        WRITE(oft_ounit,'(2A)')oft_indent,'Invalid I coefficients'
         CALL oft_increase_indent
         DO i=js+1,je
-          WRITE(*,'(A,ES11.3)')oft_indent,cofs(i)
+          WRITE(oft_ounit,'(A,ES11.3)')oft_indent,cofs(i)
         END DO
-        WRITE(*,*)
+        WRITE(oft_ounit,*)
         CALL oft_decrease_indent
         DO i=1,m
           jac_mat(i,js+j)=conlist(i)%con%val*conlist(i)%con%wt
@@ -985,12 +985,12 @@ ELSE
       ierr=gs_active%P%set_cofs(cof_tmp(1:je-js))
       cof_tmp(j)=cofs(js+j)
       IF(ierr<0)THEN
-        WRITE(*,'(2A)')oft_indent,'Invalid P coefficients'
+        WRITE(oft_ounit,'(2A)')oft_indent,'Invalid P coefficients'
         CALL oft_increase_indent
         DO i=js+1,je
-          WRITE(*,'(A,ES11.3)')oft_indent,cofs(i)
+          WRITE(oft_ounit,'(A,ES11.3)')oft_indent,cofs(i)
         END DO
-        WRITE(*,*)
+        WRITE(oft_ounit,*)
         CALL oft_decrease_indent
         DO i=1,m
           jac_mat(i,js+j)=conlist(i)%con%val*conlist(i)%con%wt
@@ -1030,7 +1030,7 @@ ELSE
   IF(ANY(isnan(jac_mat)))THEN
     CALL oft_abort("Gradient failed: NaN detected", "fit_error_grad", __FILE__)
   END IF
-  WRITE(*,*)
+  WRITE(oft_ounit,*)
 END IF
 !---Centering
 CALL reset_eq
@@ -1214,7 +1214,7 @@ IF(ANY(ABS(nax_corr)>0.d0))THEN
     IF(cons(i)%con%ncomp==0)CYCLE
     k=k+1
     IF(ANY(ABS(nax_corr(:,k))>0.d0))THEN
-      IF(oft_debug_print(1))WRITE(*,'(2A,2I4)')oft_indent,'Non-ax correction: ',i,k
+      IF(oft_debug_print(1))WRITE(oft_ounit,'(2A,2I4)')oft_indent,'Non-ax correction: ',i,k
       ALLOCATE(cons(i)%con%nax_corr(gs_active%device%ncond_eigs))
       cons(i)%con%nax_corr=nax_corr(:,k)
     END IF
@@ -1424,7 +1424,7 @@ IF(self%cell==0)THEN
         ip=i
       END IF
     END DO
-    IF(oft_debug_print(1))WRITE(*,*)'Point projected',self%r,smesh%r(:,smesh%lbp(ip))
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)'Point projected',self%r,smesh%r(:,smesh%lbp(ip))
     self%r=smesh%r(:,smesh%lbp(ip))
     self%cell=0
     call bmesh_findcell(smesh,self%cell,self%r,self%f)
@@ -1495,7 +1495,7 @@ IF(self%cell==0)THEN
         ip=i
       END IF
     END DO
-    IF(oft_debug_print(1))WRITE(*,*)'Point projected',self%r,smesh%r(:,smesh%lbp(ip))
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)'Point projected',self%r,smesh%r(:,smesh%lbp(ip))
     self%r=smesh%r(:,smesh%lbp(ip))
     self%cell=0
     call bmesh_findcell(smesh,self%cell,self%r,self%f)
@@ -1684,7 +1684,7 @@ IF(self%cell==0)THEN
         ip=i
       END IF
     END DO
-    IF(oft_debug_print(1))WRITE(*,*)'Point projected',self%r,smesh%r(:,smesh%lbp(ip))
+    IF(oft_debug_print(1))WRITE(oft_ounit,*)'Point projected',self%r,smesh%r(:,smesh%lbp(ip))
     self%r=smesh%r(:,smesh%lbp(ip))
     self%cell=0
     call bmesh_findcell(smesh,self%cell,self%r,self%f)

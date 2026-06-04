@@ -352,9 +352,9 @@ do i=1,40
 enddo
 !---Catch failure to converge
 if(i>40)then
-  write(*,*)self%id,u,val(2)
-  write(*,*)pt
-  write(*,*)rt
+  WRITE(oft_ounit,*)self%id,u,val(2)
+  WRITE(oft_ounit,*)pt
+  WRITE(oft_ounit,*)rt
   call oft_abort('Did not converge','cad_curve_find',__FILE__)
 endif
 DEBUG_STACK_POP
@@ -421,7 +421,7 @@ CALL lmdif(cad_cmid_error,nerr,neq,uv,error, &
            nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 !---
 IF(info>4)THEN
-  !WRITE(*,*)'Curve midpoint failed',info,nfev
+  !WRITE(oft_ounit,*)'Curve midpoint failed',info,nfev
   ierr=-1
 ELSE
   ierr=0
@@ -588,9 +588,9 @@ do i=1,3000
 end do
 !---Catch failure to converge
 if(i>2000)then
-  write(*,*)pt
-  write(*,*)rt
-  write(*,*)u,v,val(2),alpha
+  WRITE(oft_ounit,*)pt
+  WRITE(oft_ounit,*)rt
+  WRITE(oft_ounit,*)u,v,val(2),alpha
   call oft_abort('Did note converge','cad_surf_find',__FILE__)
 end if
 DEBUG_STACK_POP
@@ -729,7 +729,7 @@ CALL lmdif(cad_smid_error,nerr,neq,uv,error, &
            nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 !---
 IF(info>4)THEN
-  !WRITE(*,*)'Surface midpoint failed',info,nfev
+  !WRITE(oft_ounit,*)'Surface midpoint failed',info,nfev
   ierr=-1
 ELSE
   ierr=0
@@ -829,7 +829,7 @@ CALL lmdif(cad_scenter_error,nerr,neq,uv,error, &
            nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 !---
 IF(info>4)THEN
-  !WRITE(*,*)'Surface center failed',info,nfev
+  !WRITE(oft_ounit,*)'Surface center failed',info,nfev
   ierr=-1
 ELSE
   ierr=0

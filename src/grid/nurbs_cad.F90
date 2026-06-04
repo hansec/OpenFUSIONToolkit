@@ -488,7 +488,7 @@ call lmdif(nurbs_cmid_error,nerr,neq,uv,error, &
 !---
 IF(SQRT(SUM(error**2))>err_in)uv=uv_in
 IF(info>4)THEN
-  !WRITE(*,*)'Curve midpoint failed',self%cid,info,nfev
+  !WRITE(oft_ounit,*)'Curve midpoint failed',self%cid,info,nfev
   ierr=-1
 ELSE
   ierr=0
@@ -699,8 +699,8 @@ IF(sing(1))THEN
   v=(1.d0-nurbs_singstep)*v+nurbs_singstep*(self%domain(2,2)+self%domain(1,2))/2.d0
 END IF
 call self%eval(rt,u,v)
-!write(*,*)0,u,v,dmin
-!write(*,*)rt
+!WRITE(oft_ounit,*)0,u,v,dmin
+!WRITE(oft_ounit,*)rt
 un=u
 vn=v
 !---
@@ -721,7 +721,7 @@ call lmdif(nurbs_surf_error,3,2,uv,error, &
          ftol,xtol,gtol,maxfev,epsfcn,diag,mode,factor,nprint,info, &
          nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 IF(info>4)THEN
-  !WRITE(*,*)'Surface midpoint failed',self%sid,info,nfev
+  !WRITE(oft_ounit,*)'Surface midpoint failed',self%sid,info,nfev
   ierr=-1
 ELSE
   ierr=0
@@ -806,12 +806,12 @@ call lmdif(nurbs_smid_error,nerr,neq,uv,error, &
 !---
 IF(SQRT(SUM(error**2))>err_in)uv=uv_in
 IF(info>4)THEN
-  !WRITE(*,*)'Surface midpoint failed',self%sid,info,nfev
+  !WRITE(oft_ounit,*)'Surface midpoint failed',self%sid,info,nfev
   ierr=-1
 ELSE
   ierr=0
 END IF
-!WRITE(*,*)'surf',info
+!WRITE(oft_ounit,*)'surf',info
 u=uv(1)
 v=uv(2)
 call self%eval(rt,u,v)
@@ -911,12 +911,12 @@ call lmdif(nurbs_scenter_error,nerr,neq,uv,error, &
            nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 !---
 IF(info>4)THEN
-  !WRITE(*,*)'Surface center point failed',self%sid,info,nfev
+  !WRITE(oft_ounit,*)'Surface center point failed',self%sid,info,nfev
   ierr=-1
 ELSE
   ierr=0
 END IF
-!WRITE(*,*)'surf',info
+!WRITE(oft_ounit,*)'surf',info
 u=uv(1)
 v=uv(2)
 call self%eval(pt,u,v)
@@ -1075,7 +1075,7 @@ if(self%periodic(1))then
   sep_lim=.5d0*ABS(self%domain(2,1)-self%domain(1,1))
   if(sep>sep_lim)u2=u2-self%domain(2,1)+self%domain(1,1)
   !if(u2<lbound.AND.sep>sep_lim)u1=u1-self%domain(2,1)+self%domain(1,1)
-  !WRITE(*,*)'unwrap u',sep,sep_lim
+  !WRITE(oft_ounit,*)'unwrap u',sep,sep_lim
 end if
 if(self%periodic(2))then
   ubound = (1.d0-per_buff)*self%domain(2,2)+per_buff*self%domain(1,2)
@@ -1084,7 +1084,7 @@ if(self%periodic(2))then
   sep_lim=.5d0*ABS(self%domain(2,2)-self%domain(1,2))
   if(sep>sep_lim)v2=v2-self%domain(2,2)+self%domain(1,2)
   !if(v2<lbound.AND.sep>sep_lim)v1=v1-self%domain(2,2)+self%domain(1,2)
-  !WRITE(*,*)'unwrap v',sep,sep_lim
+  !WRITE(oft_ounit,*)'unwrap v',sep,sep_lim
 end if
 DEBUG_STACK_POP
 end subroutine nurbs_surf_unwrap

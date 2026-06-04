@@ -740,7 +740,7 @@ type(gs_factory), pointer :: device
 device=>gseq%device
 !---
 IF(PRESENT(error_str))error_str=""
-WRITE(*,'(3A)')oft_indent,'Saving iFile: ',TRIM(filename)
+WRITE(oft_ounit,'(3A)')oft_indent,'Saving iFile: ',TRIM(filename)
 CALL oft_increase_indent
 do_pack=.FALSE.
 save_single=.FALSE.
@@ -782,11 +782,11 @@ END DO
 pt_last=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A)')oft_indent,'Axis Position:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Axis Position:'
   CALL oft_increase_indent
-  WRITE(*,'(2A,ES11.3)')oft_indent,'R    = ',raxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'R    = ',raxis
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
 !---Trace
@@ -940,10 +940,10 @@ END IF
 CLOSE(io_unit)
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A,2ES11.3)')oft_indent,'Psi  = ',x1,x2
-  WRITE(*,'(2A,F7.2)')oft_indent,'Qmin = ',MINVAL(cout(4,:))
-  WRITE(*,'(2A,F7.2)')oft_indent,'Qmax = ',MAXVAL(cout(4,:))
-  ! WRITE(*,'(2A)')oft_indent,'Done'
+  WRITE(oft_ounit,'(2A,2ES11.3)')oft_indent,'Psi  = ',x1,x2
+  WRITE(oft_ounit,'(2A,F7.2)')oft_indent,'Qmin = ',MINVAL(cout(4,:))
+  WRITE(oft_ounit,'(2A,F7.2)')oft_indent,'Qmax = ',MAXVAL(cout(4,:))
+  ! WRITE(oft_ounit,'(2A)')oft_indent,'Done'
 END IF
 CALL oft_decrease_indent
 !---
@@ -989,7 +989,7 @@ LOGICAL :: do_truncate
 !---
 device=>gseq%device
 IF(PRESENT(error_str))error_str=""
-WRITE(*,'(3A)')oft_indent,'Saving gEQDSK: ',TRIM(filename)
+WRITE(oft_ounit,'(3A)')oft_indent,'Saving gEQDSK: ',TRIM(filename)
 CALL oft_increase_indent
 !---
 ALLOCATE(fpol(nr),pres(nr),ffprim(nr),pprime(nr),qpsi(nr))
@@ -1032,11 +1032,11 @@ END DO
 pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A)')oft_indent,'Axis Position:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Axis Position:'
   CALL oft_increase_indent
-  WRITE(*,'(2A,ES11.3)')oft_indent,'R    = ',raxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'R    = ',raxis
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
 !---Trace
@@ -1226,7 +1226,7 @@ IF(TRIM(limiter_file)=='')THEN
   ! rlim=[rbounds(1),rbounds(1),rbounds(2),rbounds(2),rbounds(1)]
   ! zlim=[zbounds(1),zbounds(2),zbounds(2),zbounds(1),zbounds(1)]
 ELSE
-  WRITE(*,*)'  Limiter file: "',TRIM(limiter_file),'"'
+  WRITE(oft_ounit,*)'  Limiter file: "',TRIM(limiter_file),'"'
   OPEN(NEWUNIT=io_unit,FILE=TRIM(limiter_file))
   READ(io_unit,*)nlim
   ALLOCATE(rlim(nlim),zlim(nlim))
@@ -1238,7 +1238,7 @@ END IF
 ! COCOS transform
 IF(PRESENT(cocos))THEN
   IF(cocos == 2)THEN
-    WRITE(*,*) 'Using COCOS=2...'
+    WRITE(oft_ounit,*) 'Using COCOS=2...'
     ffprim = -ffprim
     pprime = -pprime
     psirz = -psirz
@@ -1273,9 +1273,9 @@ WRITE (io_unit,2020) (REAL([rlim(i),zlim(i)],4),i=1,nlim)
 CLOSE (io_unit)
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A,2ES11.3)')oft_indent,'Psi  = ',x1,x2
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Qmin = ',MINVAL(qpsi)
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Qmax = ',MAXVAL(qpsi)
+  WRITE(oft_ounit,'(2A,2ES11.3)')oft_indent,'Psi  = ',x1,x2
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Qmin = ',MINVAL(qpsi)
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Qmax = ',MAXVAL(qpsi)
 END IF
 CALL oft_decrease_indent
 !---
@@ -1375,11 +1375,11 @@ END DO
 pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
 !---
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A)')oft_indent,'Axis Position:'
+  WRITE(oft_ounit,'(2A)')oft_indent,'Axis Position:'
   CALL oft_increase_indent
-  WRITE(*,'(2A,ES11.3)')oft_indent,'R    = ',raxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'R    = ',raxis
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
+  WRITE(oft_ounit,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
 !---Trace
@@ -1425,7 +1425,7 @@ do j=1,nr
   pt_last=pt
   !---Skip point if trace fails
   if(active_tracer%status/=1)THEN
-    WRITE(*,*)j,pt
+    WRITE(oft_ounit,*)j,pt
     CALL oft_warn("sauter_fc: Trace did not complete")
     CYCLE
   end if

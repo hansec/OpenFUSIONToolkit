@@ -148,7 +148,7 @@ IF(oft_debug_print(1))CALL tw_sim%save_debug()
 !---Load drivers and sensors
 CALL tw_load_sensors('floops.loc',tw_sim,sensors)
 !---Compute inductances
-WRITE(*,*)
+WRITE(oft_ounit,*)
 IF(.NOT.plot_run)THEN
   IF(save_Mcoil)THEN
     CALL tw_compute_Ael2dr(tw_sim,'Mcoil.save')

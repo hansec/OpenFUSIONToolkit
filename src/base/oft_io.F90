@@ -398,7 +398,7 @@ real(r8), intent(in) :: t !< Time value
 integer(i4) :: i
 CHARACTER(LEN=200) :: hdf5_path
 DEBUG_STACK_PUSH
-if(oft_debug_print(1))write(*,'(2A,ES11.4)')oft_indent,'Creating plot time: ',t
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A,ES11.4)')oft_indent,'Creating plot time: ',t
 IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
   "xdmf_add_timestep",__FILE__)
 self%n_ts=self%n_ts+1
@@ -423,7 +423,7 @@ istart=1
 IF(PRESENT(clear_static))THEN
   IF(clear_static)istart=0
 END IF
-if(oft_debug_print(1))write(*,'(2A,I6,A)')oft_indent,'Clearing ',self%n_ts+(1-istart),' existing timesteps'
+if(oft_debug_print(1))WRITE(oft_ounit,'(2A,I6,A)')oft_indent,'Clearing ',self%n_ts+(1-istart),' existing timesteps'
 IF(.NOT.oft_file_exist(TRIM(self%file_path)))CALL oft_abort("File does not exist", &
   "xdmf_clear_timesteps",__FILE__)
 DO i=istart,self%n_ts
@@ -439,7 +439,7 @@ IF(istart==0)THEN
 END IF
 if(oft_debug_print(2))THEN
   file_sizes = hdf5_file_size(TRIM(self%file_path))
-  write(*,'(2A,ES14.6,A,ES14.6,A)')oft_indent,'Freed ',REAL(file_sizes(2),8)/1.d6,' of ',REAL(file_sizes(1),8)/1.d6,' [MB]'
+  WRITE(oft_ounit,'(2A,ES14.6,A,ES14.6,A)')oft_indent,'Freed ',REAL(file_sizes(2),8)/1.d6,' of ',REAL(file_sizes(1),8)/1.d6,' [MB]'
 end if
 DEBUG_STACK_POP
 end subroutine xdmf_clear_timesteps
@@ -659,7 +659,7 @@ integer(HSIZE_T) :: zero = 0
 logical :: track_free
 DEBUG_STACK_PUSH
 !---Get processor rank for file creation
-IF(oft_debug_print(1))WRITE(*,'(3A)')oft_indent,'Creating HDF5 output file: ',TRIM(filename)
+IF(oft_debug_print(1))WRITE(oft_ounit,'(3A)')oft_indent,'Creating HDF5 output file: ',TRIM(filename)
 !---Initialize HDF5 system
 call h5open_f(error)
 !---Create HDF5 file
@@ -1083,7 +1083,7 @@ integer(HID_T) :: plist_id
 integer(i4) :: j
 #endif
 DEBUG_STACK_PUSH
-if(oft_debug_print(2))write(*,'(3A)')oft_indent,'Writing FE vector to file: ',TRIM(filename)
+if(oft_debug_print(2))WRITE(oft_ounit,'(3A)')oft_indent,'Writing FE vector to file: ',TRIM(filename)
 !---Remove field if it already exists
 IF(oft_env%head_proc)THEN
   IF(hdf5_field_exist(filename,path))THEN
@@ -1498,7 +1498,7 @@ END IF
 CALL oft_mpi_barrier(error)
 !---Set access flag
 access_flag=H5F_ACC_RDONLY_F
-if(oft_debug_print(2))write(*,'(2X,2A)')'Reading field from restart file: ',TRIM(filename)
+if(oft_debug_print(2))WRITE(oft_ounit,'(2X,2A)')'Reading field from restart file: ',TRIM(filename)
 !---Wait up to 30 seconds for file to be available
 DO i=1,31
   IF(oft_file_exist(filename))EXIT

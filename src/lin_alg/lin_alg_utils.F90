@@ -135,11 +135,11 @@ CALL condense_stitch(stitch_info,vec%map,vec%stitch_info)
 SELECT TYPE(this=>vec)
   TYPE is(oft_native_vector)
     CALL setup_native_vec(this)
-    IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Native real vector created'
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'Native real vector created'
 #ifdef HAVE_PETSC
   TYPE IS(oft_petsc_vector)
     CALL setup_petsc_vec(this)
-    IF(oft_debug_print(2))WRITE(*,'(2X,A)')'PETSc real vector created'
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'PETSc real vector created'
 #endif
   CLASS DEFAULT
     CALL oft_abort('Error in vector allocation.','create_vector_real',__FILE__)
@@ -267,7 +267,7 @@ CALL condense_stitch(stitch_info,vec%map,vec%stitch_info)
 SELECT TYPE(this=>vec)
   TYPE is(oft_native_cvector)
     CALL setup_native_vec(this)
-    IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Native complex vector created'
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'Native complex vector created'
   CLASS DEFAULT
     CALL oft_abort('Error in vector allocation.','create_vector_comp',__FILE__)
 END SELECT
@@ -300,7 +300,7 @@ TYPE(oft_seam), INTENT(inout) :: stitcher !< Resulting seam structure for full v
 INTEGER(i4) :: i,j,k,m,nblocks,offset1,offset2
 DEBUG_STACK_PUSH
 !---
-IF(oft_debug_print(3))WRITE(*,'(4X,A)')'Condensing seam structures'
+IF(oft_debug_print(3))WRITE(oft_ounit,'(4X,A)')'Condensing seam structures'
 nblocks=SIZE(stitch_info)
 !---
 stitcher%nproc_con=stitch_info(1)%s%nproc_con
@@ -477,11 +477,11 @@ mat%ncslice=soffset
 SELECT TYPE(this=>mat)
   TYPE is(oft_native_matrix)
     CALL setup_native(this)
-    IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Native real CRS matrix created'
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'Native real CRS matrix created'
 #ifdef HAVE_PETSC
   TYPE is(oft_petsc_matrix)
     CALL setup_petsc(this)
-    IF(oft_debug_print(2))WRITE(*,'(2X,A)')'PETSc real matrix created'
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'PETSc real matrix created'
 #endif
   CLASS DEFAULT
     CALL oft_abort('Error in matrix allocation.','create_matrix_real',__FILE__)
@@ -654,7 +654,7 @@ END DO
 SELECT TYPE(this=>mat)
   TYPE is(oft_native_cmatrix)
     CALL setup_native(this)
-    IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Native complex CRS matrix created'
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'Native complex CRS matrix created'
   CLASS DEFAULT
     CALL oft_abort('Error in matrix allocation.','create_matrix_real',__FILE__)
 END SELECT
@@ -746,7 +746,7 @@ INTEGER(i4) :: offset1,offset2
 INTEGER(i4), ALLOCATABLE :: krtmp(:)
 DEBUG_STACK_PUSH
 !---
-IF(oft_debug_print(3))WRITE(*,'(4X,A)')'Condensing matrix graphs'
+IF(oft_debug_print(3))WRITE(oft_ounit,'(4X,A)')'Condensing matrix graphs'
 ni=SIZE(ingraphs,DIM=1)
 nj=SIZE(ingraphs,DIM=2)
 !---Condense stitching info
@@ -978,11 +978,11 @@ DEBUG_STACK_PUSH
 SELECT TYPE(this=>mat)
   TYPE is(oft_native_matrix)
     CALL combine_native(this)
-    IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Native real CRS matrices combined'
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'Native real CRS matrices combined'
 #ifdef HAVE_PETSC
   TYPE IS(oft_petsc_matrix)
     CALL combine_petsc(this)
-    IF(oft_debug_print(2))WRITE(*,'(2X,A)')'PETSc real matrices combined'
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'PETSc real matrices combined'
 #endif
   CLASS DEFAULT
     CALL oft_abort('Error in matrix allocation.','combine_matrices_real',__FILE__)
@@ -1119,7 +1119,7 @@ DO i=1,nr
           DO jj=1,ncols
             DO WHILE(cols(jj)>=offsets(j,proc+1))
               proc=proc+1
-              IF(proc>oft_env%nprocs)WRITE(*,*)proc,cols(jj),offsets(j,proc)
+              IF(proc>oft_env%nprocs)WRITE(oft_ounit,*)proc,cols(jj),offsets(j,proc)
             END DO
             coltmp(jj)=cols(jj)-offsets(j,proc)+goffsets(j,proc)
           END DO
@@ -1153,7 +1153,7 @@ DEBUG_STACK_PUSH
 SELECT TYPE(this=>mat)
   TYPE is(oft_native_cmatrix)
     CALL combine_native(this)
-    IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Native complex CRS matrices combined'
+    IF(oft_debug_print(2))WRITE(oft_ounit,'(2X,A)')'Native complex CRS matrices combined'
   CLASS DEFAULT
     CALL oft_abort('Error in matrix allocation.','combine_matrices_comp',__FILE__)
 END SELECT
