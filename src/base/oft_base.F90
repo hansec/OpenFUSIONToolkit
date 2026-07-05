@@ -25,7 +25,7 @@ USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit
 USE omp_lib
 USE oft_local
 USE oft_xml, ONLY: xml_doc,xml_node,xml_nodelist,xml_parsefile,xml_get_element,xml_hasAttribute, &
-  xml_read_content,xml_read_attribute
+  xml_read_content,xml_read_attribute,xml_print_exceptions,xml_clear_exceptions
 USE oft_sort, ONLY: sort_array
 #ifdef HAVE_PETSC
 USE petscsys
@@ -188,8 +188,9 @@ CONTAINS
 !!
 !! Also calls MPI_INIT
 !------------------------------------------------------------------------------
-SUBROUTINE oft_init(nthreads)
+SUBROUTINE oft_init(nthreads,quiet)
 INTEGER(i4), INTENT(in), OPTIONAL :: nthreads !< Number for threads to use (negative for default)
+LOGICAL, INTENT(in), OPTIONAL :: quiet !< If `True`, do not print OFT environment information on initialization
 INTEGER(i4) :: ierr,thrdtype,nargs,io_unit
 REAL(r8) :: elapsed_time
 INTEGER(i4) :: ppn=1
@@ -199,7 +200,7 @@ INTEGER(i4) :: omp_nthreads=-1
 LOGICAL :: test_run,from_api
 CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
-LOGICAL :: rst
+LOGICAL :: rst,print_header
 NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,test_run,nparts
 !---Initialize MPI
 #ifdef HAVE_MPI
@@ -311,11 +312,19 @@ ELSE
 END IF
 #endif
 !---Print runtime information
-IF(oft_env%rank==0)THEN
-  WRITE(*,'(A)')    '#----------------------------------------------'
-  WRITE(*,'(A)')    'Open FUSION Toolkit Initialized'
+print_header=(oft_env%rank==0)
+IF(PRESENT(quiet))print_header=print_header.AND.(.NOT.quiet)
+IF(print_header)THEN
+  WRITE(*,'(A)')'#----------------------------------------------'
+  WRITE(*,'(10X,A)')'   ____  ____________'
+  WRITE(*,'(10X,A)')'  / __ \/ ____/_  __/'
+  WRITE(*,'(10X,A)')' / / / / /_    / /'
+  WRITE(*,'(10X,A)')'/ /_/ / __/   / /'
+  WRITE(*,'(10X,A)')'\____/_/     /_/'
+  WRITE(*,*)
   CALL oft_print_git()
-  WRITE(*,'(2A)')   'Parallelization Info:'
+  WRITE(*,*)
+  WRITE(*,'(A)')   'Parallelization Info:'
 #ifdef HAVE_MPI
   WRITE(*,'(A,I4)') '  # of MPI tasks      = ',oft_env%nprocs
   WRITE(*,'(A,I4)') '  # of NUMA nodes     = ',oft_env%nnodes
@@ -328,17 +337,22 @@ IF(oft_env%rank==0)THEN
   WRITE(*,'(A)')    '  Not compiled with OpenMP'
 #endif
 IF(.NOT.from_api)THEN
-  WRITE(*,'(2A)')   'Fortran input file    = ',TRIM(oft_env%ifile)
-  WRITE(*,'(2A)')   'XML input file        = ',TRIM(oft_env%xml_file)
+  WRITE(*,*)
+  WRITE(*,'(2A)')   'Fortran input file     = ',TRIM(oft_env%ifile)
+  WRITE(*,'(2A)')   'XML input file         = ',TRIM(oft_env%xml_file)
 END IF
-  WRITE(*,'(A,3I4)')'Integer Precisions    = ',i4,i8
-  WRITE(*,'(A,3I4)')'Float Precisions      = ',r4,r8,r10
-  WRITE(*,'(A,3I4)')'Complex Precisions    = ',c4,c8
+  ! WRITE(*,*)
+  ! WRITE(*,'(A)')    'Data Type Sizes:'
+  ! WRITE(*,'(A,3I4)')'  Integer:  ',i4,i8
+  ! WRITE(*,'(A,3I4)')'  Float:    ',r4,r8,r10
+  ! WRITE(*,'(A,3I4)')'  Complex:  ',c4,c8
+  WRITE(*,*)
 IF(use_petsc)THEN
-  WRITE(*,'(A)')    'LA backend            = PETSc'
+  WRITE(*,'(A)')    'Linear Algebra backend: PETSc'
 ELSE
-  WRITE(*,'(A)')    'LA backend            = native'
+  WRITE(*,'(A)')    'Linear Algebra backend: native'
 END IF
+  WRITE(*,*)
   WRITE(*,'(A)')    '#----------------------------------------------'
   WRITE(*,*)
 END IF
@@ -392,7 +406,7 @@ CALL MPI_FINALIZE(ierr)
 STOP
 END SUBROUTINE oft_finalize
 !------------------------------------------------------------------------------
-!> Graceful abort for Open FUSION Toolkit
+!> "Graceful" abort for Open FUSION Toolkit
 !!
 !! Also calls MPI_ABORT/STOP
 !------------------------------------------------------------------------------
@@ -441,7 +455,19 @@ ERROR STOP errcode
 #endif
 END SUBROUTINE oft_abort
 !------------------------------------------------------------------------------
-!> Graceful warning printing for Open FUSION Toolkit
+!> "Graceful" abort for Open FUSION Toolkit with XML exception printing
+!!
+!! Calls @ref oft_xml::xml_print_exceptions and then @ref oft_base::oft_abort
+!------------------------------------------------------------------------------
+SUBROUTINE oft_xml_abort(error_str,sname,fname)
+CHARACTER(LEN=*), INTENT(in) :: error_str !< Error string
+CHARACTER(LEN=*), INTENT(in) :: sname !< Source subroutine name
+CHARACTER(LEN=*), INTENT(in) :: fname !< Source file name
+CALL xml_print_exceptions()
+CALL oft_abort(error_str,sname,fname)
+END SUBROUTINE oft_xml_abort
+!------------------------------------------------------------------------------
+!> Standardized warning printing for Open FUSION Toolkit
 !------------------------------------------------------------------------------
 SUBROUTINE oft_warn(error_str)
 CHARACTER(LEN=*) :: error_str
@@ -535,7 +561,7 @@ TYPE(mpi_request), INTENT(inout) :: req(n) !< Array of requests
 #else
 INTEGER(i4), INTENT(inout) :: req(n) !< Array of requests
 #endif
-INTEGER(i4), INTENT(out) :: j !< Next completed request 
+INTEGER(i4), INTENT(out) :: j !< Next completed request
 INTEGER(i4), INTENT(out) :: ierr !< Error flag
 INTEGER(i8) :: timein
 #ifdef HAVE_MPI
