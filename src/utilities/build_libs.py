@@ -333,8 +333,6 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     config_dict['CC_VENDOR'] = cc_vendor
     config_dict['CC_VERSION'] = cc_version
     if cc_vendor == 'gnu':
-        if int(config_dict['CC_VERSION'].split(".")[0]) > 9:
-            config_dict['BASE_FFLAGS'] = "-fallow-argument-mismatch"
         config_dict['OMP_FLAGS'] = "-fopenmp"
         config_dict['DEBUG_FLAGS'] = "-g"
         config_dict['CHK_FLAGS'] = "-O0 -fcheck=all"
