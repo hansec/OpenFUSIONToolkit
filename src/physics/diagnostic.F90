@@ -543,7 +543,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(mesh,field,quad) reduction(+:energy)
 do i=1,mesh%nc
   !---Loop over quadrature points
   do m=1,quad%np

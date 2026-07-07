@@ -20,6 +20,8 @@ import http.client
 import urllib.request
 from urllib.error import URLError
 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
 
 def error_exit(error_str, extra_info=None, exception=None):
     # Exit build script with error
@@ -497,7 +499,7 @@ end program test_program
             else:
                 error_exit("Unable to compile Fortran test program",
                            ["===Compile output===", compile_res, "===Run output===", run_res])
-    cmake_lines += [os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))]
+    cmake_lines += [os.path.abspath(os.path.join(script_dir, os.pardir))]
     cmake_lines_str = ' \\\n  '.join(cmake_lines)
     if len(env_lines) > 0:
         env_lines_str = '# Environment modifications\n' + '\n'.join(env_lines) + '\n\n'
@@ -615,6 +617,7 @@ class package:
                     return config_dict
             else:
                 print("  Ignoring existing installation due to hash mismatch")
+                shutil.rmtree(install_dir_abspath)
         print("  Executing build (this may take a few minutes)")
         build_start = time.time()
         self.run_build(self.config_dict)
@@ -654,14 +657,14 @@ class package:
                 break
         else:
             print("  Using existing file: {0}".format(self.file))
-        for args in self.extra_fetch + self.patch_files:
+        for args in self.extra_fetch:
             url = args[0]
             if len(args) == 1:
                 tmp_file = url.split("/")[-1]
             elif len(args) == 2:
                 tmp_file = args[1]
             else:
-                error_exit('Invalid "extra_fetch" or "patch_file" object!')
+                error_exit('Invalid "extra_fetch" object!')
             if (not os.path.isfile(tmp_file)) or force:
                 for i in range(nretry+1):
                     try:
@@ -684,21 +687,18 @@ class package:
         extract_archive(self.file)
         # Apply patches
         for patch in self.patch_files:
-            if len(patch) == 1:
-                tmp_file = patch[0].split("/")[-1]
-            elif len(patch) == 2:
-                tmp_file = patch[1]
+            patch_name = os.path.basename(patch)
             os.chdir(self.build_dir)
-            result, errcode = run_command("patch -N -p0 < {0}".format(os.path.join("..", tmp_file)))
+            result, errcode = run_command("patch -N -p0 < {0}".format(patch))
             os.chdir("..")
             if errcode == 0:
-                print('  Applied patch "{0}"'.format(tmp_file))
+                print('  Applied patch "{0}"'.format(patch_name))
             else:
                 shutil.rmtree(self.build_dir)
-                with open("{0}.log".format(tmp_file), "w+") as fid:
+                with open("{0}.log".format(patch_name), "w+") as fid:
                     fid.write(result)
-                error_exit('Failed to apply patch "{0}"'.format(tmp_file),
-                           ('See "{0}.log" for more information'.format(os.path.join(self.root_build_path, tmp_file)),))
+                error_exit('Failed to apply patch "{0}"'.format(patch_name),
+                           ('See "{0}.log" for more information'.format(os.path.join(self.root_build_path, patch_name)),))
 
     def setup_root_struct(self, lib_path="lib", inc_path="include", bin_path="bin"):
         # Setup default directory structure
@@ -1069,6 +1069,7 @@ class HDF5(package):
         self.cmake_build = cmake_build
         self.build_hl = build_hl
         self.shared_libs = shared_libs
+        self.patch_files = ['{0}/build_libs_patches/hdf5_llvm_flang_macos.patch'.format(script_dir)]
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
