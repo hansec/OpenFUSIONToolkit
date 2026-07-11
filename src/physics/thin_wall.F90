@@ -2335,7 +2335,7 @@ DO k=1,10
   END DO
   IF(all_oriented)EXIT
 END DO
-IF(.NOT.all_oriented)CALL oft_abort("Error orienting cells","",__FILE__)
+IF(.NOT.all_oriented)CALL oft_abort("Error orienting cells on hole","tw_setup_hole",__FILE__)
 !---Save orientations
 ALLOCATE(hmesh%kpc(hmesh%n+1))
 hmesh%kpc=0
