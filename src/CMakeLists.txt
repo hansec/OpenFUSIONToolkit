@@ -197,13 +197,18 @@ elseif("${CMAKE_Fortran_COMPILER_ID}" MATCHES "LLVMFlang")
   set( CMAKE_Fortran_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}" )
   set( CMAKE_Fortran_FLAGS "${CMAKE_C_FLAGS_DEBUG}" )
   #
+  execute_process(
+    COMMAND llvm-config --libdir
+    OUTPUT_VARIABLE FLANG_LIB_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
   if( APPLE )
+    list(APPEND CMAKE_BUILD_RPATH "${FLANG_LIB_DIR}" "/usr/lib")
+  else()
     execute_process(
-      COMMAND llvm-config --libdir
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-      OUTPUT_VARIABLE FLANG_LIB_DIR
+      COMMAND flang -print-target-triple
+      OUTPUT_VARIABLE FLANG_TARGET_TRIPLE
       OUTPUT_STRIP_TRAILING_WHITESPACE)
-      list(APPEND CMAKE_BUILD_RPATH "${FLANG_LIB_DIR}" "/usr/lib")
+    list(APPEND CMAKE_BUILD_RPATH "${FLANG_LIB_DIR}/${FLANG_TARGET_TRIPLE}")
   endif()
 endif()
 # Internal profiling
