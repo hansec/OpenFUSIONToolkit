@@ -419,6 +419,9 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DCMAKE_CXX_COMPILER:FILEPATH={CXX}",
         "-DCMAKE_Fortran_COMPILER:FILEPATH={FC}"
     ]
+    if tmp_dict['OS_TYPE'] == 'Darwin' and tmp_dict['CC_VENDOR'] == 'llvm':
+        LLVM_fix_path = os.path.abspath(os.path.join(script_dir, os.pardir))
+        cmake_lines.append('-DCMAKE_USER_MAKE_RULES_OVERRIDE:PATH={0}'.format(os.path.join(LLVM_fix_path,"cmake","Apple-LLVMFlang-Fortran.cmake")))
     if 'MACOS_SDK_PATH' in tmp_dict:
         env_lines.append('export SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
         cmake_lines.append('-DCMAKE_OSX_SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
@@ -1069,7 +1072,6 @@ class HDF5(package):
         self.cmake_build = cmake_build
         self.build_hl = build_hl
         self.shared_libs = shared_libs
-        self.patch_files = ['{0}/build_libs_patches/hdf5_llvm_flang_macos.patch'.format(script_dir)]
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()
@@ -1113,6 +1115,9 @@ class HDF5(package):
                     '-DBUILD_SHARED_LIBS:BOOL=ON',
                     '-DBUILD_STATIC_LIBS:BOOL=OFF'
                 ]
+                if self.config_dict['OS_TYPE'] == 'Darwin' and self.config_dict['CC_VENDOR'] == 'llvm':
+                    LLVM_fix_path = os.path.abspath(os.path.join(script_dir, os.pardir))
+                    cmake_options.append('-DCMAKE_USER_MAKE_RULES_OVERRIDE:PATH={0}'.format(os.path.join(LLVM_fix_path,"cmake","Apple-LLVMFlang-Fortran.cmake")))
             else:
                 cmake_options += [
                     '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
