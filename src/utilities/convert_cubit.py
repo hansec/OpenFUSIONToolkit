@@ -112,6 +112,11 @@ def read_mesh(filename, ignore_attrs):
             node_sets.append(np.asarray(variable))
         elif varname.startswith('elem_ss'):
             side_sets.append(np.asarray(variable))
+    # Read block names if present
+    if 'eb_names' in ncdf_file.variables:
+        block_names = ["".join(block_name.compressed().astype(str)) for block_name in ncdf_file.variables['eb_names']]
+    else:
+        block_names = None
     # Remove lower level geometry
     keep_inds = []
     reg = []
@@ -125,6 +130,7 @@ def read_mesh(filename, ignore_attrs):
     lc = [lc[i] for i in keep_inds]
     block_types = [block_types[i] for i in keep_inds]
     block_attrs = [block_attrs[i] for i in keep_inds]
+    block_names = [block_names[i] for i in keep_inds] if block_names is not None else None
     lc = np.vstack(lc)
     reg = np.hstack(reg)
     mesh_order = 1
@@ -195,7 +201,10 @@ def read_mesh(filename, ignore_attrs):
                     raise ValueError("Attributes specified for only some blocks.")
             elif nattrs != block_attr.shape[0]:
                 raise ValueError("Attribute size must be the same on all blocks.")
-        block_attrs = [block_attr for block_attr in np.array(block_attrs).transpose()]
+        if nattrs > 0:
+            block_attrs = [block_attr for block_attr in np.array(block_attrs).transpose()]
+        else:
+            block_attrs = []
     #
     print("  Mesh type: {0}".format(mesh_type))
     print("  Dimension: {0}D".format(r_new.shape[1]))
@@ -214,15 +223,16 @@ def read_mesh(filename, ignore_attrs):
 Note: {0} points were not referenced by cells.
 This may be normal or could indicate an error""".format(np_total-np_orig))
     #
-    return r_new, lc_new, reg, node_sets, side_sets, ho_info, block_attrs
+    return mesh_type, r_new, lc_new, reg, node_sets, side_sets, ho_info, block_attrs, block_names
 
-def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, block_attrs=None, periodic_info=None):
+def write_file(filename, mesh_type, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, block_attrs=None, block_names=None, periodic_info=None):
     print()
     print("Saving mesh: {0}".format(filename))
     with h5py.File(filename, 'w') as h5_file:
         # Write out basic mesh information
         h5_file.create_dataset('mesh/R', data=r, dtype='f8')
-        h5_file.create_dataset('mesh/LC', data=lc, dtype='i4')
+        dset = h5_file.create_dataset('mesh/LC', data=lc, dtype='i4')
+        dset.attrs["TYPE"] = mesh_type.split('_')[0].encode('ascii')
         h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
         # Write out high-order mesh information (nodes and indexing information)
         if ho_info is not None:
@@ -230,6 +240,10 @@ def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, b
             h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
             if ho_info[2] is not None:
                 h5_file.create_dataset('mesh/ho_info/LF', data=ho_info[2], dtype='i4')
+        # Write block names
+        if block_names is not None:
+            max_len = max(map(len, block_names))
+            h5_file.create_dataset('mesh/reg_attr/BLOCK_NAMES', data=np.array(block_names, dtype=f"S{max_len}"))
         # Write block attributes
         if len(block_attrs) > 0:
             h5_file.create_dataset('mesh/reg_attr/NUM_ATTR', data=[len(block_attrs),], dtype='i4')
@@ -253,21 +267,24 @@ def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, b
 parser = argparse.ArgumentParser()
 parser.description = "Pre-processing script for mesh files"
 parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
-parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
-parser.add_argument("--periodic_nodeset", type=int, default=None, help="Index of perioidic nodeset")
+parser.add_argument("--out_file", type=str, default=None, help="Output mesh file")
+parser.add_argument("--periodic_nodeset", type=int, default=None, help="Index of periodic nodeset")
 parser.add_argument("--ignore_attr", default=False, action="store_true", help="Ignore block attributes")
+# Handle command line arguments
 options = parser.parse_args()
-
 out_file = options.out_file
 if out_file is None:
     out_file = os.path.splitext(options.in_file)[0] + ".h5"
 
-r, lc, reg, node_sets, side_sets, ho_info, block_attrs = read_mesh(options.in_file, options.ignore_attr)
+# Read input Exodus file
+mesh_type, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, block_names = read_mesh(options.in_file, options.ignore_attr)
 
+# Map periodicity information
 periodic_info = None
 if options.periodic_nodeset is not None:
     if options.periodic_nodeset > len(node_sets):
         raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(options.periodic_nodeset, len(node_sets)))
     periodic_info = node_sets.pop(options.periodic_nodeset-1)
 
-write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, periodic_info)
+# Write output file
+write_file(out_file, mesh_type, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, block_names, periodic_info)
