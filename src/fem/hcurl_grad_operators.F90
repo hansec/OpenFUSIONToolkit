@@ -962,7 +962,7 @@ subroutine hcurl_grad_getmop(hcurl_grad_rep,mat,bc)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_flag
 integer(i4), allocatable :: j_curl(:),j_grad(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable, dimension(:,:) :: rop_curl,rop_grad
@@ -988,6 +988,14 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---
+bc_flag=0
+SELECT CASE(TRIM(bc))
+  CASE("none")
+    bc_flag=1
+  CASE("zerob")
+    bc_flag=2
+END SELECT
 !------------------------------------------------------------------------------
 ! Operator integration
 !------------------------------------------------------------------------------
@@ -1032,11 +1040,11 @@ do i=1,hgrad_rep%mesh%nc
   call hgrad_rep%ncdofs(i,j_grad)
   mop21=TRANSPOSE(mop12)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("none")
+  SELECT CASE(bc_flag)
+    CASE(1)
       mop21(1:hgrad_rep%mesh%cell_np,:)=0.d0
       mop22(1:hgrad_rep%mesh%cell_np,:)=0.d0
-    CASE("zerob")
+    CASE(2)
       DO jr=1,hcurl_rep%nce
         IF(hcurl_rep%global%gbe(j_curl(jr)))THEN
           mop11(jr,:)=0.d0
@@ -1064,8 +1072,8 @@ deallocate(mop11,mop12,mop21,mop22)
 !$omp end parallel
 ALLOCATE(mop11(1,1),j_curl(1))
 !---Set diagonal entries for dirichlet rows
-SELECT CASE(TRIM(bc))
-  CASE("none")
+SELECT CASE(bc_flag)
+  CASE(1)
     mop11(1,1)=1.d0
     DO i=1,hgrad_rep%mesh%np
       IF(hgrad_rep%mesh%bp(i))CYCLE
@@ -1079,7 +1087,7 @@ SELECT CASE(TRIM(bc))
       j_curl=jr
       call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
     END DO
-  CASE("zerob")
+  CASE(2)
     mop11(1,1)=1.d0
     DO i=1,hcurl_rep%nbe
       jr=hcurl_rep%lbe(i)

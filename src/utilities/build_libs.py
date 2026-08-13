@@ -293,7 +293,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     result, errcode = run_command("{FC} --version".format(**config_dict))
     if errcode != 0:
         error_exit("FORTRAN compiler does not appear to work!")
-    line = result.split("\n")[0]
+    line = result.strip().split("\n")[0]
     fc_vendor = 'unknown'
     if line.find('GNU') >= 0:
         fc_vendor = 'gnu'
@@ -304,6 +304,8 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
         if line.find('ifx') >= 0:
             if ver_lt(config_dict.get('CMAKE_VERSION','0.0'),"3.20"):
                 error_exit('CMAKE >= 3.20 required for Intel "ifx" Fortran compiler', ('Update or retry with "--build_cmake=1" to build a compatible version',))
+    elif line.find('nvfortran') >= 0:
+        fc_vendor = 'nvidia'
     # Check C++ compiler
     result, errcode = run_command("{CXX} --version".format(**config_dict))
     if errcode != 0:
@@ -317,7 +319,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     elif result.find('oneAPI DPC++/C++') >= 0:
         if ver_lt(config_dict.get('CMAKE_VERSION','0.0'),"3.20"):
             error_exit('CMAKE >= 3.20 required for Intel "icx" C/C++ compiler', ('Update or retry with "--build_cmake=1" to build a compatible version',))
-    line = result.split("\n")[0]
+    line = result.strip().split("\n")[0]
     cc_vendor = 'unknown'
     cc_version = 'unknown'
     if line.find('gcc') >= 0:
@@ -331,6 +333,8 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
         cc_vendor = 'llvm'
     elif (line.find('icc') >= 0) or (line.find('oneAPI') >= 0):
         cc_vendor = 'intel'
+    elif line.find('nvc') >= 0:
+        cc_vendor = 'nvidia'
     # Make sure we are using compaitble C and Fortran compilers
     if cc_vendor != fc_vendor:
         error_exit("C and FORTRAN compilers appear to be from different vendors!",
@@ -374,7 +378,11 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     else:
         match_archs = [config_dict['TARGET_ARCH'],]
     for compiler_key in ('CC', 'CXX', 'FC'):
-        target_arch = detect_compiler_target(config_dict[compiler_key])
+        if config_dict['CC_VENDOR'] == 'nvidia':
+            print('WARNING: Unable to detect default target architecture for NVIDIA compilers, skipping check')
+            break
+        else:
+            target_arch = detect_compiler_target(config_dict[compiler_key])
         if target_arch not in match_archs:
             error_exit('Detected compiler "{0}" target "{1}" does not match target architecture "{2}"'.format(config_dict[compiler_key], target_arch, ', '.join(match_archs)),
                        ["If cross-compiling, specify target architecture with --cross_compile_arch (e.g. --cross_compile_arch=arm64)"])
@@ -1450,7 +1458,7 @@ int main(int argc, char** argv) {
             'export CC={CC}',
             'export FC={FC}',
             'make clean',
-            'make {0}'.format(' '.join(oblas_options + make_thread)),
+            'make {0} shared'.format(' '.join(oblas_options + make_thread)),
             'make {0} install'.format(' '.join(oblas_options + ['NO_PARALLEL_MAKE=1', 'PREFIX={OpenBLAS_ROOT}']))
         ]
         self.setup_build_script(build_lines, tmp_dict)
