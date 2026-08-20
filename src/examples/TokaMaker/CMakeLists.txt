@@ -1,22 +1,26 @@
-install(DIRECTORY fixed_boundary DESTINATION examples/TokaMaker COMPONENT examples)
-install(DIRECTORY HBT DESTINATION examples/TokaMaker COMPONENT examples)
-install(DIRECTORY ITER DESTINATION examples/TokaMaker COMPONENT examples)
-install(DIRECTORY DIIID DESTINATION examples/TokaMaker COMPONENT examples)
-install(DIRECTORY CUTE DESTINATION examples/TokaMaker COMPONENT examples)
-install(DIRECTORY LTX DESTINATION examples/TokaMaker COMPONENT examples)
-install(DIRECTORY MANTA DESTINATION examples/TokaMaker COMPONENT examples)
-install(DIRECTORY Dipole DESTINATION examples/TokaMaker COMPONENT examples)
-install(DIRECTORY AdvancedWorkflows DESTINATION examples/TokaMaker COMPONENT examples)
+set( TMAKER_EQ_DIRS
+  fixed_boundary
+  ARC
+  CUTE
+  DIIID
+  Dipole
+  HBT
+  ITER
+  JET
+  LTX
+  MANTA
+  SPARC
+  AdvancedWorkflows
+)
+
+foreach( path ${TMAKER_EQ_DIRS} )
+  install(DIRECTORY ${path} DESTINATION examples/TokaMaker COMPONENT examples)
+  if( OFT_BUILD_TESTS )
+    file(COPY ${path} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+  endif()
+endforeach()
 
 if( OFT_BUILD_TESTS )
-  file(COPY fixed_boundary DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-  file(COPY HBT DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-  file(COPY ITER DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-  file(COPY DIIID DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-  file(COPY CUTE DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-  file(COPY LTX DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-  file(COPY Dipole DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-  file(COPY AdvancedWorkflows DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
   # Create test driver
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/test_examples.sh.in ${CMAKE_CURRENT_BINARY_DIR}/test_examples.sh @ONLY )
   file(
