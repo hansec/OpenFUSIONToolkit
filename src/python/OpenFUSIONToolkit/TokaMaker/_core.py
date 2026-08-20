@@ -199,6 +199,8 @@ class TokaMaker():
         self._vac_dict = {}
         ## Coil definition dictionary
         self._coil_dict = {}
+        ## Iron region definition dictionary
+        self._iron_dict = {}
         ## Coil set definitions, including sub-coils
         self.coil_sets = {}
         ## Virtual coils, if present (currently only `'#VSC'`)
@@ -260,6 +262,7 @@ class TokaMaker():
         self._cond_dict = {}
         self._vac_dict = {}
         self._coil_dict = {}
+        self._iron_dict = {}
         self._vcoils = {}
         self.coil_sets = {}
         self._virtual_coils = {'#VSC': {'id': -1 ,'facs': {}}}
@@ -355,23 +358,33 @@ class TokaMaker():
         xpoint_mask[0] = 1
         eta_vals = -2.0*numpy.ones((self.nregs,),dtype=numpy.float64)
         eta_vals[0] = -1.0
+        mag_susep = -1.E99*numpy.ones((self.nregs,),dtype=numpy.float64)
         contig_flag = numpy.ones((self.nregs,),dtype=numpy.int32)
         # Process conductors and vacuum regions
         self._vac_dict = {}
+        self._iron_dict = {}
         for key in cond_dict:
             if 'vac_id' in cond_dict[key]:
                 self._vac_dict[key] = cond_dict[key]
             else:
-                eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
+                mag_suscep = cond_dict[key].get('magnetic_susceptibility')
+                if mag_suscep is not None:
+                    mag_susep[cond_dict[key]['reg_id']-1] = mag_suscep
+                    eta_vals[cond_dict[key]['reg_id']-1] = 0.0
+                    self._iron_dict[key] = cond_dict[key]
+                else:
+                    eta_vals[cond_dict[key]['reg_id']-1] = cond_dict[key]['eta']/mu0
                 if cond_dict[key].get('noncontinuous',False):
                     contig_flag[cond_dict[key]['reg_id']-1] = 0
             xpoint_mask[cond_dict[key]['reg_id']-1] = int(cond_dict[key].get('allow_xpoints',False))
             if cond_dict[key].get('inner_limiter',False):
                 contig_flag[cond_dict[key]['reg_id']-1] = -1
-        # Remove vacuum regions
+        # Remove vacuum and Iron regions
+        self._cond_dict = cond_dict.copy()
         for key in self._vac_dict:
-            del cond_dict[key]
-        self._cond_dict = cond_dict
+            del self._cond_dict[key]
+        for key in self._iron_dict:
+            del self._cond_dict[key]
         # Process coils
         nCoils = 0
         self.coil_sets = {}
@@ -390,7 +403,7 @@ class TokaMaker():
             self.coil_sets[coil_set]['sub_coils'].append(coil_dict[key])
             self.coil_sets[coil_set]['sub_coils'][-1]['name'] = key
             self.coil_sets[coil_set]['net_turns'] += coil_dict[key].get('nturns',1.0)
-        self._coil_dict = coil_dict
+        self._coil_dict = coil_dict.copy()
         # Mark vacuum regions
         self.nvac = 0
         for i in range(self.nregs):
@@ -405,7 +418,7 @@ class TokaMaker():
                 coil_nturns[self.coil_sets[key]['id'],sub_coil['reg_id']-1] = sub_coil.get('nturns',1.0)
         cstring = self._oft_env.path2c('none')
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup_regions(self._tMaker_ptr,cstring,eta_vals,contig_flag,xpoint_mask,coil_nturns,nCoils,error_string)
+        tokamaker_setup_regions(self._tMaker_ptr,cstring,eta_vals,mag_susep,contig_flag,xpoint_mask,coil_nturns,nCoils,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -1572,7 +1585,8 @@ class TokaMaker():
         return self._tMaker_equil.compute_flux_integral(psi_vals,field_vals)
 
     def plot_machine(self,fig,ax,equilibrium=None,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
-                     coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]',colorbar=None):
+                     coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]',
+                     colorbar=None,iron_color='orange'):
         '''! Plot machine geometry
 
         @param fig Figure to add to
@@ -1587,6 +1601,7 @@ class TokaMaker():
         @param coil_scale Scale for coil currents when plotting
         @param coil_clabel Label for coil current colorbar (`None` to disable colorbar)
         @param colorbar Colorbar instance to overwrite (`None` to add)
+        @param iron_color Color for iron regions (`None` to disable)
         @result Colorbar instance for coil colors or `None`
         '''
         # Get equilibrium object if not set
@@ -1604,6 +1619,13 @@ class TokaMaker():
             mask = numpy.logical_and(self.reg > 1, self.reg <= self.nvac+1)
             if mask.sum() > 0.0:
                 ax.tricontourf(r_plot, z_plot, self.lc[mask,:], mask_vals, colors=vacuum_color)
+        # Shade Iron regions
+        if iron_color is not None:
+            mask = numpy.zeros((self.nc,), dtype=numpy.bool)
+            for key in self._iron_dict:
+                mask[self.reg == self._iron_dict[key]['reg_id']] = True
+            if mask.sum() > 0.0:
+                ax.tricontourf(r_plot, z_plot, self.lc[mask,:], mask_vals, colors=iron_color)
         # Shade coils
         if coil_colormap is not None:
             _, region_currents = equilibrium.get_coil_currents()

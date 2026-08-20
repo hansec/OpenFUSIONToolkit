@@ -167,6 +167,7 @@ TYPE :: gs_factory
   INTEGER(i4) :: nlimiter_pts = 0 !< Number of non-node limiter points
   INTEGER(i4) :: nlimiter_nds = 0 !< Number of grid nodes used as limiter points
   INTEGER(i4) :: ninner_limiter_nds = 0 !< Needs docs
+  INTEGER(i4) :: niron_regs = 0 !< Number of iron regions
   INTEGER(i4) :: ncond_regs = 0 !< Number of conducting regions
   INTEGER(i4) :: ncond_eigs = 0 !< Number of total fixed-shape current modes for conducting regions
   INTEGER(i4) :: bc_nrhs = 0 !< Number of terms in free-boundary BC
@@ -194,6 +195,8 @@ TYPE :: gs_factory
   INTEGER(i4), POINTER, DIMENSION(:) :: lim_con => NULL() !< Limiter contour list (contains all limiters)
   INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each
   REAL(r8), POINTER, DIMENSION(:) :: cond_weights => NULL() !< Needs docs
+  REAL(r8), POINTER, DIMENSION(:) :: mag_suscep => NULL() !< Needs docs
+  REAL(r8), POINTER, DIMENSION(:) :: mu_cell => NULL() !< Needs docs
   REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Virtual VSC definition as weighted sum of other coils
   REAL(r8), POINTER, DIMENSION(:) :: Rcoils => NULL() !< Lumped resistance [Ohms] of each coil (negative for Icoils)
   REAL(r8), POINTER, DIMENSION(:) :: coils_dt => NULL() !< Coil currents at start of step for quasi-static calculations
@@ -2284,6 +2287,18 @@ DO i=1,self%maxits
   !---
   CALL psip%add(0.d0,1.d0,equil%psi)
 
+  !---Update mu
+  IF(self%niron_regs>0)THEN!.AND.(i>10))THEN
+    ! CALL gs_update_mu(equil)
+    self%mu_cell=1.d3
+    IF(self%free)THEN
+      CALL build_dels(self%dels,self,"free")
+    ELSE
+      CALL build_dels(self%dels,self,"zerob")
+    END IF
+    self%lu_solver%refactor=.TRUE.
+  END IF
+
   !---Compute toroidal flux contribution
   CALL rhs%add(0.d0,1.d0,psi_ffp)
   CALL self%zerob_bc%apply(rhs)
@@ -4295,6 +4310,39 @@ do i=1,device%fe_rep%mesh%nc
   end do
 end do
 end subroutine gs_helicity
+!------------------------------------------------------------------------------
+!> Update mu in iron regions
+!------------------------------------------------------------------------------
+subroutine gs_update_mu(self)
+class(gs_equil), intent(inout) :: self !< G-S object
+type(oft_lag_bginterp), target :: psi_geval
+real(8) :: goptmp(3,3),v,gpsitmp(3),pt(3),ftmp(3)
+real(8) :: Bpol
+real(8), parameter :: Bpol_vals(16) = [0.d0, 0.5d0, 0.7d0, 0.8d0, 0.88d0, 1.d0, 1.2d0, &
+  1.52d0, 1.76d0, 2.06d0, 2.25d0, 3.05d0, 4.05d0, 6.05d0, 98.2d0, 1.d5]
+real(8), parameter :: mu_vals(16) = [1.038d3, 1.038d3, 1.3989d3, 1.55d3, &
+       1.64d3, 1.692d3, 1.522d3, 4.889d2, &
+       1.7577d2, 3.400d1, 1.0998d1, 3.000d0, &
+       2.0295d0, 1.5149d0, 1.02137d0, 1.0d0]
+integer(4) :: i,m
+type(gs_factory), pointer :: device
+device=>self%device
+!---
+psi_geval%u=>self%psi
+CALL psi_geval%setup(device%fe_rep)
+ftmp=1.d0/3.d0
+device%mu_cell=1.d3
+!$omp parallel do private(m,pt,goptmp,v,gpsitmp,Bpol)
+do i=1,device%fe_rep%mesh%nc
+  IF(device%mag_suscep(device%fe_rep%mesh%reg(i))<-1.d98)CYCLE
+  call device%fe_rep%mesh%jacobian(i,ftmp,goptmp,v)
+  call psi_geval%interp(i,ftmp,goptmp,gpsitmp)
+  pt=device%fe_rep%mesh%log2phys(i,ftmp)
+  gpsitmp=gpsitmp*self%psiscale/(pt(1)+gs_epsilon)
+  Bpol=SQRT(SUM(gpsitmp(1:2)**2))
+  device%mu_cell(i)=1.d3 !linterp(Bpol_vals,mu_vals,16,Bpol,1)
+end do
+end subroutine gs_update_mu
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
@@ -5339,7 +5387,7 @@ real(8), optional, intent(in) :: dt !< Timestep size for time-dependent version
 real(8), optional, intent(in) :: scale !< Global scale factor
 integer(i4) :: i,m,jr,jc
 integer(i4), allocatable :: j(:),j2(:)
-real(r8) :: vol,det,goptmp(3,4),elapsed_time,pt(3),dt_in,main_scale
+real(r8) :: vol,det,goptmp(3,4),elapsed_time,pt(3),dt_in,main_scale,mu_loc
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),eta_reg(:)
 logical :: curved
 integer(i4) :: nnonaxi
@@ -5455,13 +5503,18 @@ IF(nnonaxi>0)THEN
   ALLOCATE(nonaxi_vals(self%region_info%block_max+1,self%region_info%nnonaxi))
   nonaxi_vals=0.d0
 END IF
-!$omp parallel private(j,rop,gop,det,lop,curved,goptmp,m,vol,jc,jr,pt,nonaxi_tmp)
+!$omp parallel private(j,rop,gop,det,lop,curved,goptmp,m,vol,jc,jr,pt,nonaxi_tmp,mu_loc)
 allocate(j(self%fe_rep%nce)) ! Local DOF and matrix indices
 allocate(rop(self%fe_rep%nce),gop(3,self%fe_rep%nce)) ! Reconstructed gradient operator
 allocate(lop(self%fe_rep%nce,self%fe_rep%nce)) ! Local laplacian matrix
 IF(nnonaxi>0)allocate(nonaxi_tmp(self%fe_rep%nce))
 !$omp do schedule(dynamic,1) ordered
 do i=1,self%fe_rep%mesh%nc
+  IF(self%mag_suscep(self%fe_rep%mesh%reg(i))<-1.d98)THEN
+    mu_loc=1.d0
+  ELSE
+    mu_loc=self%mu_cell(i)
+  END IF
   !---Get local reconstructed operators
   lop=0.d0
   IF(nnonaxi>0)nonaxi_tmp=0.d0
@@ -5476,7 +5529,7 @@ do i=1,self%fe_rep%mesh%nc
     !---Compute local matrix contributions
     do jr=1,self%fe_rep%nce
       do jc=1,self%fe_rep%nce
-        lop(jr,jc) = lop(jr,jc) + DOT_PRODUCT(gop(1:2,jr),gop(1:2,jc))*det/(pt(1)+gs_epsilon)
+        lop(jr,jc) = lop(jr,jc) + DOT_PRODUCT(gop(1:2,jr),gop(1:2,jc))*det/(pt(1)+gs_epsilon)/mu_loc
       end do
     end do
     IF(dt_in>0.d0.AND.eta_reg(smesh%reg(i))>0.d0)THEN
@@ -5835,6 +5888,8 @@ IF(self%ncond_regs>0)THEN
   DEALLOCATE(self%cond_regions)
   self%ncond_regs=0
 END IF
+!---
+IF(ASSOCIATED(self%mag_suscep))DEALLOCATE(self%mag_suscep)
 !---
 IF(ASSOCIATED(self%coil_vec))THEN
   CALL self%coil_vec%delete()

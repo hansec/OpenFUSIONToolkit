@@ -241,16 +241,17 @@ END SUBROUTINE tokamaker_eval_green
 !---------------------------------------------------------------------------------
 !> Setup TokaMaker region representations based on coil, conductor, and other information
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_regions(tMaker_ptr,coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils,error_str) BIND(C,NAME="tokamaker_setup_regions")
+SUBROUTINE tokamaker_setup_regions(tMaker_ptr,coil_file,reg_eta,mag_suscep,contig_flag,xpoint_mask,coil_nturns,ncoils,error_str) BIND(C,NAME="tokamaker_setup_regions")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 CHARACTER(KIND=c_char), INTENT(in) :: coil_file(OFT_PATH_SLEN) !< Path to file containing coil information (for legacy region loading)
 TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Resistivity values for each region
+TYPE(c_ptr), VALUE, INTENT(in) :: mag_suscep !< Magnetic susceptibility values for each region
 TYPE(c_ptr), VALUE, INTENT(in) :: contig_flag !< Toroidal contiguity/inner limiter flag for each region (1 if toroidally contiguous, 0 if not, -1 if inner limiter region)
 TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Region mask for X-point search (1 if region can contain X-points, 0 otherwise)
 TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Number of turns for each coil
 INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Number of coils
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
+real(r8), POINTER :: eta_tmp(:),mag_suscep_tmp(:),nturns_tmp(:,:)
 INTEGER(i4), POINTER :: contig_tmp(:)
 INTEGER(4) :: i
 INTEGER(4), POINTER :: xpoint_tmp(:)
@@ -266,13 +267,23 @@ IF(TRIM(tMaker_obj%device%coil_file)=='none')THEN
   tMaker_obj%device%saddle_rmask=LOGICAL(xpoint_tmp==0)
   !
   CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
+  CALL c_f_pointer(mag_suscep, mag_suscep_tmp, [smesh%nreg])
+  ALLOCATE(tMaker_obj%device%mag_suscep(smesh%nreg),tMaker_obj%device%mu_cell(smesh%nc))
+  tMaker_obj%device%mu_cell=1.d0
+  tMaker_obj%device%mag_suscep=0.d0
   tMaker_obj%device%ncoil_regs=0
   tMaker_obj%device%ncond_regs=0
+  tMaker_obj%device%niron_regs=0
   DO i=2,smesh%nreg
-    IF(eta_tmp(i)>0.d0)THEN
-      tMaker_obj%device%ncond_regs=tMaker_obj%device%ncond_regs+1
+    IF(mag_suscep_tmp(i)>-1.d98)THEN
+      tMaker_obj%device%niron_regs=tMaker_obj%device%niron_regs+1
+      tMaker_obj%device%mag_suscep(i)=mag_suscep_tmp(i)
     ELSE
-      tMaker_obj%device%ncoil_regs=tMaker_obj%device%ncoil_regs+1
+      IF(eta_tmp(i)>0.d0)THEN
+        tMaker_obj%device%ncond_regs=tMaker_obj%device%ncond_regs+1
+      ELSE
+        tMaker_obj%device%ncoil_regs=tMaker_obj%device%ncoil_regs+1
+      END IF
     END IF
   END DO
   !
@@ -290,6 +301,7 @@ IF(TRIM(tMaker_obj%device%coil_file)=='none')THEN
   tMaker_obj%device%ncond_regs=0
   tMaker_obj%device%ncoil_regs=0
   DO i=2,smesh%nreg
+    IF(mag_suscep_tmp(i)>-1.d98)CYCLE
     IF(eta_tmp(i)>0.d0)THEN
       tMaker_obj%device%ncond_regs=tMaker_obj%device%ncond_regs+1
       IF(eta_tmp(i)<1.d9)THEN

@@ -266,7 +266,8 @@ class gs_Domain:
             self.region_info = {}
             self._extra_reg_defs = []
 
-    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None,allow_xpoints=False,inner_limiter=False):
+    def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None,
+                      allow_xpoints=False,inner_limiter=False,magnetic_susceptibility=None):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
         @param name Name of region
@@ -276,6 +277,7 @@ class gs_Domain:
         @param nTurns Number of turns for "coil" regions (raises error if region is other type)
         @param allow_xpoints Allow X-points in this region (for non-plasma regions only)
         @param inner_limiter This region forms the inner limiter (valid for non-plasma regions in Dipole mode only)
+        @param magnetic_susceptibility Magnetic susceptibility for "conductor" regions to be treated as linear diamagnetic volumes (raises error if region is other type)
         '''
         if (dx is None) or (dx < 0.0):
             raise ValueError('"dx" must have a non-negative value')
@@ -315,10 +317,18 @@ class gs_Domain:
             if reg_type != 'conductor':
                 raise ValueError('Resistivity specification only valid for "conductor" regions')
             else:
+                if magnetic_susceptibility is not None:
+                    raise ValueError('Cannot specify both resistivity and magnetic susceptibility for "conductor" regions')
                 self.region_info[name]['eta'] = eta
         else:
-            if reg_type == 'conductor':
-                raise ValueError('Resistivity not specified for "conductor" region')
+            if magnetic_susceptibility is not None:
+                if reg_type != 'conductor':
+                    raise ValueError('Magnetic susceptibility specification only valid for "conductor" regions')
+                else:
+                    self.region_info[name]['magnetic_susceptibility'] = magnetic_susceptibility
+            else:
+                if reg_type == 'conductor':
+                    raise ValueError('Neither resistivity nor magnetic susceptibility specified for "conductor" region')
         if noncontinuous is not None:
             if reg_type != 'conductor':
                 raise ValueError('Non-contiguous specification only valid for "conductor" regions')
@@ -515,7 +525,8 @@ class gs_Domain:
                 cond_list[key] = {
                     'reg_id': self.region_info[key]['id'],
                     'cond_id': cond_id,
-                    'eta': self.region_info[key]['eta'],
+                    'eta': self.region_info[key].get('eta'),
+                    'magnetic_susceptibility': self.region_info[key].get('magnetic_susceptibility'),
                     'noncontinuous': self.region_info[key].get('noncontinuous',False),
                     'allow_xpoints': self.region_info[key].get('allow_xpoints',False)
                 }
