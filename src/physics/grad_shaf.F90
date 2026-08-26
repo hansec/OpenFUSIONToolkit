@@ -2287,18 +2287,6 @@ DO i=1,self%maxits
   !---
   CALL psip%add(0.d0,1.d0,equil%psi)
 
-  !---Update mu
-  IF(self%niron_regs>0)THEN!.AND.(i>10))THEN
-    ! CALL gs_update_mu(equil)
-    self%mu_cell=1.d3
-    IF(self%free)THEN
-      CALL build_dels(self%dels,self,"free")
-    ELSE
-      CALL build_dels(self%dels,self,"zerob")
-    END IF
-    self%lu_solver%refactor=.TRUE.
-  END IF
-
   !---Compute toroidal flux contribution
   CALL rhs%add(0.d0,1.d0,psi_ffp)
   CALL self%zerob_bc%apply(rhs)
@@ -4318,20 +4306,26 @@ class(gs_equil), intent(inout) :: self !< G-S object
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: goptmp(3,3),v,gpsitmp(3),pt(3),ftmp(3)
 real(8) :: Bpol
+real(r8), allocatable, dimension(:) :: reg_nc,reg_bpol
 real(8), parameter :: Bpol_vals(16) = [0.d0, 0.5d0, 0.7d0, 0.8d0, 0.88d0, 1.d0, 1.2d0, &
   1.52d0, 1.76d0, 2.06d0, 2.25d0, 3.05d0, 4.05d0, 6.05d0, 98.2d0, 1.d5]
 real(8), parameter :: mu_vals(16) = [1.038d3, 1.038d3, 1.3989d3, 1.55d3, &
        1.64d3, 1.692d3, 1.522d3, 4.889d2, &
        1.7577d2, 3.400d1, 1.0998d1, 3.000d0, &
        2.0295d0, 1.5149d0, 1.02137d0, 1.0d0]
-integer(4) :: i,m
+integer(4) :: i,j,m
 type(gs_factory), pointer :: device
+class(oft_vector), pointer :: tmp_vec
+real(r8), pointer, dimension(:) :: psi_vals
 device=>self%device
 !---
 psi_geval%u=>self%psi
 CALL psi_geval%setup(device%fe_rep)
 ftmp=1.d0/3.d0
-device%mu_cell=1.d3
+! device%mu_cell=1.d0
+ALLOCATE(reg_nc(device%fe_rep%mesh%nreg),reg_bpol(device%fe_rep%mesh%nreg))
+reg_nc=0.d0
+reg_bpol=0.d0
 !$omp parallel do private(m,pt,goptmp,v,gpsitmp,Bpol)
 do i=1,device%fe_rep%mesh%nc
   IF(device%mag_suscep(device%fe_rep%mesh%reg(i))<-1.d98)CYCLE
@@ -4340,8 +4334,52 @@ do i=1,device%fe_rep%mesh%nc
   pt=device%fe_rep%mesh%log2phys(i,ftmp)
   gpsitmp=gpsitmp*self%psiscale/(pt(1)+gs_epsilon)
   Bpol=SQRT(SUM(gpsitmp(1:2)**2))
-  device%mu_cell(i)=1.d3 !linterp(Bpol_vals,mu_vals,16,Bpol,1)
+  ! device%mu_cell(i)=(device%mu_cell(i)+linterp(Bpol_vals,mu_vals,16,Bpol,1))/2.d0
+  reg_nc(device%fe_rep%mesh%reg(i))=reg_nc(device%fe_rep%mesh%reg(i))+v
+  reg_bpol(device%fe_rep%mesh%reg(i))=reg_bpol(device%fe_rep%mesh%reg(i))+Bpol*v
 end do
+DO i=1,device%fe_rep%mesh%nreg
+  IF(reg_nc(i)<1.d-8)CYCLE
+  reg_bpol(i)=reg_bpol(i)/reg_nc(i)
+END DO
+do i=1,device%fe_rep%mesh%nc
+  IF(reg_nc(device%fe_rep%mesh%reg(i))<1.d-8)CYCLE
+  ! call device%fe_rep%mesh%jacobian(i,ftmp,goptmp,v)
+  ! call psi_geval%interp(i,ftmp,goptmp,gpsitmp)
+  ! pt=device%fe_rep%mesh%log2phys(i,ftmp)
+  ! gpsitmp=gpsitmp*self%psiscale/(pt(1)+gs_epsilon)
+  ! Bpol=(SQRT(SUM(gpsitmp(1:2)**2))+reg_bpol(device%fe_rep%mesh%reg(i)))/2.d0
+  Bpol=reg_bpol(device%fe_rep%mesh%reg(i))
+  device%mu_cell(i)=(4.d0*device%mu_cell(i)+linterp(Bpol_vals,mu_vals,16,Bpol,1))/5.d0
+end do
+!---
+IF(device%free)THEN
+  CALL build_dels(device%dels,device,"free")
+ELSE
+  CALL build_dels(device%dels,device,"zerob")
+END IF
+device%lu_solver%refactor=.TRUE.
+!---
+NULLIFY(tmp_vec,psi_vals)
+CALL device%fe_rep%vec_create(tmp_vec)
+DO i=1,device%ncoils
+  CALL gs_coil_source(device,i,tmp_vec)
+  CALL device%zerob_bc%apply(tmp_vec)
+  CALL gs_vacuum_solve(device,device%psi_coil(i)%f,tmp_vec)
+  CALL device%psi_coil(i)%f%get_local(psi_vals)
+END DO
+DO i=1,device%ncoils
+  DO j=i,device%ncoils
+    CALL gs_coil_mutual(device,i,device%psi_coil(j)%f,device%Lcoils(i,j))
+    IF(j>i)THEN ! Integral can be slightly different in each direction so compute both ways and average
+      CALL gs_coil_mutual(device,j,device%psi_coil(i)%f,device%Lcoils(j,i))
+      device%Lcoils(j,i)=(device%Lcoils(j,i)+device%Lcoils(i,j))/2.d0
+      device%Lcoils(i,j)=device%Lcoils(j,i)
+    END IF
+  END DO
+END DO
+CALL tmp_vec%delete()
+DEALLOCATE(tmp_vec)
 end subroutine gs_update_mu
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -5510,11 +5548,7 @@ allocate(lop(self%fe_rep%nce,self%fe_rep%nce)) ! Local laplacian matrix
 IF(nnonaxi>0)allocate(nonaxi_tmp(self%fe_rep%nce))
 !$omp do schedule(dynamic,1) ordered
 do i=1,self%fe_rep%mesh%nc
-  IF(self%mag_suscep(self%fe_rep%mesh%reg(i))<-1.d98)THEN
-    mu_loc=1.d0
-  ELSE
-    mu_loc=self%mu_cell(i)
-  END IF
+  mu_loc=self%mu_cell(i)
   !---Get local reconstructed operators
   lop=0.d0
   IF(nnonaxi>0)nonaxi_tmp=0.d0

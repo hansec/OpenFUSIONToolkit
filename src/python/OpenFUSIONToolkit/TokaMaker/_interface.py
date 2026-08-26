@@ -77,6 +77,10 @@ tokamaker_set_profile_dofs = ctypes_subroutine(oftpy_lib.tokamaker_set_profile_d
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_char_p])
 
+# tokamaker_update_mu(tMaker_ptr,error_str)
+tokamaker_update_mu = ctypes_subroutine(oftpy_lib.tokamaker_update_mu,
+    [c_void_p, c_char_p])
+
 # tokamaker_solve(tMaker_ptr,vacuum,nl_its,error_str)
 tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve,
     [c_void_p, c_bool, c_int_ptr, c_char_p])

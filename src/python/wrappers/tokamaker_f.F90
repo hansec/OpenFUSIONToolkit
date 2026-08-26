@@ -32,7 +32,8 @@ USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source, gs_coil_source_distributed, gs_vacuum_solve, &
-  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
+  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds, &
+  gs_update_mu
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   sauter_fc, gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
@@ -270,7 +271,7 @@ IF(TRIM(tMaker_obj%device%coil_file)=='none')THEN
   CALL c_f_pointer(mag_suscep, mag_suscep_tmp, [smesh%nreg])
   ALLOCATE(tMaker_obj%device%mag_suscep(smesh%nreg),tMaker_obj%device%mu_cell(smesh%nc))
   tMaker_obj%device%mu_cell=1.d0
-  tMaker_obj%device%mag_suscep=0.d0
+  tMaker_obj%device%mag_suscep=-1.d99
   tMaker_obj%device%ncoil_regs=0
   tMaker_obj%device%ncond_regs=0
   tMaker_obj%device%niron_regs=0
@@ -579,6 +580,17 @@ ELSE
 END IF
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_init_psi
+!---------------------------------------------------------------------------------
+!> Update the magnetic permeability in iron regions
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_update_mu(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_update_mu")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+CALL gs_update_mu(tMaker_obj%gs_equil)
+END SUBROUTINE tokamaker_update_mu
 !---------------------------------------------------------------------------------
 !> Perform nonlinear solve to find equilibrium solution for given profiles, targets, etc.
 !---------------------------------------------------------------------------------

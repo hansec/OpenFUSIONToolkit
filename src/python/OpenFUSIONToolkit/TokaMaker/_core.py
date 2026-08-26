@@ -489,6 +489,12 @@ class TokaMaker():
         ## Mesh regions [nc]
         self.reg = numpy.ctypeslib.as_array(reg_loc,shape=(self.nc,))
 
+    def update_mu(self):
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_update_mu(self._tMaker_ptr,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+
     @property
     def c_ptr(self):
         r'''! C pointer to Fortran-side TokaMaker object'''
