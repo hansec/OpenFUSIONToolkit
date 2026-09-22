@@ -166,7 +166,7 @@ def _run_tokamaker_torax(
     loop0: bool = True,
 ) -> Dict[str, Any]:
     r'''! Run the minimal ITER TokaMaker_TORAX benchmark and return numerical outputs.
-    
+
         Parameters
         ----------
         mesh_path
@@ -181,7 +181,7 @@ def _run_tokamaker_torax(
             Highest counted coupling index (see TokaMaker_TORAX.fly); default 1.
         loop0
             If True (default), run the cheap index-0 pass before counted loops.
-        
+
     '''
     try:
         import torax  # noqa: F401
@@ -217,7 +217,7 @@ def _run_tokamaker_torax(
 
     mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh(mesh)
     mygs.settings.maxits = 500
-    mygs.setup_full(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=2, F0=f0)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=2, F0=f0)
     mygs.set_coil_vsc({"VS": 1.0})
 
     coil_bounds = {key: [-50.0e6, 50.0e6] for key in mygs.coil_sets}
