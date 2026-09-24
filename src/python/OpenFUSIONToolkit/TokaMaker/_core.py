@@ -300,17 +300,17 @@ class TokaMaker():
   | | (_) |   < (_| | |  | | (_| |   <  __/ |
   |_|\___/|_|\_\__,_|_|  |_|\__,_|_|\_\___|_|
 ''')
-    def setup_model(self,r,lc,reg=None,mesh_file=None,cond_dict={},coil_dict={},order=2,F0=0.0,full_domain=False):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,cond_dict={},coil_dict={},order=2,F0=0.0,full_domain=False):
         r'''! Setup full G-S solver
 
-        @param order Order of FE representation to use
-        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
-        @param r Mesh point list [np,2]
-        @param lc Mesh cell list [nc,3] (base one)
-        @param reg Mesh region list [nc] (base one)
+        @param r Mesh point list [:,2]
+        @param lc Mesh cell list [:,3] (base one)
+        @param reg Mesh region list [:] (base one)
         @param mesh_file Filename containing mesh to load (native format only)
         @param cond_dict Dictionary specifying conducting regions
         @param coil_dict Dictionary specifying coil regions
+        @param order Order of FE representation to use
+        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
         @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
         '''
         self._setup_mesh(r=r,lc=lc,reg=reg,mesh_file=mesh_file)
