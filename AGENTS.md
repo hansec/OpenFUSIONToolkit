@@ -54,6 +54,24 @@ Detailed, task-specific procedures live in agent skills under `.agents/skills/`
 | [`oft-build`](.agents/skills/oft-build/SKILL.md) | Locate or set up a build tree, build external libraries, configure/compile/install OFT, build against system libraries in a sandbox, or change Python packaging (`make_package.sh.in`/`pyproject.toml.in`, which supersede the lint-only `src/python/pyproject.toml`) |
 | [`oft-test`](.agents/skills/oft-test/SKILL.md) | Run, select, debug, or write regression tests |
 
+### Subagents (Claude Code)
+
+Building and testing produce long output that is rarely worth keeping in the main
+context. Two subagents in `.claude/agents/` wrap the skills above, with only `Bash` and
+`Read`, and reply with a short structured report (`STATUS:` line, counts, the first
+distinct errors or each failing test with a one-line reason, and log paths for detail):
+
+| Agent | Preloads | Use it to |
+|---|---|---|
+| [`oft-builder`](.claude/agents/oft-builder.md) | `oft-build` | Run `make` (and optionally `make install`) in an existing build tree |
+| [`oft-tester`](.claude/agents/oft-tester.md) | `oft-test` | Rebuild incrementally, then run selected tests or `make test` |
+
+Pass them the build directory, the Python environment, and the tests to run when known.
+They cannot ask the user questions: when the skills say to ask (several build trees, an
+unknown Python environment, a tree that compiles another checkout), they return
+`STATUS: NEEDS_INPUT` with the options instead, for the orchestrating agent to resolve.
+Neither edits source files, and neither sets up a new configuration unless told to.
+
 ## Build System
 
 OFT uses a two-stage build: `src/utilities/build_libs.py` builds external libraries and
