@@ -57,24 +57,28 @@ Detailed, task-specific procedures live in agent skills under `.agents/skills/`
 ### Subagents (Claude Code)
 
 Building and testing produce long output that is rarely worth keeping in the main
-context. Two subagents in `.claude/agents/` wrap the skills above, with only `Bash` and
-`Read`, and reply with a short structured report (`STATUS:` line, counts, the first
-distinct errors or each failing test with a one-line reason, and log paths for detail):
+context. Subagents in `.claude/agents/` handle them with only `Bash` and `Read`, and
+reply with a short structured report (`STATUS:` line, counts, the first distinct errors
+or each failing test/notebook with a one-line reason, and log paths for detail):
 
 | Agent | Preloads | Use it to |
 |---|---|---|
 | [`oft-builder`](.claude/agents/oft-builder.md) | `oft-build` | Run `make` (and optionally `make install`) in an existing build tree |
 | [`oft-tester`](.claude/agents/oft-tester.md) | `oft-test` | Rebuild incrementally, then run selected tests or `make test` |
+| [`oft-notebooks`](.claude/agents/oft-notebooks.md) | — | Re-execute the example notebooks and copy those that run cleanly back to `src/examples` (outputs kept, noisy metadata stripped; failures reported and left untouched). Prepares what each example folder's README/requirements document in isolated environments under `<config_dir>/notebook_envs/` and `notebook_deps/` |
 
 Pass them the build directory, the Python environment, and the tests to run when known.
 They cannot ask the user questions: when the skills say to ask (several build trees, an
 unknown Python environment, a tree that compiles another checkout), they return
 `STATUS: NEEDS_INPUT` with the options instead, for the orchestrating agent to resolve.
-Neither edits source files, and neither sets up a new configuration unless told to.
+None of them edits source files (`oft-notebooks` only replaces the outputs and metadata
+of notebooks that executed cleanly), and none sets up a new configuration unless told to.
+`oft-notebooks` drives `src/utilities/run_example_notebooks.py`, which can also be run
+by hand (see its header; `--strip-only` just normalizes metadata).
 
 Run them one at a time per build tree: start `oft-tester` only after `oft-builder` has
 reported, and never run two agents (or an agent and your own `make`/tests) on the same
-build tree at once. Both check for `make`/`pytest` processes already running in the tree
+build tree at once. They check for `make`/`pytest`/notebook-kernel processes already running in the tree
 and wait or return `NEEDS_INPUT`, but that is a safeguard, not a scheduler.
 `oft-tester` returns `STATUS: BUILD_INCOMPLETE` when the build tree's shared library is
 missing or empty — rebuild with `oft-builder` rather than treating it as test failures.

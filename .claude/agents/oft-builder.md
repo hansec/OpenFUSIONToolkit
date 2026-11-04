@@ -44,17 +44,19 @@ The orchestrator's prompt may give any of:
 4. **Check the tree is idle.** Another agent or the user may be building or testing in
    the same tree; a second `make` alongside theirs, or a rebuild under running tests,
    corrupts both. List `make`/`pytest` processes whose working directory is inside
-   `<build_dir>` (run from `/` so the check does not match its own shell):
+   `<build_dir>` (run from `/` so the check does not match its own shell; it reads each
+   process's working directory from `/proc` on Linux and falls back to `lsof` on macOS,
+   so use it as is):
 
    ```bash
-   cd / && busy() { for p in $(pgrep -f 'make|pytest|run_test'); do d=$(readlink /proc/$p/cwd 2>/dev/null || lsof -a -p $p -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'); case "$d/" in "<build_dir>"/*) ps -o pid=,etime=,command= -p $p;; esac; done; }; busy
+   cd / && busy() { for p in $(pgrep -f 'make|pytest|run_test|ipykernel'); do d=$(readlink /proc/$p/cwd 2>/dev/null || lsof -a -p $p -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'); case "$d/" in "<build_dir>"/*) ps -o pid=,etime=,command= -p $p;; esac; done; }; busy
    ```
 
    No output means idle. If a **build** is running, wait for it to finish (Bash timeout
    600000 ms, repeat until idle or about 30 minutes have passed, then return
    `NEEDS_INPUT`): `for i in $(seq 1 55); do [ -z "$(busy)" ] && break; sleep 10; done; busy`
    (with `busy` defined as above in the same command), then run your own (incremental)
-   build. If **tests** are running, return `NEEDS_INPUT` with the process list. Skip this
+   build. If **tests** or notebook kernels (`ipykernel`) are running, return `NEEDS_INPUT` with the process list. Skip this
    step for a configuration you have just created.
 5. **Build.** `jobs` defaults to `getconf _NPROCESSORS_ONLN` (not `nproc`). Do not re-run
    `config_cmake.sh` just to rebuild — it deletes the build tree. Always send output to a
