@@ -41,7 +41,22 @@ The orchestrator's prompt may give any of:
    the given environment active in the same command, eg.
    `PATH=<venv>/bin:$PATH bash config_cmake.sh > <new_config_dir>/config.log 2>&1`, and
    check that the `Found pytest:` line in that log names it.
-4. **Build.** `jobs` defaults to `getconf _NPROCESSORS_ONLN` (not `nproc`). Do not re-run
+4. **Check the tree is idle.** Another agent or the user may be building or testing in
+   the same tree; a second `make` alongside theirs, or a rebuild under running tests,
+   corrupts both. List `make`/`pytest` processes whose working directory is inside
+   `<build_dir>` (run from `/` so the check does not match its own shell):
+
+   ```bash
+   cd / && busy() { for p in $(pgrep -f 'make|pytest|run_test'); do d=$(readlink /proc/$p/cwd 2>/dev/null || lsof -a -p $p -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'); case "$d/" in "<build_dir>"/*) ps -o pid=,etime=,command= -p $p;; esac; done; }; busy
+   ```
+
+   No output means idle. If a **build** is running, wait for it to finish (Bash timeout
+   600000 ms, repeat until idle or about 30 minutes have passed, then return
+   `NEEDS_INPUT`): `for i in $(seq 1 55); do [ -z "$(busy)" ] && break; sleep 10; done; busy`
+   (with `busy` defined as above in the same command), then run your own (incremental)
+   build. If **tests** are running, return `NEEDS_INPUT` with the process list. Skip this
+   step for a configuration you have just created.
+5. **Build.** `jobs` defaults to `getconf _NPROCESSORS_ONLN` (not `nproc`). Do not re-run
    `config_cmake.sh` just to rebuild — it deletes the build tree. Always send output to a
    log, never to your context:
 
@@ -61,7 +76,7 @@ The orchestrator's prompt may give any of:
    ```
 
    Run `make install > <log_dir>/install.log 2>&1` only if requested.
-5. **Filter the result.** On failure, extract only what identifies the error, eg.:
+6. **Filter the result.** On failure, extract only what identifies the error, eg.:
 
    ```bash
    grep -nE -B5 '^(Error|Fatal Error):|error:|undefined reference|Undefined symbols|ld: |No rule to make target|CMake Error' <log_dir>/make.log | head -80

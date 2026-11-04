@@ -33,15 +33,37 @@ The orchestrator's prompt may give any of:
    candidate, return `NEEDS_INPUT`. Check that `CMAKE_HOME_DIRECTORY` in
    `<build_dir>/CMakeCache.txt` is this checkout's `src/`; if not, say so in the report
    (you would be testing different code) and return `NEEDS_INPUT` unless told to proceed.
-2. **Rebuild** (unless `rebuild: no`), output to a log:
+2. **Check the tree is idle.** Another agent or the user may be building or testing in
+   the same tree; running alongside them gives broken results. List `make`/`pytest`
+   processes whose working directory is inside `<build_dir>` (run from `/` so the check
+   does not match its own shell):
+
+   ```bash
+   cd / && busy() { for p in $(pgrep -f 'make|pytest|run_test'); do d=$(readlink /proc/$p/cwd 2>/dev/null || lsof -a -p $p -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'); case "$d/" in "<build_dir>"/*) ps -o pid=,etime=,command= -p $p;; esac; done; }; busy
+   ```
+
+   No output means idle. If a **build** is running, wait for it (Bash timeout 600000 ms,
+   repeat until idle or about 30 minutes have passed, then return `NEEDS_INPUT`):
+   `for i in $(seq 1 55); do [ -z "$(busy)" ] && break; sleep 10; done; busy` (with
+   `busy` defined as above in the same command). If **tests** are running, return
+   `NEEDS_INPUT` with the process list — never run a second test session in the same tree.
+3. **Rebuild** unless the orchestrator said `rebuild: no`; do not skip it for any other
+   reason. Output to a log:
    `cd <build_dir> && make -j<N> > <log_dir>/make.log 2>&1; echo "exit=$?"`.
    If it fails, stop and return `STATUS: BUILD_FAILED` with the first error lines
    (`grep -nE -B5 '^(Error|Fatal Error):|error:|undefined reference' <log_dir>/make.log | head -40`)
    — the orchestrator should use the `oft-builder` agent for build problems.
-3. **Set `OMP_NUM_THREADS`** in the same command as the tests: `1` if
+4. **Check the build is complete.** The Python tests (all of `physics/`, and anything
+   importing `OpenFUSIONToolkit`) load `<build_dir>/bin/liboftpy.so` (`.dylib` on macOS).
+   If it is missing or empty (`ls -l <build_dir>/bin/liboftpy.*`), the build is
+   incomplete or still linking: return `STATUS: BUILD_INCOMPLETE` instead of running
+   tests. The same applies after a run whose errors are `Unable to load OFT shared
+   library` (from `OpenFUSIONToolkit/_interface.py`): report it as an incomplete build,
+   not as test failures.
+5. **Set `OMP_NUM_THREADS`** in the same command as the tests: `1` if
    `getconf _NPROCESSORS_ONLN` is 2 or less, otherwise `2` (Linux containers: check the
    cgroup CPU quota as described in the skill).
-4. **Run**, always redirecting output to a log. For targeted runs use `run_test.sh` with
+6. **Run**, always redirecting output to a log. For targeted runs use `run_test.sh` with
    flags that make the output easy to filter:
 
    ```bash
@@ -65,7 +87,7 @@ The orchestrator's prompt may give any of:
    ```
 
    If you need a listing first, use `--collect-only -q` (runs nothing).
-5. **Filter the result.** Get counts and failures from the pytest summary
+7. **Filter the result.** Get counts and failures from the pytest summary
    (`grep -nE '^(FAILED|ERROR|SKIPPED) |^=+ .*(passed|failed|error|skipped)' <log>`; with
    `-rfEs`, the `SKIPPED [N] ...` lines already give skip reasons with counts). `make test`
    does not pass `-rs`, so for it group skip reasons from the JUnit XML with the configured
@@ -76,11 +98,15 @@ The orchestrator's prompt may give any of:
    ```
 
    For each failure, read just enough of its traceback (`--tb=short` section in the log,
-   or the `<failure>` element in the XML) to give the assertion or error, and for
-   Fortran-driven tests the relevant lines of the program output (eg. a solver iteration
-   count vs. the expected value, a timeout, a crash signal). If a cause is unclear, you
-   may re-run that single test with `-x -s` into a separate log. Compare skip counts with
-   the "Skips" section and typical outcomes table of the skill and flag only deviations.
+   or the `<failure>` element in the XML) to give the assertion or error. Fortran-driven
+   tests print their own diagnosis into the captured output, eg. `FAILED: Iteration count
+   incorrect!` followed by `Expected = ...` and `Actual = ...` lines; always pull out the
+   actual and expected values (`grep -nE 'FAILED:|Expected|Actual' <log>`, or the
+   `<system-out>` of that test case in the XML), since environment-dependent iteration
+   counts are compared against the values documented in the skills. Likewise report a
+   timeout or crash signal. If a cause is unclear, you may re-run that single test with
+   `-x -s` into a separate log. Compare skip counts with the "Skips" section and typical
+   outcomes table of the skill and flag only deviations.
 
 Do not edit source, test, or data files, and do not "fix" failures; diagnosis beyond a
 one-line likely cause is the orchestrator's job. Never fall back to the system `python3`
@@ -92,8 +118,9 @@ environments.
 Reply with exactly this structure, nothing before it:
 
 ```
-STATUS: PASSED | FAILED | BUILD_FAILED | NEEDS_INPUT
+STATUS: PASSED | FAILED | BUILD_FAILED | BUILD_INCOMPLETE | NEEDS_INPUT
 build_dir: <path>   (compiles: <CMAKE_HOME_DIRECTORY>)
+rebuild: yes (exit <code>, <no-op | recompiled>) | skipped (orchestrator said rebuild: no) | not reached (<reason>)
 command: <test command run, including OMP_NUM_THREADS>
 result: <N passed, N failed, N errors, N skipped> in <duration>
 log: <log path>   junit: <xml path>
@@ -102,11 +129,12 @@ log: <log path>   junit: <xml path>
 Then, only as applicable:
 
 - `failures:` one entry per failed/errored test: `<nodeid>` — one-line reason (assertion,
-  expected vs. actual, timeout, signal), plus at most 5 lines of the most telling
+  actual vs. expected, timeout, signal), plus at most 5 lines of the most telling
   traceback or program output. If more than 10 tests fail, list 10 and group the rest by
   common cause.
 - `skips:` reasons with counts (eg. `266 Not compiled with PETSc`), and one line saying
   whether they match the expected pattern for this configuration.
-- **NEEDS_INPUT** — the single question the orchestrator must answer, with the options.
+- **NEEDS_INPUT** / **BUILD_INCOMPLETE** — what blocked the run (eg. the busy processes,
+  or the missing/empty library) and the single question or next step for the orchestrator.
 - Anything unexpected (eg. stale build tree, tree compiles another checkout, known
   environment-dependent failures listed in the skills) as one bullet each.

@@ -43,17 +43,18 @@ runs everything under `coverage`, both force `OFT_DEBUG_TEST=1`, and neither wri
 make sure the intended environment provides it (activate it if unsure). `run_test.sh` is
 unaffected.
 
-With `OMP_NUM_THREADS=2`, `make test` alone took about 50 minutes on a 4-core Linux sandbox, about 28 minutes on a
+With `OMP_NUM_THREADS=2`, `make test` alone took about 52 minutes on a 4-core Linux sandbox, about 28 minutes on a
 40-core Linux server, and about 18 minutes on an 18-core Apple Silicon Mac, and
 `test_full` takes longer — run them in the background,
 and prefer targeted runs while iterating.
 
-Typical `make test` outcomes (October 2026; counts drift as tests are added):
+Typical `make test` outcomes (counts drift as tests are added, so compare skips and
+failures more than exact pass counts):
 
-| Configuration | Passed | Skipped (PETSc / configuration / bare) | Failed |
-|---|---|---|---|
-| `oft-build` section 4 example flags: `build_libs.py` MPICH, SuperLU, UMFPACK, ARPACK (macOS and Linux) | ~917 | ~328 (266 / 36 / 26) | 0 |
-| Ubuntu system libraries from `oft-build` section 5 | ~906 | ~337 (266 / 45 / 26) | 2 (known, see `oft-build`) |
+| Configuration | Measured | Passed | Skipped (PETSc / configuration / bare) | Failed |
+|---|---|---|---|---|
+| `oft-build` section 4 example flags: `build_libs.py` MPICH, SuperLU, UMFPACK, ARPACK (macOS and Linux) | Oct 2026 | ~917 | ~328 (266 / 36 / 26) | 0 |
+| Ubuntu system libraries from `oft-build` section 5 | Nov 2026 | ~976 | ~337 (266 / 45 / 26) | 2 (known, see `oft-build`) |
 
 Targeted runs use `run_test.sh`, generated into `<build_dir>/tests/`. It sets `PATH`
 (build-tree `python/`, the configured interpreter, and the MPI that OFT was built

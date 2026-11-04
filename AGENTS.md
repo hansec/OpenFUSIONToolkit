@@ -72,6 +72,13 @@ unknown Python environment, a tree that compiles another checkout), they return
 `STATUS: NEEDS_INPUT` with the options instead, for the orchestrating agent to resolve.
 Neither edits source files, and neither sets up a new configuration unless told to.
 
+Run them one at a time per build tree: start `oft-tester` only after `oft-builder` has
+reported, and never run two agents (or an agent and your own `make`/tests) on the same
+build tree at once. Both check for `make`/`pytest` processes already running in the tree
+and wait or return `NEEDS_INPUT`, but that is a safeguard, not a scheduler.
+`oft-tester` returns `STATUS: BUILD_INCOMPLETE` when the build tree's shared library is
+missing or empty — rebuild with `oft-builder` rather than treating it as test failures.
+
 ## Build System
 
 OFT uses a two-stage build: `src/utilities/build_libs.py` builds external libraries and
