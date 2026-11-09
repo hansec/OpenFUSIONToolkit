@@ -3460,7 +3460,9 @@ end subroutine bjprecond_delete
 !!
 !! With `pre_overlap>0` on the HODLR operator the blocks are overlapping subdomains, each leaf with the leaves
 !! within `pre_overlap` adjacency steps (@ref tw_hodlr_schwarz_subdomains), and the corrections of all subdomains
-!! are added (additive Schwarz, symmetric for use with CG). The holes and V-coils form one more block.
+!! are added (additive Schwarz, symmetric for use with CG). The input and output of each subdomain are weighted by
+!! \f$ 1/\sqrt{n} \f$ for an element held by \f$ n \f$ subdomains, so that the overlapping corrections are not
+!! counted several times. The holes and V-coils form one more block.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE rbjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object

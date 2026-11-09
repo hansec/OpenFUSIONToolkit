@@ -339,3 +339,14 @@ value (`pre_neigs=N` in
 slowest \f$ \textrm{L}/\textrm{R} \f$ eigenmodes to the coarse space for time-dependent runs, which targets the slowly
 decaying current patterns that limit convergence on large models. The eigenmodes are computed with ARPACK on the first
 run and reused by later runs on the same model while the resistivity is unchanged.
+
+Setting `pre_overlap` to a positive value (`pre_overlap=N` in
+\ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") replaces the diagonal blocks with
+overlapping subdomains: each leaf block of the partition tree together with the leaf blocks within `pre_overlap` steps of
+it, where two leaves are adjacent if their cells in the partition tree touch. Time-dependent runs use a weighted
+additive Schwarz preconditioner (each element's contribution is scaled by \f$ 1/\sqrt{n} \f$ for the \f$ n \f$ subdomains
+holding it, which keeps the preconditioner symmetric for CG), and frequency-response runs use restricted additive
+Schwarz (each subdomain only sets the solution on its own leaf). Overlap reduces the number of iterations, but with
+`pre_overlap=1` each subdomain is typically 5-10 times larger than a leaf block, so constructing, storing and applying
+the dense subdomain inverses costs much more than block-Jacobi; on a 22,000 element model it was slower overall in both
+cases, so it is off by default.

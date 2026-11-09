@@ -399,7 +399,7 @@ class ThinCurr():
         `pre_coarse` and ARPACK; computed once and reused by later `run_td` calls on the same model while the
         resistivity is unchanged)
         @param pre_overlap Overlap of the HODLR block preconditioners in adjacency steps between leaf blocks (0: block-Jacobi,
-        1: each leaf with the leaves adjacent to it, ...; additive Schwarz for time-domain and restricted additive Schwarz
+        1: each leaf with the leaves adjacent to it, ...; weighted additive Schwarz for time-domain and restricted additive Schwarz
         for frequency-domain runs)
         '''
         if target_size is not None:
