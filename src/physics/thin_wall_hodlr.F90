@@ -676,6 +676,8 @@ INTEGER(4) :: size_out,nblocks_progress(9),nblocks_complete,counts(4),iblock,jbl
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: kc_tmp,kr_tmp
 INTEGER(4), ALLOCATABLE, DIMENSION(:,:) :: block_interaction,row_count
 INTEGER(8) :: mat_size(3),compressed_size
+INTEGER(4) :: ntouch,ncorner,nsep_only,ntouch_only
+REAL(8) :: ov(3),sep
 LOGICAL :: is_masked,is_neighbor
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: near_closure,cell_mark
 LOGICAL, ALLOCATABLE, DIMENSION(:,:) :: dense_blocks
@@ -817,6 +819,27 @@ DO i=1,self%nlevels
   sparse_count=sparse_count+counts(3:4)
 END DO
 ! WRITE(*,*)self%ndense,self%nsparse
+!---Leaf pairs: contact in the partition tree (face, or edge/corner only) against the separation criterion
+IF(self%tree_admissibility)THEN
+  ntouch=0; ncorner=0; nsep_only=0; ntouch_only=0
+  ASSOCIATE(blks=>self%levels(self%nlevels)%blocks)
+  DO j=1,self%levels(self%nlevels)%nblocks
+    DO k=j+1,self%levels(self%nlevels)%nblocks
+      ov=MIN(blks(j)%cell(2,:),blks(k)%cell(2,:))-MAX(blks(j)%cell(1,:),blks(k)%cell(1,:))
+      sep=magnitude(blks(j)%center-blks(k)%center)/(blks(j)%extent+blks(k)%extent)
+      IF(ALL(ov>=0.d0))THEN
+        ntouch=ntouch+1
+        IF(COUNT(ov>0.d0)<2)ncorner=ncorner+1
+        IF(sep>MINVAL(self%aca_sep_thresh))ntouch_only=ntouch_only+1
+      ELSE IF(sep<=MINVAL(self%aca_sep_thresh))THEN
+        nsep_only=nsep_only+1
+      END IF
+    END DO
+  END DO
+  END ASSOCIATE
+  WRITE(*,'(2A,I8,A,I8)')oft_indent,'Touching leaf pairs =   ',ntouch,', edge/corner only =',ncorner
+  WRITE(*,'(2A,I8,A,I8)')oft_indent,'Near by separation only =',nsep_only,', touching only =',ntouch_only
+END IF
 ALLOCATE(self%dense_blocks(3,self%ndense),self%sparse_blocks(3,self%nsparse))
 self%ndense=0
 self%nsparse=0
