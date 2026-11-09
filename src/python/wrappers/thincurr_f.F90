@@ -44,6 +44,7 @@ integer(i4), POINTER :: reg_plot(:) !< Needs docs
 real(r8), POINTER :: r_plot(:,:) !< Needs docs
 INTEGER(i4), POINTER :: leaf_kr(:) => NULL() !< Pointer into `leaf_lc` for each HODLR leaf (see @ref thincurr_hodlr_leaves)
 INTEGER(i4), POINTER :: leaf_lc(:) => NULL() !< Leaves of each overlapping HODLR leaf subdomain (see @ref thincurr_hodlr_leaves)
+REAL(r8), POINTER :: leaf_cell(:,:,:) => NULL() !< Cell of each HODLR leaf (see @ref thincurr_hodlr_leaves)
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Cast C pointer to ThinCurr object
@@ -598,20 +599,24 @@ END SUBROUTINE thincurr_Lmat
 !> Get the leaf blocks of a HODLR operator and the leaves within a given number of adjacency steps of each leaf
 !! (see @ref thin_wall_hodlr::tw_hodlr_leaf_overlap "tw_hodlr_leaf_overlap")
 !!
-!! The subdomains are returned in CSR form (1-based), in arrays kept by this module until the next call.
+!! The subdomains are returned in CSR form (1-based) with the cell of each leaf, in arrays kept by this module until
+!! the next call.
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_hodlr_leaves(hodlr_ptr,overlap,pt_leaf,sizes,kr_ptr,lc_ptr,error_str) BIND(C,NAME="thincurr_hodlr_leaves")
+SUBROUTINE thincurr_hodlr_leaves(hodlr_ptr,overlap,pt_leaf,sizes,kr_ptr,lc_ptr,cell_ptr,error_str) BIND(C,NAME="thincurr_hodlr_leaves")
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Pointer to HODLR operator
 INTEGER(c_int), VALUE, INTENT(in) :: overlap !< Number of adjacency steps (>= 0)
 INTEGER(c_int), INTENT(out) :: pt_leaf(*) !< Leaf containing each mesh vertex (1-based) [np]
 INTEGER(c_int), INTENT(out) :: sizes(2) !< Number of leaves and size of `lc_ptr`
 TYPE(c_ptr), INTENT(out) :: kr_ptr !< Pointer into `lc_ptr` for each leaf [nleaves+1]
 TYPE(c_ptr), INTENT(out) :: lc_ptr !< Leaves of each subdomain, including the leaf itself (sorted)
+TYPE(c_ptr), INTENT(out) :: cell_ptr !< Cell of each leaf in the partition tree [2,3,nleaves]
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error message
+INTEGER(i4) :: i
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
 CALL copy_string('',error_str)
 kr_ptr=c_null_ptr
 lc_ptr=c_null_ptr
+cell_ptr=c_null_ptr
 sizes=0
 IF(.NOT.c_associated(hodlr_ptr))THEN
   CALL copy_string('HODLR operator not associated',error_str)
@@ -629,10 +634,16 @@ END IF
 pt_leaf(1:SIZE(hodlr_op%pt_leaf))=hodlr_op%pt_leaf
 IF(ASSOCIATED(leaf_kr))DEALLOCATE(leaf_kr)
 IF(ASSOCIATED(leaf_lc))DEALLOCATE(leaf_lc)
+IF(ASSOCIATED(leaf_cell))DEALLOCATE(leaf_cell)
 CALL tw_hodlr_leaf_overlap(hodlr_op,overlap,leaf_kr,leaf_lc)
+ALLOCATE(leaf_cell(2,3,hodlr_op%nblocks))
+DO i=1,hodlr_op%nblocks
+  leaf_cell(:,:,i)=hodlr_op%blocks(i)%cell
+END DO
 sizes=[hodlr_op%nblocks,SIZE(leaf_lc)]
 kr_ptr=C_LOC(leaf_kr)
 lc_ptr=C_LOC(leaf_lc)
+cell_ptr=C_LOC(leaf_cell)
 END SUBROUTINE thincurr_hodlr_leaves
 !---------------------------------------------------------------------------------
 !> Compute magnetic field reconstruction operators for a ThinCurr model

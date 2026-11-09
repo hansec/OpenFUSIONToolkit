@@ -28,6 +28,7 @@ type :: oft_tw_block
   INTEGER(4) :: parent = -1
   REAL(8) :: center(3) = 0.d0
   REAL(8) :: extent = 0.d0
+  REAL(8) :: cell(2,3) = 0.d0 !< Region of space owned by the block in the partition tree [lower/upper,x/y/z]
   INTEGER(4), POINTER :: ielem(:) => NULL()
   INTEGER(4), POINTER :: inv_map(:) => NULL()
   INTEGER(4), POINTER :: ipts(:) => NULL()
@@ -855,25 +856,34 @@ DO j=1,self%nlevels
   END DO
 END DO
 DEALLOCATE(cell_mark)
-!---Adjacency of leaf blocks from near-field interactions (for overlapping block preconditioners)
+!---Adjacency of leaf blocks in the partition tree (for overlapping block preconditioners)
 CALL tw_hodlr_leaf_adjacency(self)
 WRITE(*,'(2A,F6.1)')oft_indent,'Avg # adjacent = ',REAL(self%leaf_kadj(self%nblocks+1)-1,r8)/REAL(self%nblocks,r8)
 CALL oft_decrease_indent
 END SUBROUTINE tw_hodlr_setup
 !---------------------------------------------------------------------------------
-!> Find the leaf blocks adjacent to each leaf block of the HODLR tree
+!> Find the leaf blocks adjacent to each leaf block of the HODLR partition tree
 !!
-!! Two leaf blocks are adjacent if their interaction is flagged as near field in the HODLR tree (`mat_mask` of +/-3
-!! on the leaf level): they are not separated enough for ACA+ (distance between centers over sum of extents at most
-!! `aca_sep_thresh`) and the interaction is not already covered by a block on a higher level. The adjacency is
-!! geometric, so leaves can be adjacent without touching on the mesh (eg. close but separate surfaces), and is
-!! stored in CSR form in `leaf_kadj` and `leaf_ladj` (sorted, not including the leaf itself; symmetric). The leaf
-!! of each mesh vertex is stored in `pt_leaf`. Holes and V-coils are not part of any leaf.
+!! Each block owns a cell, the region of space given by the split planes of its ancestors (see @ref tw_part_mesh).
+!! The cells of the leaves tile the root cell, and two leaves are adjacent if their cells touch (share a face, an
+!! edge or a corner). Leaves that end at a shallower depth are copied unchanged to the lowest level, so they are
+!! included with their full cell. Adjacent leaves are found from each pair of sibling blocks by descending into
+!! both, keeping only pairs of blocks whose cells touch (a pair of leaves is found once, from its lowest common
+!! ancestor).
+!!
+!! The adjacency is stored in CSR form in `leaf_kadj` and `leaf_ladj` (sorted, not including the leaf itself;
+!! symmetric), and the leaf of each mesh vertex in `pt_leaf`. Holes and V-coils are not part of any leaf.
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_hodlr_leaf_adjacency(self)
-CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator (after partitioning and tagging interactions)
-INTEGER(i4) :: i,j,nadj
-INTEGER(i4), POINTER, DIMENSION(:,:) :: mask
+CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator (after partitioning)
+TYPE :: child_list
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: kc !< Pointer into `lc` for each block [nblocks+1]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lc !< Children of each block on the next level
+END TYPE child_list
+INTEGER(i4) :: i,j,k,l,npairs
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: nadj
+INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: pairs
+TYPE(child_list), ALLOCATABLE, DIMENSION(:) :: children
 !---Leaf of each mesh vertex
 IF(ASSOCIATED(self%pt_leaf))DEALLOCATE(self%pt_leaf)
 IF(ASSOCIATED(self%leaf_kadj))DEALLOCATE(self%leaf_kadj)
@@ -883,22 +893,92 @@ self%pt_leaf=0
 DO i=1,self%nblocks
   self%pt_leaf(self%blocks(i)%ipts)=i
 END DO
-!---Near-field interactions on the leaf level
-mask=>self%levels(self%nlevels)%mat_mask
-ALLOCATE(self%leaf_kadj(self%nblocks+1))
-self%leaf_kadj(1)=1
-DO i=1,self%nblocks
-  self%leaf_kadj(i+1)=self%leaf_kadj(i)+COUNT(ABS(mask(:,i))==3)
+!---Children of each block (on the next level)
+ALLOCATE(children(self%nlevels))
+DO i=1,self%nlevels-1
+  ALLOCATE(children(i)%kc(self%levels(i)%nblocks+1),children(i)%lc(self%levels(i+1)%nblocks))
+  children(i)%kc=0
+  DO j=1,self%levels(i+1)%nblocks
+    k=self%levels(i+1)%blocks(j)%parent
+    children(i)%kc(k)=children(i)%kc(k)+1
+  END DO
+  children(i)%kc(self%levels(i)%nblocks+1)=self%levels(i+1)%nblocks+1
+  DO j=self%levels(i)%nblocks,1,-1
+    children(i)%kc(j)=children(i)%kc(j+1)-children(i)%kc(j)
+  END DO
+  ALLOCATE(nadj(self%levels(i)%nblocks))
+  nadj=0
+  DO j=1,self%levels(i+1)%nblocks
+    k=self%levels(i+1)%blocks(j)%parent
+    children(i)%lc(children(i)%kc(k)+nadj(k))=j
+    nadj(k)=nadj(k)+1
+  END DO
+  DEALLOCATE(nadj)
 END DO
-ALLOCATE(self%leaf_ladj(self%leaf_kadj(self%nblocks+1)-1))
-DO i=1,self%nblocks
-  nadj=self%leaf_kadj(i)-1
-  DO j=1,self%nblocks
-    IF(ABS(mask(j,i))/=3)CYCLE
-    nadj=nadj+1
-    self%leaf_ladj(nadj)=j
+!---Touching pairs of leaves, from each pair of siblings
+npairs=0
+ALLOCATE(pairs(2,4*self%nblocks))
+DO i=1,self%nlevels-1
+  DO j=1,self%levels(i)%nblocks
+    DO k=children(i)%kc(j),children(i)%kc(j+1)-1
+      DO l=k+1,children(i)%kc(j+1)-1
+        CALL touching_leaves(i+1,children(i)%lc(k),i+1,children(i)%lc(l))
+      END DO
+    END DO
   END DO
 END DO
+!---Convert to CSR
+ALLOCATE(self%leaf_kadj(self%nblocks+1),nadj(self%nblocks))
+nadj=0
+DO i=1,npairs
+  nadj(pairs(:,i))=nadj(pairs(:,i))+1
+END DO
+self%leaf_kadj(1)=1
+DO i=1,self%nblocks
+  self%leaf_kadj(i+1)=self%leaf_kadj(i)+nadj(i)
+END DO
+ALLOCATE(self%leaf_ladj(self%leaf_kadj(self%nblocks+1)-1))
+nadj=0
+DO i=1,npairs
+  DO j=1,2
+    k=pairs(j,i)
+    self%leaf_ladj(self%leaf_kadj(k)+nadj(k))=pairs(3-j,i)
+    nadj(k)=nadj(k)+1
+  END DO
+END DO
+DO i=1,self%nblocks
+  CALL sort_array(self%leaf_ladj(self%leaf_kadj(i):self%leaf_kadj(i+1)-1),nadj(i))
+END DO
+DEALLOCATE(nadj,pairs,children)
+CONTAINS
+!> Record the pairs of leaves under blocks `ia` (level `la`) and `ib` (level `lb`) whose cells touch
+RECURSIVE SUBROUTINE touching_leaves(la,ia,lb,ib)
+INTEGER(i4), INTENT(in) :: la !< Level of first block
+INTEGER(i4), INTENT(in) :: ia !< First block
+INTEGER(i4), INTENT(in) :: lb !< Level of second block
+INTEGER(i4), INTENT(in) :: ib !< Second block
+INTEGER(i4) :: m
+INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: pairs_tmp
+IF(ANY(self%levels(la)%blocks(ia)%cell(1,:)>self%levels(lb)%blocks(ib)%cell(2,:)))RETURN
+IF(ANY(self%levels(lb)%blocks(ib)%cell(1,:)>self%levels(la)%blocks(ia)%cell(2,:)))RETURN
+IF((la==self%nlevels).AND.(lb==self%nlevels))THEN
+  IF(npairs==SIZE(pairs,DIM=2))THEN
+    ALLOCATE(pairs_tmp(2,2*npairs))
+    pairs_tmp(:,1:npairs)=pairs
+    CALL MOVE_ALLOC(pairs_tmp,pairs)
+  END IF
+  npairs=npairs+1
+  pairs(:,npairs)=[ia,ib]
+ELSE IF((lb==self%nlevels).OR.((la<self%nlevels).AND.(la<=lb)))THEN
+  DO m=children(la)%kc(ia),children(la)%kc(ia+1)-1
+    CALL touching_leaves(la+1,children(la)%lc(m),lb,ib)
+  END DO
+ELSE
+  DO m=children(lb)%kc(ib),children(lb)%kc(ib+1)-1
+    CALL touching_leaves(la,ia,lb+1,children(lb)%lc(m))
+  END DO
+END IF
+END SUBROUTINE touching_leaves
 END SUBROUTINE tw_hodlr_leaf_adjacency
 !---------------------------------------------------------------------------------
 !> Get the leaf blocks within a given number of adjacency steps of each leaf block of the HODLR tree, for
@@ -2137,7 +2217,12 @@ val=self%dense_mats(dense_ind(blk(self%nlevels,e)))%M(pos(self%nlevels,e),pos(se
 END FUNCTION entry
 END SUBROUTINE tw_hodlr_junction_cross_diag
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Partition the mesh vertices into a hierarchy of blocks with a binary space partitioning (k-d) tree
+!!
+!! Blocks with more than `leaf_target` vertices are split in two at the median of their vertices along the direction
+!! of largest spread. Each block stores the bounding box of its vertices (`center`, `extent`) and its cell, the
+!! part of its parent's cell on its side of the split plane, so that the cells of the leaves tile the bounding box
+!! of the mesh. Leaves above the lowest level are copied to each lower level.
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_part_mesh(self,leaf_target,nlevels,levels)
 TYPE(tw_type), INTENT(inout) :: self
@@ -2158,6 +2243,7 @@ TYPE :: tw_oct_tree
   INTEGER(4) :: dind = -1
   INTEGER(4) :: pind = -1
   REAL(8) :: bounds(2,3) = 0.d0
+  REAL(8) :: cell(2,3) = 0.d0 !< Region of space owned by the node (parent cell split at the parent's split plane)
   REAL(8) :: extent = 1.d99
   REAL(8) :: center(3) = 0.d0
   INTEGER(4), POINTER, CONTIGUOUS, DIMENSION(:) :: pts => NULL()
@@ -2193,6 +2279,7 @@ END DO
 ! mesh_tree%extents=mesh_tree%bounds
 !mesh_tree%center=SUM(mesh_tree%bounds,DIM=1)/2.d0
 mesh_tree%center=SUM(active_pts,DIM=2)/REAL(mesh_tree%npts,8)
+mesh_tree%cell=mesh_tree%bounds
 mesh_tree%depth=1
 !---Recursively subdivide
 nlevels=1
@@ -2256,6 +2343,7 @@ END DO
 ! levels(depth)%blocks(block_id)%ielem=leaf%pts
 levels(depth)%blocks(block_id)%center=leaf%center
 levels(depth)%blocks(block_id)%extent=leaf%extent
+levels(depth)%blocks(block_id)%cell=leaf%cell
 levels(depth)%blocks(block_id)%parent=parent
 !---Ensure we are at the bottom of each tree
 IF(leaf%nchildren>0)THEN
@@ -2288,6 +2376,7 @@ ELSE
     ! levels(j)%blocks(block_id)%ielem=leaf%pts
     levels(j)%blocks(block_id)%center=leaf%center
     levels(j)%blocks(block_id)%extent=leaf%extent
+    levels(j)%blocks(block_id)%cell=leaf%cell
     levels(j)%blocks(block_id)%parent=levels(j-1)%nblocks
   END DO
 END IF
@@ -2336,6 +2425,11 @@ j=sep_max(1)
 locs=[xm,ym,zm]
 child_tmp(1)%bounds(1,j)=locs(j)
 child_tmp(2)%bounds(2,j)=locs(j)
+!---Cells split at the same plane (not shrunk, so the cells of the leaves tile the root cell)
+child_tmp(1)%cell=leaf%cell
+child_tmp(2)%cell=leaf%cell
+child_tmp(1)%cell(1,j)=locs(j)
+child_tmp(2)%cell(2,j)=locs(j)
 ! WRITE(*,*)0
 ! WRITE(*,*)leaf%bounds(:,1)
 ! WRITE(*,*)leaf%bounds(:,2)
@@ -2423,6 +2517,7 @@ ALLOCATE(leaf%children(leaf%nchildren))
 leaf%nchildren=0
 DO j=1,2
   IF(child_tmp(j)%npts>0)THEN
+    IF(SIZE(leaf%children)==1)child_tmp(j)%cell=leaf%cell ! Only child keeps the whole cell
     leaf%nchildren=leaf%nchildren+1
     CALL clone_tree(child_tmp(j),leaf%children(leaf%nchildren))
     ! WRITE(*,*)'  Child block',child_tmp(j)%ncells,child_tmp(j)%ncells<=branch_target
@@ -2444,6 +2539,7 @@ out_tree%dind=in_tree%dind
 out_tree%pind=in_tree%pind
 out_tree%depth=in_tree%depth
 out_tree%bounds=in_tree%bounds
+out_tree%cell=in_tree%cell
 out_tree%extent=in_tree%extent
 out_tree%center=in_tree%center
 out_tree%npts=in_tree%npts
