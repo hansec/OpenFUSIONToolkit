@@ -173,6 +173,7 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   INTEGER(4), POINTER, DIMENSION(:) :: sub_llc => NULL() !< Leaves of each overlapping subdomain (owned leaf first)
   INTEGER(4), POINTER, DIMENSION(:) :: sub_kr => NULL() !< Pointer into `sub_inds` for each overlapping subdomain [nblocks+1]
   INTEGER(4), POINTER, DIMENSION(:) :: sub_inds => NULL() !< Elements of each overlapping subdomain (owned leaf first)
+  REAL(r8), POINTER, DIMENSION(:) :: sub_wt => NULL() !< Weight of each element in the subdomain corrections, 1/sqrt(number of subdomains holding it)
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => rbjprecond_apply
@@ -3726,6 +3727,13 @@ IF(new_subs)THEN
     nstore=nstore+INT(n,8)**2
   END DO
   CALL tw_hodlr_schwarz_report(self%mf_obj,self%sub_kr,nstore*MERGE(4_8,8_8,self%mf_obj%pre_single))
+  !---Weights: each element counted once over the subdomains holding it
+  ALLOCATE(self%sub_wt(self%mf_obj%tw_obj%np_active))
+  self%sub_wt=0.d0
+  DO i=1,SIZE(self%sub_inds)
+    self%sub_wt(self%sub_inds(i))=self%sub_wt(self%sub_inds(i))+1.d0
+  END DO
+  WHERE(self%sub_wt>0.d0)self%sub_wt=1.d0/SQRT(self%sub_wt)
 END IF
 END SUBROUTINE schwarz_factor
 !------------------------------------------------------------------------------
@@ -3750,24 +3758,24 @@ DO i=1,self%mf_obj%nblocks
   IF(self%mf_obj%pre_single)THEN
     scale=0.d0
     DO j=1,nrows
-      scale=MAX(scale,ABS(ge(inds(j))))
+      scale=MAX(scale,ABS(ge(inds(j))*self%sub_wt(inds(j))))
     END DO
     IF(scale>0.d0)THEN
       DO j=1,nrows
-        vloc4(j,1) = REAL(ge(inds(j))/scale,r4)
+        vloc4(j,1) = REAL(ge(inds(j))*self%sub_wt(inds(j))/scale,r4)
       END DO
       CALL sgemv('N',nrows,nrows,1.0_r4,mat%M4,nrows,vloc4(:,1),1,0.0_r4,vloc4(:,2),1)
       DO j=1,nrows
-        uacc(inds(j)) = uacc(inds(j)) + REAL(vloc4(j,2),r8)*scale
+        uacc(inds(j)) = uacc(inds(j)) + REAL(vloc4(j,2),r8)*scale*self%sub_wt(inds(j))
       END DO
     END IF
   ELSE
     DO j=1,nrows
-      vloc(j,1) = ge(inds(j))
+      vloc(j,1) = ge(inds(j))*self%sub_wt(inds(j))
     END DO
     CALL dgemv('N',nrows,nrows,1.d0,mat%M,nrows,vloc(:,1),1,0.d0,vloc(:,2),1)
     DO j=1,nrows
-      uacc(inds(j)) = uacc(inds(j)) + vloc(j,2)
+      uacc(inds(j)) = uacc(inds(j)) + vloc(j,2)*self%sub_wt(inds(j))
     END DO
   END IF
   END ASSOCIATE
@@ -4063,6 +4071,7 @@ IF(ASSOCIATED(self%z_gvals))DEALLOCATE(self%z_gvals)
 IF(ASSOCIATED(self%zlz))DEALLOCATE(self%zlz,self%zrz)
 IF(ASSOCIATED(self%einv))DEALLOCATE(self%einv)
 IF(ASSOCIATED(self%sub_kr))DEALLOCATE(self%sub_lkr,self%sub_llc,self%sub_kr,self%sub_inds)
+IF(ASSOCIATED(self%sub_wt))DEALLOCATE(self%sub_wt)
 self%nz=0
 !---Reset
 self%max_block_size=0
