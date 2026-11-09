@@ -1556,3 +1556,34 @@ def test_hodlr_schwarz():
     for out in (full, out):
         assert np.allclose(out[2], ref[2], rtol=0.0, atol=1.E-6*np.abs(ref[2]).max())
         assert np.allclose(out[3], ref[3], rtol=0.0, atol=1.E-8*np.abs(ref[3]).max())
+
+
+#============================================================================
+# Near and far HODLR interactions from partition tree adjacency
+def run_hodlr_admissibility(tree, mp_q):
+    '''Products of the dense and HODLR inductance matrices with random vectors, and the near/far interactions'''
+    result = None
+    try:
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        tw_model = ThinCurr(_get_oft_env())
+        tw_model.setup_model(mesh_file='tw_test-torus.h5')
+        tw_model.compute_Lmat()
+        X = np.random.default_rng(7).standard_normal((tw_model.nelems, 3))
+        LX = tw_model.Lmat @ X
+        tw_model.set_hodlr_options(target_size=40, tree_admissibility=tree, L_svd_tol=-1.E-6)
+        tw_model.compute_Lmat(use_hodlr=True)
+        HX = np.column_stack([tw_model.apply_Lmat(X[:, k]) for k in range(X.shape[1])])
+        result = (LX, HX)
+    except BaseException as e:
+        print(e)
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("tree", (False, True))
+def test_hodlr_admissibility(tree):
+    result = mp_run(run_hodlr_admissibility, (tree,))
+    assert result  # False (timeout or crash) or None (exception)
+    LX, HX = result
+    assert np.linalg.norm(HX-LX)/np.linalg.norm(LX) < 1.E-4

@@ -44,7 +44,8 @@ class ThinCurr():
             'pre_single': 'F',
             'pre_coarse': 'F',
             'pre_neigs': '0',
-            'pre_overlap': '0'
+            'pre_overlap': '0',
+            'tree_admissibility': 'F'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -383,7 +384,7 @@ class ThinCurr():
 
     def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
                           L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,pre_coarse=None,
-                          pre_neigs=None,pre_overlap=None):
+                          pre_neigs=None,pre_overlap=None,tree_admissibility=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
@@ -401,6 +402,8 @@ class ThinCurr():
         @param pre_overlap Overlap of the HODLR block preconditioners in adjacency steps between leaf blocks (0: block-Jacobi,
         1: each leaf with the leaves adjacent to it, ...; weighted additive Schwarz for time-domain and restricted additive Schwarz
         for frequency-domain runs)
+        @param tree_admissibility Choose near (refined, SVD on the lowest level) and far (ACA+) interactions by adjacency
+        of the blocks in the partition tree (their cells touch) instead of `aca_sep_thresh`?
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
@@ -428,6 +431,8 @@ class ThinCurr():
             if pre_overlap < 0:
                 raise ValueError('"pre_overlap" must be >= 0')
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_overlap'] = '{0:d}'.format(pre_overlap)
+        if tree_admissibility is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['tree_admissibility'] = 'T' if tree_admissibility else 'F'
         self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
