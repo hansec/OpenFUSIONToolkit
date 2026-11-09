@@ -855,7 +855,7 @@ DO j=1,self%nlevels
   END DO
 END DO
 DEALLOCATE(cell_mark)
-!---Adjacency of leaf blocks (for overlapping block preconditioners)
+!---Adjacency of leaf blocks from near-field interactions (for overlapping block preconditioners)
 CALL tw_hodlr_leaf_adjacency(self)
 WRITE(*,'(2A,F6.1)')oft_indent,'Avg # adjacent = ',REAL(self%leaf_kadj(self%nblocks+1)-1,r8)/REAL(self%nblocks,r8)
 CALL oft_decrease_indent
@@ -863,61 +863,42 @@ END SUBROUTINE tw_hodlr_setup
 !---------------------------------------------------------------------------------
 !> Find the leaf blocks adjacent to each leaf block of the HODLR tree
 !!
-!! Two leaf blocks are adjacent if they touch on the mesh, ie. if a cell has vertices in both. Every mesh vertex
-!! (active or not) belongs to exactly one leaf, so the leaves tile the mesh and each cell links the leaves of its
-!! vertices. The leaves of each vertex are stored in `pt_leaf` and the adjacency in CSR form in `leaf_kadj` and
-!! `leaf_ladj` (sorted, not including the leaf itself; symmetric). Leaves can be adjacent although they couple
-!! no elements, eg. when the shared cell's vertices in one of them are all inactive.
-!!
-!! For meshes split at junctions the copies of a vertex have the same position, so they are always in the same
-!! leaf and the adjacency is that of the unsplit mesh: leaves on different sheets meeting at a junction are
-!! adjacent, whether or not the junction is insulated. Holes and V-coils are not part of any leaf.
+!! Two leaf blocks are adjacent if their interaction is flagged as near field in the HODLR tree (`mat_mask` of +/-3
+!! on the leaf level): they are not separated enough for ACA+ (distance between centers over sum of extents at most
+!! `aca_sep_thresh`) and the interaction is not already covered by a block on a higher level. The adjacency is
+!! geometric, so leaves can be adjacent without touching on the mesh (eg. close but separate surfaces), and is
+!! stored in CSR form in `leaf_kadj` and `leaf_ladj` (sorted, not including the leaf itself; symmetric). The leaf
+!! of each mesh vertex is stored in `pt_leaf`. Holes and V-coils are not part of any leaf.
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_hodlr_leaf_adjacency(self)
-CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator (after partitioning)
-INTEGER(i4) :: i,j,k,l,m,ipass,ileaf,nadj
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: mark
-CLASS(oft_bmesh), POINTER :: mesh
-mesh=>self%tw_obj%mesh
+CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator (after partitioning and tagging interactions)
+INTEGER(i4) :: i,j,nadj
+INTEGER(i4), POINTER, DIMENSION(:,:) :: mask
 !---Leaf of each mesh vertex
 IF(ASSOCIATED(self%pt_leaf))DEALLOCATE(self%pt_leaf)
 IF(ASSOCIATED(self%leaf_kadj))DEALLOCATE(self%leaf_kadj)
 IF(ASSOCIATED(self%leaf_ladj))DEALLOCATE(self%leaf_ladj)
-ALLOCATE(self%pt_leaf(mesh%np))
+ALLOCATE(self%pt_leaf(self%tw_obj%mesh%np))
 self%pt_leaf=0
 DO i=1,self%nblocks
   self%pt_leaf(self%blocks(i)%ipts)=i
 END DO
-!---Count (pass 1) and store (pass 2) the leaves touching each leaf through the cells around its vertices
-ALLOCATE(self%leaf_kadj(self%nblocks+1),mark(self%nblocks))
+!---Near-field interactions on the leaf level
+mask=>self%levels(self%nlevels)%mat_mask
+ALLOCATE(self%leaf_kadj(self%nblocks+1))
 self%leaf_kadj(1)=1
-DO ipass=1,2
-  mark=0
-  nadj=0
-  DO i=1,self%nblocks
-    mark(i)=i
-    DO j=1,self%blocks(i)%np
-      k=self%blocks(i)%ipts(j)
-      DO l=mesh%kpc(k),mesh%kpc(k+1)-1
-        DO m=1,mesh%cell_np
-          ileaf=self%pt_leaf(mesh%lc(m,mesh%lpc(l)))
-          IF(ileaf==0)CYCLE
-          IF(mark(ileaf)==i)CYCLE
-          mark(ileaf)=i
-          nadj=nadj+1
-          IF(ipass==2)self%leaf_ladj(nadj)=ileaf
-        END DO
-      END DO
-    END DO
-    IF(ipass==1)THEN
-      self%leaf_kadj(i+1)=nadj+1
-    ELSE
-      CALL sort_array(self%leaf_ladj(self%leaf_kadj(i):self%leaf_kadj(i+1)-1),self%leaf_kadj(i+1)-self%leaf_kadj(i))
-    END IF
-  END DO
-  IF(ipass==1)ALLOCATE(self%leaf_ladj(nadj))
+DO i=1,self%nblocks
+  self%leaf_kadj(i+1)=self%leaf_kadj(i)+COUNT(ABS(mask(:,i))==3)
 END DO
-DEALLOCATE(mark)
+ALLOCATE(self%leaf_ladj(self%leaf_kadj(self%nblocks+1)-1))
+DO i=1,self%nblocks
+  nadj=self%leaf_kadj(i)-1
+  DO j=1,self%nblocks
+    IF(ABS(mask(j,i))/=3)CYCLE
+    nadj=nadj+1
+    self%leaf_ladj(nadj)=j
+  END DO
+END DO
 END SUBROUTINE tw_hodlr_leaf_adjacency
 !---------------------------------------------------------------------------------
 !> Get the leaf blocks within a given number of adjacency steps of each leaf block of the HODLR tree, for

@@ -463,9 +463,11 @@ class ThinCurr():
     def get_hodlr_leaves(self,overlap=0):
         '''! Get the leaf blocks of the HODLR inductance matrix and overlapping subdomains built from them
 
-        Two leaves are adjacent if they touch on the mesh (a cell has vertices in both). The subdomain of each leaf
-        holds the leaves within `overlap` adjacency steps of it: the leaf alone for `overlap=0` (the blocks of the
-        block-Jacobi preconditioners), the leaf and the leaves adjacent to it for `overlap=1`, and so on.
+        Two leaves are adjacent if their interaction is near field in the HODLR tree (not separated enough for ACA+,
+        see `aca_sep_thresh` in \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.set_hodlr_options "set_hodlr_options()").
+        The subdomain of each leaf holds the leaves within `overlap` adjacency steps of it: the leaf alone for
+        `overlap=0` (the blocks of the block-Jacobi preconditioners), the leaf and the leaves adjacent to it for
+        `overlap=1`, and so on.
 
         @note Requires a HODLR inductance matrix, see \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.compute_Lmat "compute_Lmat()".
 

@@ -1405,23 +1405,30 @@ def test_mirnov_point(coil_type):
 
 
 #============================================================================
-# Adjacency of HODLR leaf blocks
-def leaf_overlap_reference(lc, pt_leaf, overlap):
-    '''Leaves within `overlap` steps of each leaf, with leaves adjacent if a cell has vertices in both'''
-    import scipy.sparse
+# Adjacency of HODLR leaf blocks (near-field interactions)
+def leaf_near_field(r, pt_leaf, sep_thresh):
+    '''Leaf pairs with separation (distance between centers over sum of extents) at most `sep_thresh`, and pairs
+    too close to the threshold to compare'''
     nleaves = pt_leaf.max() + 1
-    cell_leaves = pt_leaf[lc]
-    rows = np.hstack([cell_leaves[:, i] for i in range(3) for _ in range(3)])
-    cols = np.hstack([cell_leaves[:, j] for _ in range(3) for j in range(3)])
-    adj = scipy.sparse.csr_array((np.ones(rows.shape[0]), (rows, cols)), shape=(nleaves, nleaves))
-    adj = (adj > 0).astype(np.int64)
-    reach = scipy.sparse.identity(nleaves, dtype=np.int64, format='csr')
+    centers = np.array([r[pt_leaf == i].mean(axis=0) for i in range(nleaves)])
+    extents = np.array([np.linalg.norm(r[pt_leaf == i] - centers[i], axis=1).max() for i in range(nleaves)])
+    with np.errstate(divide='ignore', invalid='ignore'):
+        sep = np.linalg.norm(centers[:, None, :] - centers[None, :, :], axis=2)/(extents[:, None] + extents[None, :])
+    np.fill_diagonal(sep, 0.0)
+    return sep <= sep_thresh, np.abs(sep - sep_thresh) < 1.E-8
+
+
+def leaf_overlap_reference(adj, overlap):
+    '''Leaves within `overlap` steps of each leaf for the adjacency matrix `adj` (diagonal included)'''
+    import scipy.sparse
+    adj = scipy.sparse.csr_array(adj.astype(np.int64))
+    reach = scipy.sparse.identity(adj.shape[0], dtype=np.int64, format='csr')
     for _ in range(overlap):
         reach = ((reach @ adj) > 0).astype(np.int64)
-    return [np.sort(reach[[i], :].indices) for i in range(nleaves)]
+    return [np.sort(reach[[i], :].indices) for i in range(adj.shape[0])]
 
 
-def run_hodlr_leaves(meshfile, target_size, mp_q):
+def run_hodlr_leaves(meshfile, target_size, sep_thresh, mp_q):
     '''Leaf of each vertex and overlapping leaf subdomains (overlap 0-3) of the HODLR inductance matrix'''
     result = None
     try:
@@ -1434,7 +1441,7 @@ def run_hodlr_leaves(meshfile, target_size, mp_q):
             checks.append(False)
         except ValueError:
             checks.append(True)
-        tw_model.set_hodlr_options(target_size=target_size)
+        tw_model.set_hodlr_options(target_size=target_size, aca_sep_thresh=sep_thresh)
         tw_model.compute_Lmat(use_hodlr=True)
         try:
             tw_model.get_hodlr_leaves(-1)
@@ -1452,26 +1459,39 @@ def run_hodlr_leaves(meshfile, target_size, mp_q):
 
 
 @pytest.mark.coverage
-@pytest.mark.parametrize("meshfile,target_size", (("tw_test-plate.h5", 20), ("tw_test-torus.h5", 60),
-                                                  ("tw_test-torus.h5", 30)))
-def test_hodlr_leaves(meshfile, target_size):
+@pytest.mark.parametrize("meshfile,target_size,sep_thresh", (("tw_test-plate.h5", 20, (1.0, 1.E3)),
+                                                             ("tw_test-plate.h5", 20, (1.5, 1.E3)),
+                                                             ("tw_test-torus.h5", 30, (1.0, 1.E3)),
+                                                             ("tw_test-torus.h5", 30, (1.0, 1.1))))
+def test_hodlr_leaves(meshfile, target_size, sep_thresh):
     from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh
     os.chdir(test_dir)
-    lc = read_ThinCurr_mesh(meshfile)['lc']
-    result = mp_run(run_hodlr_leaves, (meshfile, target_size))
+    r = read_ThinCurr_mesh(meshfile)['r']
+    result = mp_run(run_hodlr_leaves, (meshfile, target_size, sep_thresh))
     assert result  # False (timeout or crash) or None (exception)
     assert result[0]
     pt_leaf, sub = result[1][0]
     nleaves = len(sub)
     # Leaves tile the mesh vertices, and there are enough of them to test the adjacency
-    assert pt_leaf.shape[0] == lc.max() + 1
+    assert pt_leaf.shape[0] == r.shape[0]
     assert np.array_equal(np.unique(pt_leaf), np.arange(nleaves))
     assert nleaves > 4
+    # Adjacency (overlap 1) against the separation of the leaves: equal if no interaction is compressed above the
+    # leaf level (large threshold for other levels), otherwise a subset (pairs covered by higher-level blocks)
+    adj = np.zeros((nleaves, nleaves), dtype=bool)
+    for i, leaves in enumerate(result[1][1][1]):
+        adj[i, leaves] = True
+    assert np.array_equal(adj, adj.T) and np.all(np.diag(adj))
+    near, close = leaf_near_field(r, pt_leaf, sep_thresh[0])
+    if sep_thresh[1] > 100.0:
+        assert np.array_equal(adj[~close], near[~close])
+    else:
+        assert not np.any(adj & ~near & ~close)
+    # Overlap 1 adds leaves to the subdomains, but none holds every leaf
+    sizes = adj.sum(axis=1)
+    assert sizes.max() > 1 and sizes.max() < nleaves
+    # Subdomains for each overlap: breadth-first search of the adjacency
     for overlap in range(4):
         assert np.array_equal(result[1][overlap][0], pt_leaf)
-        sub = result[1][overlap][1]
-        ref = leaf_overlap_reference(lc, pt_leaf, overlap)
-        assert all(np.array_equal(sub[i], ref[i]) for i in range(nleaves))
-    # Overlap 1 adds leaves to the subdomains, but none holds every leaf
-    sizes = np.array([len(s) for s in result[1][1][1]])
-    assert sizes.max() > 1 and sizes.max() < nleaves
+        ref = leaf_overlap_reference(adj, overlap)
+        assert all(np.array_equal(result[1][overlap][1][i], ref[i]) for i in range(nleaves))
