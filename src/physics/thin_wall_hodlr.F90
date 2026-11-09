@@ -81,6 +81,9 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:,:) :: dense_B_mats => NULL() !< Dense matrices for diagonal interactions (B-field)
   REAL(8), POINTER, DIMENSION(:,:,:) :: hole_Vcoil_Bmat => NULL() !< Dense coupling matrix to holes and Vcoils (B-field)
   REAL(8), POINTER, DIMENSION(:,:,:) :: Icoil_Bmat => NULL() !< Dense coupling matrix to Icoils (B-field) [np,n_icoils,3]
+  INTEGER(i4), POINTER, DIMENSION(:) :: pt_leaf => NULL() !< Leaf block containing each mesh vertex [mesh%np]
+  INTEGER(i4), POINTER, DIMENSION(:) :: leaf_kadj => NULL() !< Pointer into `leaf_ladj` for each leaf block [nblocks+1]
+  INTEGER(i4), POINTER, DIMENSION(:) :: leaf_ladj => NULL() !< Leaf blocks adjacent to each leaf block (sorted, not including the leaf itself)
   TYPE(oft_tw_block), POINTER, DIMENSION(:) :: blocks => NULL() !< REMOVE
   TYPE(oft_tw_level), POINTER, DIMENSION(:) :: levels => NULL() !< Block heirarchy
   type(tw_type), pointer :: tw_obj => NULL()
@@ -852,8 +855,129 @@ DO j=1,self%nlevels
   END DO
 END DO
 DEALLOCATE(cell_mark)
+!---Adjacency of leaf blocks (for overlapping block preconditioners)
+CALL tw_hodlr_leaf_adjacency(self)
+WRITE(*,'(2A,F6.1)')oft_indent,'Avg # adjacent = ',REAL(self%leaf_kadj(self%nblocks+1)-1,r8)/REAL(self%nblocks,r8)
 CALL oft_decrease_indent
 END SUBROUTINE tw_hodlr_setup
+!---------------------------------------------------------------------------------
+!> Find the leaf blocks adjacent to each leaf block of the HODLR tree
+!!
+!! Two leaf blocks are adjacent if they touch on the mesh, ie. if a cell has vertices in both. Every mesh vertex
+!! (active or not) belongs to exactly one leaf, so the leaves tile the mesh and each cell links the leaves of its
+!! vertices. The leaves of each vertex are stored in `pt_leaf` and the adjacency in CSR form in `leaf_kadj` and
+!! `leaf_ladj` (sorted, not including the leaf itself; symmetric). Leaves can be adjacent although they couple
+!! no elements, eg. when the shared cell's vertices in one of them are all inactive.
+!!
+!! For meshes split at junctions the copies of a vertex have the same position, so they are always in the same
+!! leaf and the adjacency is that of the unsplit mesh: leaves on different sheets meeting at a junction are
+!! adjacent, whether or not the junction is insulated. Holes and V-coils are not part of any leaf.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_leaf_adjacency(self)
+CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator (after partitioning)
+INTEGER(i4) :: i,j,k,l,m,ipass,ileaf,nadj
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: mark
+CLASS(oft_bmesh), POINTER :: mesh
+mesh=>self%tw_obj%mesh
+!---Leaf of each mesh vertex
+IF(ASSOCIATED(self%pt_leaf))DEALLOCATE(self%pt_leaf)
+IF(ASSOCIATED(self%leaf_kadj))DEALLOCATE(self%leaf_kadj)
+IF(ASSOCIATED(self%leaf_ladj))DEALLOCATE(self%leaf_ladj)
+ALLOCATE(self%pt_leaf(mesh%np))
+self%pt_leaf=0
+DO i=1,self%nblocks
+  self%pt_leaf(self%blocks(i)%ipts)=i
+END DO
+!---Count (pass 1) and store (pass 2) the leaves touching each leaf through the cells around its vertices
+ALLOCATE(self%leaf_kadj(self%nblocks+1),mark(self%nblocks))
+self%leaf_kadj(1)=1
+DO ipass=1,2
+  mark=0
+  nadj=0
+  DO i=1,self%nblocks
+    mark(i)=i
+    DO j=1,self%blocks(i)%np
+      k=self%blocks(i)%ipts(j)
+      DO l=mesh%kpc(k),mesh%kpc(k+1)-1
+        DO m=1,mesh%cell_np
+          ileaf=self%pt_leaf(mesh%lc(m,mesh%lpc(l)))
+          IF(ileaf==0)CYCLE
+          IF(mark(ileaf)==i)CYCLE
+          mark(ileaf)=i
+          nadj=nadj+1
+          IF(ipass==2)self%leaf_ladj(nadj)=ileaf
+        END DO
+      END DO
+    END DO
+    IF(ipass==1)THEN
+      self%leaf_kadj(i+1)=nadj+1
+    ELSE
+      CALL sort_array(self%leaf_ladj(self%leaf_kadj(i):self%leaf_kadj(i+1)-1),self%leaf_kadj(i+1)-self%leaf_kadj(i))
+    END IF
+  END DO
+  IF(ipass==1)ALLOCATE(self%leaf_ladj(nadj))
+END DO
+DEALLOCATE(mark)
+END SUBROUTINE tw_hodlr_leaf_adjacency
+!---------------------------------------------------------------------------------
+!> Get the leaf blocks within a given number of adjacency steps of each leaf block of the HODLR tree, for
+!! overlapping (eg. additive Schwarz) subdomains built from the leaves
+!!
+!! Overlap 0 gives each leaf alone (the blocks of the block-Jacobi preconditioners), overlap 1 adds the leaves
+!! adjacent to it (see @ref tw_hodlr_leaf_adjacency), and each further level adds the leaves adjacent to those
+!! already included (breadth-first search of the leaf adjacency graph).
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_leaf_overlap(self,overlap,kr,lc)
+CLASS(oft_tw_hodlr_op), INTENT(in) :: self !< HODLR operator (after setup)
+INTEGER(i4), INTENT(in) :: overlap !< Number of adjacency steps (>= 0)
+INTEGER(i4), POINTER, DIMENSION(:), INTENT(out) :: kr !< Pointer into `lc` for each leaf [nblocks+1]
+INTEGER(i4), POINTER, DIMENSION(:), INTENT(out) :: lc !< Leaves within `overlap` steps of each leaf, including itself (sorted)
+INTEGER(i4) :: i,ipass,n
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: mark,queue
+IF(overlap<0)CALL oft_abort('Overlap must be >= 0','tw_hodlr_leaf_overlap',__FILE__)
+IF(.NOT.ASSOCIATED(self%leaf_kadj))CALL oft_abort('Leaf adjacency not computed','tw_hodlr_leaf_overlap',__FILE__)
+ALLOCATE(kr(self%nblocks+1),mark(self%nblocks),queue(self%nblocks))
+kr(1)=1
+DO ipass=1,2
+  mark=0
+  DO i=1,self%nblocks
+    n=leaf_bfs(i)
+    IF(ipass==1)THEN
+      kr(i+1)=kr(i)+n
+    ELSE
+      lc(kr(i):kr(i+1)-1)=queue(1:n)
+      CALL sort_array(lc(kr(i):kr(i+1)-1),n)
+    END IF
+  END DO
+  IF(ipass==1)ALLOCATE(lc(kr(self%nblocks+1)-1))
+END DO
+DEALLOCATE(mark,queue)
+CONTAINS
+!> Breadth-first search from leaf `i` up to `overlap` steps, leaves found are put in `queue`
+FUNCTION leaf_bfs(i) RESULT(nfound)
+INTEGER(i4), INTENT(in) :: i !< Starting leaf
+INTEGER(i4) :: nfound !< Number of leaves found (including `i`)
+INTEGER(i4) :: istep,istart,iend,j,k,l
+mark(i)=i
+queue(1)=i
+nfound=1
+istart=1
+DO istep=1,overlap
+  iend=nfound
+  DO j=istart,iend
+    DO k=self%leaf_kadj(queue(j)),self%leaf_kadj(queue(j)+1)-1
+      l=self%leaf_ladj(k)
+      IF(mark(l)==i)CYCLE
+      mark(l)=i
+      nfound=nfound+1
+      queue(nfound)=l
+    END DO
+  END DO
+  IF(nfound==iend)EXIT
+  istart=iend+1
+END DO
+END FUNCTION leaf_bfs
+END SUBROUTINE tw_hodlr_leaf_overlap
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------

@@ -1402,3 +1402,76 @@ def test_mirnov_point(coil_type):
     assert np.abs(Ms_loop - Ms_point).max() < 1.E-5*np.abs(Ms_point).max()
     assert np.allclose(Msc_loop, Msc_point, rtol=1.E-6, atol=0.0)
 
+
+
+#============================================================================
+# Adjacency of HODLR leaf blocks
+def leaf_overlap_reference(lc, pt_leaf, overlap):
+    '''Leaves within `overlap` steps of each leaf, with leaves adjacent if a cell has vertices in both'''
+    import scipy.sparse
+    nleaves = pt_leaf.max() + 1
+    cell_leaves = pt_leaf[lc]
+    rows = np.hstack([cell_leaves[:, i] for i in range(3) for _ in range(3)])
+    cols = np.hstack([cell_leaves[:, j] for _ in range(3) for j in range(3)])
+    adj = scipy.sparse.csr_array((np.ones(rows.shape[0]), (rows, cols)), shape=(nleaves, nleaves))
+    adj = (adj > 0).astype(np.int64)
+    reach = scipy.sparse.identity(nleaves, dtype=np.int64, format='csr')
+    for _ in range(overlap):
+        reach = ((reach @ adj) > 0).astype(np.int64)
+    return [np.sort(reach[[i], :].indices) for i in range(nleaves)]
+
+
+def run_hodlr_leaves(meshfile, target_size, mp_q):
+    '''Leaf of each vertex and overlapping leaf subdomains (overlap 0-3) of the HODLR inductance matrix'''
+    result = None
+    try:
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        tw_model = ThinCurr(_get_oft_env())
+        tw_model.setup_model(mesh_file=meshfile)
+        checks = []
+        try:
+            tw_model.get_hodlr_leaves()  # HODLR matrix not computed yet
+            checks.append(False)
+        except ValueError:
+            checks.append(True)
+        tw_model.set_hodlr_options(target_size=target_size)
+        tw_model.compute_Lmat(use_hodlr=True)
+        try:
+            tw_model.get_hodlr_leaves(-1)
+            checks.append(False)
+        except ValueError:
+            checks.append(True)
+        leaves = {}
+        for overlap in range(4):
+            leaves[overlap] = tw_model.get_hodlr_leaves(overlap)
+        result = (all(checks), leaves)
+    except BaseException as e:
+        print(e)
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("meshfile,target_size", (("tw_test-plate.h5", 20), ("tw_test-torus.h5", 60),
+                                                  ("tw_test-torus.h5", 30)))
+def test_hodlr_leaves(meshfile, target_size):
+    from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh
+    os.chdir(test_dir)
+    lc = read_ThinCurr_mesh(meshfile)['lc']
+    result = mp_run(run_hodlr_leaves, (meshfile, target_size))
+    assert result  # False (timeout or crash) or None (exception)
+    assert result[0]
+    pt_leaf, sub = result[1][0]
+    nleaves = len(sub)
+    # Leaves tile the mesh vertices, and there are enough of them to test the adjacency
+    assert pt_leaf.shape[0] == lc.max() + 1
+    assert np.array_equal(np.unique(pt_leaf), np.arange(nleaves))
+    assert nleaves > 4
+    for overlap in range(4):
+        assert np.array_equal(result[1][overlap][0], pt_leaf)
+        sub = result[1][overlap][1]
+        ref = leaf_overlap_reference(lc, pt_leaf, overlap)
+        assert all(np.array_equal(sub[i], ref[i]) for i in range(nleaves))
+    # Overlap 1 adds leaves to the subdomains, but none holds every leaf
+    sizes = np.array([len(s) for s in result[1][1][1]])
+    assert sizes.max() > 1 and sizes.max() < nleaves

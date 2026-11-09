@@ -58,6 +58,10 @@ thincurr_cross_eval = ctypes_subroutine(oftpy_lib.thincurr_cross_eval,
 thincurr_Lmat = ctypes_subroutine(oftpy_lib.thincurr_Lmat,
     [c_void_p, c_bool, c_void_ptr_ptr, c_char_p, c_char_p])
 
+# thincurr_hodlr_leaves(hodlr_ptr,overlap,pt_leaf,sizes,kr_ptr,lc_ptr,error_str)
+thincurr_hodlr_leaves = ctypes_subroutine(oftpy_lib.thincurr_hodlr_leaves,
+    [c_void_p, c_int, ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), c_int_ptr_ptr, c_int_ptr_ptr, c_char_p])
+
 # thincurr_Bmat(tw_ptr,hodlr_ptr,B_dx,Bmat_ptr,Bdr_ptr,cache_file,error_str)
 thincurr_Bmat = ctypes_subroutine(oftpy_lib.thincurr_Bmat,
     [c_void_p, c_void_p, c_double, c_void_ptr_ptr, c_void_ptr_ptr, c_char_p, c_char_p])

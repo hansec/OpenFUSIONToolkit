@@ -460,6 +460,34 @@ class ThinCurr():
             thincurr_apply_Lmat(self.tw_obj,field_in,c_void_p())
         return field_in
 
+    def get_hodlr_leaves(self,overlap=0):
+        '''! Get the leaf blocks of the HODLR inductance matrix and overlapping subdomains built from them
+
+        Two leaves are adjacent if they touch on the mesh (a cell has vertices in both). The subdomain of each leaf
+        holds the leaves within `overlap` adjacency steps of it: the leaf alone for `overlap=0` (the blocks of the
+        block-Jacobi preconditioners), the leaf and the leaves adjacent to it for `overlap=1`, and so on.
+
+        @note Requires a HODLR inductance matrix, see \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.compute_Lmat "compute_Lmat()".
+
+        @param overlap Number of adjacency steps (>= 0)
+        @result `pt_leaf` Leaf containing each mesh vertex [np] (0-based),
+        `subdomains` Leaves of the subdomain of each leaf, including the leaf itself (sorted, 0-based) [nleaves]
+        '''
+        if not self.Lmat_hodlr:
+            raise ValueError('HODLR matrix not computed, call `compute_Lmat(use_hodlr=True)` first')
+        pt_leaf = numpy.zeros((self.np,), dtype=numpy.int32)
+        sizes = numpy.zeros((2,), dtype=numpy.int32)
+        kr_loc = c_int_ptr()
+        lc_loc = c_int_ptr()
+        error_string = self._oft_env.get_c_errorbuff()
+        thincurr_hodlr_leaves(self.Lmat_hodlr,c_int(overlap),pt_leaf,sizes,ctypes.byref(kr_loc),ctypes.byref(lc_loc),error_string)
+        if error_string.value != b'':
+            raise ValueError(error_string.value.decode())
+        kr = numpy.ctypeslib.as_array(kr_loc,shape=(sizes[0]+1,)) - 1
+        lc = numpy.ctypeslib.as_array(lc_loc,shape=(sizes[1],)) - 1
+        subdomains = [lc[kr[i]:kr[i+1]].copy() for i in range(sizes[0])]
+        return pt_leaf - 1, subdomains
+
     def compute_Bmat(self,cache_file=None,B_dx=-1.E-2):
         '''! Compute magnetic field reconstruction operators for this model
 
