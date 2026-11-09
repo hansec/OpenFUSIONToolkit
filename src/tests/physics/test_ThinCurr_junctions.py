@@ -465,7 +465,7 @@ def run_jumpers(path, mp_q):
     mp_q.put(result)
 
 
-def run_hodlr_coarse(path, use_hodlr, mp_q):
+def run_hodlr_coarse(path, use_hodlr, mp_q, pre_overlap=0):
     """Current potential after a short time-domain run: HODLR L with the two-level preconditioner (iterative), or
     dense L (direct)"""
     result = False
@@ -476,10 +476,10 @@ def run_hodlr_coarse(path, use_hodlr, mp_q):
         myOFT = OFT_env(nthreads=-1)
         tw = ThinCurr(myOFT)
         tw.setup_model(mesh_file=path)
-        basepath = f'junction_coarse_{use_hodlr}/'
+        basepath = f'junction_coarse_{use_hodlr}_{pre_overlap}/'
         tw.setup_io(basepath=basepath)
         if use_hodlr:
-            tw.set_hodlr_options(target_size=150, L_svd_tol=1.E-12, pre_coarse=True)
+            tw.set_hodlr_options(target_size=150, L_svd_tol=1.E-12, pre_coarse=True, pre_overlap=pre_overlap)
         tw.compute_Mcoil()
         tw.compute_Lmat(use_hodlr=use_hodlr)
         tw.compute_Rmat()
@@ -498,6 +498,22 @@ def test_hodlr_coarse():
     files, _ = write_pair(r, lc, reg, 'junction_ring_coarse')
     ref = mp_run(run_hodlr_coarse, (files[0], False))
     out = mp_run(run_hodlr_coarse, (files[0], True))
+    assert ref is not False and out is not False
+    assert np.max(np.abs(ref)) > 0.0
+    assert np.allclose(out, ref, rtol=0.0, atol=1.E-5*np.max(np.abs(ref)))
+
+
+def run_hodlr_overlap(path, use_hodlr, mp_q):
+    run_hodlr_coarse(path, use_hodlr, mp_q, pre_overlap=1)
+
+
+def test_hodlr_overlap():
+    """Two-level HODLR preconditioner with overlapping blocks (additive Schwarz) on a junction mesh, against the
+    dense direct solution"""
+    r, lc, reg = ring()
+    files, _ = write_pair(r, lc, reg, 'junction_ring_overlap')
+    ref = mp_run(run_hodlr_coarse, (files[0], False))
+    out = mp_run(run_hodlr_overlap, (files[0], True))
     assert ref is not False and out is not False
     assert np.max(np.abs(ref)) > 0.0
     assert np.allclose(out, ref, rtol=0.0, atol=1.E-5*np.max(np.abs(ref)))

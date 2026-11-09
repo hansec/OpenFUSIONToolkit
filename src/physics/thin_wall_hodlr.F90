@@ -43,6 +43,7 @@ REAL(8), PARAMETER :: tw_hole_aca_tol = 1.d-6 !< Relative ACA tolerance for hole
 type oft_tw_level
   INTEGER(4) :: nblocks = 0
   INTEGER(4), POINTER, DIMENSION(:,:) :: mat_mask => NULL()
+  INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_ind => NULL() !< Compressed interaction of each pair of blocks (index in `sparse_blocks`, negative if stored as the transpose, 0 if none)
   TYPE(oft_tw_block), POINTER, DIMENSION(:) :: blocks => NULL()
 end type oft_tw_level
 !---------------------------------------------------------------------------------
@@ -65,6 +66,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
   LOGICAL :: pre_coarse = .FALSE. !< Add a global coarse correction to block-Jacobi preconditioners (two-level preconditioner)?
   INTEGER(4) :: pre_neigs = 0 !< Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires pre_coarse and ARPACK)
+  INTEGER(4) :: pre_overlap = 0 !< Overlap of the block preconditioners in leaf adjacency steps (0: block-Jacobi, >0: additive Schwarz)
   INTEGER(4) :: pre_evecs_hash = 0 !< Hash of the resistance matrix used for `pre_evecs`
   REAL(r8), POINTER, DIMENSION(:,:) :: pre_evecs => NULL() !< Slowest L/R eigenmodes for the coarse space, kept between runs [nelems,:]
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
@@ -85,6 +87,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   INTEGER(i4), POINTER, DIMENSION(:) :: pt_leaf => NULL() !< Leaf block containing each mesh vertex [mesh%np]
   INTEGER(i4), POINTER, DIMENSION(:) :: leaf_kadj => NULL() !< Pointer into `leaf_ladj` for each leaf block [nblocks+1]
   INTEGER(i4), POINTER, DIMENSION(:) :: leaf_ladj => NULL() !< Leaf blocks adjacent to each leaf block (sorted, not including the leaf itself)
+  INTEGER(i4), POINTER, DIMENSION(:) :: leaf_dense => NULL() !< Diagonal interaction of each leaf block (index in `dense_blocks`) [nblocks]
   TYPE(oft_tw_block), POINTER, DIMENSION(:) :: blocks => NULL() !< REMOVE
   TYPE(oft_tw_level), POINTER, DIMENSION(:) :: levels => NULL() !< Block heirarchy
   type(tw_type), pointer :: tw_obj => NULL()
@@ -111,6 +114,9 @@ TYPE :: cmat_container
 END TYPE
 !------------------------------------------------------------------------------
 !> Complex block-Jacobi preconditioner for ThinCurr HODLR matrices
+!!
+!! With `pre_overlap>0` on the HODLR operator the blocks are overlapping subdomains of leaves (restricted additive
+!! Schwarz), see @ref bjprecond_apply.
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_csolver) :: oft_tw_hodlr_bjpre
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
@@ -120,6 +126,10 @@ TYPE, PUBLIC, EXTENDS(oft_csolver) :: oft_tw_hodlr_bjpre
   TYPE(oft_tw_hodlr_op), POINTER :: mf_obj => NULL()
   TYPE(oft_native_matrix), POINTER :: Rmat => NULL()
   TYPE(cmat_container), POINTER, DIMENSION(:) :: inverse_mats => NULL()
+  INTEGER(4), POINTER, DIMENSION(:) :: sub_lkr => NULL() !< Pointer into `sub_llc` for each overlapping subdomain [nblocks+1]
+  INTEGER(4), POINTER, DIMENSION(:) :: sub_llc => NULL() !< Leaves of each overlapping subdomain (owned leaf first)
+  INTEGER(4), POINTER, DIMENSION(:) :: sub_kr => NULL() !< Pointer into `sub_inds` for each overlapping subdomain [nblocks+1]
+  INTEGER(4), POINTER, DIMENSION(:) :: sub_inds => NULL() !< Elements of each overlapping subdomain (owned leaf first)
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => bjprecond_apply
@@ -135,6 +145,9 @@ TYPE :: rmat_container
 END TYPE
 !------------------------------------------------------------------------------
 !> Real block-Jacobi preconditioner for ThinCurr HODLR matrices
+!!
+!! With `pre_overlap>0` on the HODLR operator the blocks are overlapping subdomains of leaves (additive Schwarz),
+!! see @ref rbjprecond_apply.
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
@@ -156,6 +169,10 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   TYPE(oft_tw_hodlr_op), POINTER :: mf_obj => NULL()
   TYPE(oft_native_matrix), POINTER :: Rmat => NULL()
   TYPE(rmat_container), POINTER, DIMENSION(:) :: inverse_mats => NULL()
+  INTEGER(4), POINTER, DIMENSION(:) :: sub_lkr => NULL() !< Pointer into `sub_llc` for each overlapping subdomain [nblocks+1]
+  INTEGER(4), POINTER, DIMENSION(:) :: sub_llc => NULL() !< Leaves of each overlapping subdomain (owned leaf first)
+  INTEGER(4), POINTER, DIMENSION(:) :: sub_kr => NULL() !< Pointer into `sub_inds` for each overlapping subdomain [nblocks+1]
+  INTEGER(4), POINTER, DIMENSION(:) :: sub_inds => NULL() !< Elements of each overlapping subdomain (owned leaf first)
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => rbjprecond_apply
@@ -676,8 +693,9 @@ REAL(8) :: B_aca_rel_tol = -1.d0
 LOGICAL :: pre_single = .FALSE.
 LOGICAL :: pre_coarse = .FALSE.
 INTEGER(4) :: pre_neigs = 0
+INTEGER(4) :: pre_overlap = 0
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse,pre_neigs
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse,pre_neigs,pre_overlap
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -702,6 +720,7 @@ if(ierr>0)call oft_abort('Error parsing "thincurr_hodlr_options" in input file.'
 IF((L_svd_tol>0.d0).AND.(min_rank>aca_min_its))CALL oft_abort('"min_rank" must be <= "aca_min_its"', &
   "tw_hodlr_setup",__FILE__)
 IF(min_rank<1)CALL oft_abort('"min_rank" must be >= 1',"tw_hodlr_setup",__FILE__)
+IF(pre_overlap<0)CALL oft_abort('"pre_overlap" must be >= 0',"tw_hodlr_setup",__FILE__)
 !
 self%leaf_target=target_size
 self%min_rank=min_rank
@@ -710,6 +729,7 @@ self%aca_sep_thresh=aca_sep_thresh
 self%pre_single=pre_single
 self%pre_coarse=pre_coarse
 self%pre_neigs=pre_neigs
+self%pre_overlap=pre_overlap
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
 IF(L_svd_tol<0.d0)THEN
@@ -797,6 +817,20 @@ DO i=1,self%nlevels
     END DO
   END DO
 END DO
+!---Lookup of interactions by pair of blocks
+DO i=1,self%nlevels
+  ALLOCATE(self%levels(i)%sparse_ind(self%levels(i)%nblocks,self%levels(i)%nblocks))
+  self%levels(i)%sparse_ind=0
+END DO
+DO i=1,self%nsparse
+  self%levels(self%sparse_blocks(1,i))%sparse_ind(self%sparse_blocks(2,i),self%sparse_blocks(3,i))=i
+  self%levels(self%sparse_blocks(1,i))%sparse_ind(self%sparse_blocks(3,i),self%sparse_blocks(2,i))=-i
+END DO
+ALLOCATE(self%leaf_dense(self%levels(self%nlevels)%nblocks))
+self%leaf_dense=0
+DO i=1,self%ndense
+  IF(self%dense_blocks(1,i)==self%nlevels)self%leaf_dense(self%dense_blocks(2,i))=i
+END DO
 ! WRITE(*,*)self%ndense,self%nsparse
 ! CALL oft_abort("","",__FILE__)
 self%nblocks=self%levels(self%nlevels)%nblocks
@@ -822,6 +856,7 @@ WRITE(*,'(2A,I6)')oft_indent,'# of SVD  =      ',sparse_count(2)
 WRITE(*,'(2A,I6)')oft_indent,'# of ACA+ =      ',sparse_count(1)
 IF(self%pre_single)WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
 IF(self%pre_coarse)WRITE(*,'(2A)')oft_indent,'Using two-level block preconditioners'
+IF(self%pre_overlap>0)WRITE(*,'(2A,I4)')oft_indent,'Using additive Schwarz block preconditioners, overlap = ',self%pre_overlap
 !---Diagnostic block field (only when plot output has been set up)
 IF(self%tw_obj%xdmf%n_grids>0)CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
@@ -1039,6 +1074,147 @@ DO istep=1,overlap
 END DO
 END FUNCTION leaf_bfs
 END SUBROUTINE tw_hodlr_leaf_overlap
+!---------------------------------------------------------------------------------
+!> Get the inductance matrix between two leaf blocks, L(elements of `la`, elements of `lb`)
+!!
+!! The diagonal block of a leaf is stored dense. For two different leaves the interaction is part of a compressed
+!! block, between the leaves themselves or between ancestors of both on a higher level (found by going up the tree
+!! while the interaction is masked); the rows and columns of the two leaves are taken from its dense or low-rank form.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_leaf_block(self,la,lb,M)
+CLASS(oft_tw_hodlr_op), INTENT(in) :: self !< HODLR operator (after computing L)
+INTEGER(i4), INTENT(in) :: la !< Row leaf
+INTEGER(i4), INTENT(in) :: lb !< Column leaf
+REAL(r8), INTENT(out) :: M(:,:) !< Block [nelems(la),nelems(lb)]
+INTEGER(i4) :: i,level,p,q,isp,na,nb,rank
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ia,ib
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: Ured,Vred
+na=self%blocks(la)%nelems
+nb=self%blocks(lb)%nelems
+IF(la==lb)THEN
+  M=self%dense_mats(self%leaf_dense(la))%M(1:na,1:nb)
+  RETURN
+END IF
+!---Block holding the interaction
+level=self%nlevels
+p=la
+q=lb
+DO WHILE(self%levels(level)%mat_mask(p,q)==-1)
+  p=self%levels(level)%blocks(p)%parent
+  q=self%levels(level)%blocks(q)%parent
+  level=level-1
+END DO
+isp=self%levels(level)%sparse_ind(p,q)
+IF(isp==0)CALL oft_abort('Missing interaction between leaves','tw_hodlr_leaf_block',__FILE__)
+!---Local indices of the elements of each leaf in the blocks p and q
+ALLOCATE(ia(na),ib(nb))
+DO i=1,na
+  ia(i)=self%levels(level)%blocks(p)%inv_map(self%tw_obj%lpmap_inv(self%blocks(la)%ielem(i)))
+END DO
+DO i=1,nb
+  ib(i)=self%levels(level)%blocks(q)%inv_map(self%tw_obj%lpmap_inv(self%blocks(lb)%ielem(i)))
+END DO
+!---Stored block S maps the elements of its first block to its second: S = L(second, first)
+isp=ABS(isp)
+IF(self%levels(level)%sparse_ind(p,q)>0)THEN ! S = L(q,p), M = S(ib,ia)^T
+  IF(ASSOCIATED(self%aca_dense(isp)%M))THEN
+    M=TRANSPOSE(self%aca_dense(isp)%M(ib,ia))
+  ELSE
+    rank=SIZE(self%aca_U_mats(isp)%M,DIM=2)
+    ALLOCATE(Ured(nb,rank),Vred(rank,na))
+    Ured=self%aca_U_mats(isp)%M(ib,:)
+    Vred=self%aca_V_mats(isp)%M(:,ia)
+    CALL DGEMM('T','T',na,nb,rank,1.d0,Vred,rank,Ured,nb,0.d0,M,na)
+  END IF
+ELSE ! S = L(p,q), M = S(ia,ib)
+  IF(ASSOCIATED(self%aca_dense(isp)%M))THEN
+    M=self%aca_dense(isp)%M(ia,ib)
+  ELSE
+    rank=SIZE(self%aca_U_mats(isp)%M,DIM=2)
+    ALLOCATE(Ured(na,rank),Vred(rank,nb))
+    Ured=self%aca_U_mats(isp)%M(ia,:)
+    Vred=self%aca_V_mats(isp)%M(:,ib)
+    CALL DGEMM('N','N',na,nb,rank,1.d0,Ured,na,Vred,rank,0.d0,M,na)
+  END IF
+END IF
+DEALLOCATE(ia,ib)
+IF(ALLOCATED(Ured))DEALLOCATE(Ured,Vred)
+END SUBROUTINE tw_hodlr_leaf_block
+!---------------------------------------------------------------------------------
+!> Get the elements of a group of leaf blocks and the inductance matrix between them
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_leaves_L(self,leaves,inds,L)
+CLASS(oft_tw_hodlr_op), INTENT(in) :: self !< HODLR operator (after computing L)
+INTEGER(i4), INTENT(in) :: leaves(:) !< Leaves (their elements are ordered as listed)
+INTEGER(i4), INTENT(out) :: inds(:) !< Elements of the leaves [sum of nelems]
+REAL(r8), INTENT(out) :: L(:,:) !< Inductance matrix between the elements [SIZE(inds),SIZE(inds)]
+INTEGER(i4) :: i,j,ia,ib,na,nb
+ia=0
+DO i=1,SIZE(leaves)
+  na=self%blocks(leaves(i))%nelems
+  inds(ia+1:ia+na)=self%blocks(leaves(i))%ielem
+  ib=ia
+  DO j=i,SIZE(leaves)
+    nb=self%blocks(leaves(j))%nelems
+    CALL tw_hodlr_leaf_block(self,leaves(i),leaves(j),L(ia+1:ia+na,ib+1:ib+nb))
+    IF(j>i)L(ib+1:ib+nb,ia+1:ia+na)=TRANSPOSE(L(ia+1:ia+na,ib+1:ib+nb))
+    ib=ib+nb
+  END DO
+  ia=ia+na
+END DO
+END SUBROUTINE tw_hodlr_leaves_L
+!---------------------------------------------------------------------------------
+!> Get the overlapping subdomains of the Schwarz block preconditioners: for each leaf, the leaves within `overlap`
+!! adjacency steps (see @ref tw_hodlr_leaf_overlap) with the leaf itself first, and their elements in that order
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_schwarz_subdomains(self,overlap,leaf_kr,leaf_lc,elem_kr,elem_lc)
+CLASS(oft_tw_hodlr_op), INTENT(in) :: self !< HODLR operator (after setup)
+INTEGER(i4), INTENT(in) :: overlap !< Number of adjacency steps (>= 0)
+INTEGER(i4), POINTER, DIMENSION(:), INTENT(out) :: leaf_kr !< Pointer into `leaf_lc` for each subdomain [nblocks+1]
+INTEGER(i4), POINTER, DIMENSION(:), INTENT(out) :: leaf_lc !< Leaves of each subdomain (owned leaf first)
+INTEGER(i4), POINTER, DIMENSION(:), INTENT(out) :: elem_kr !< Pointer into `elem_lc` for each subdomain [nblocks+1]
+INTEGER(i4), POINTER, DIMENSION(:), INTENT(out) :: elem_lc !< Elements of each subdomain (owned leaf first)
+INTEGER(i4) :: i,j,k,n
+CALL tw_hodlr_leaf_overlap(self,overlap,leaf_kr,leaf_lc)
+ALLOCATE(elem_kr(self%nblocks+1))
+elem_kr(1)=1
+DO i=1,self%nblocks
+  !---Owned leaf first
+  DO j=leaf_kr(i),leaf_kr(i+1)-1
+    IF(leaf_lc(j)==i)THEN
+      leaf_lc(j)=leaf_lc(leaf_kr(i))
+      leaf_lc(leaf_kr(i))=i
+      EXIT
+    END IF
+  END DO
+  n=0
+  DO j=leaf_kr(i),leaf_kr(i+1)-1
+    n=n+self%blocks(leaf_lc(j))%nelems
+  END DO
+  elem_kr(i+1)=elem_kr(i)+n
+END DO
+ALLOCATE(elem_lc(elem_kr(self%nblocks+1)-1))
+DO i=1,self%nblocks
+  k=elem_kr(i)
+  DO j=leaf_kr(i),leaf_kr(i+1)-1
+    n=self%blocks(leaf_lc(j))%nelems
+    elem_lc(k:k+n-1)=self%blocks(leaf_lc(j))%ielem
+    k=k+n
+  END DO
+END DO
+END SUBROUTINE tw_hodlr_schwarz_subdomains
+!---------------------------------------------------------------------------------
+!> Print the size of the overlapping subdomains of a Schwarz block preconditioner
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_schwarz_report(self,elem_kr,nbytes)
+CLASS(oft_tw_hodlr_op), INTENT(in) :: self !< HODLR operator (after setup)
+INTEGER(i4), INTENT(in) :: elem_kr(:) !< Pointer into the elements of each subdomain [nblocks+1]
+INTEGER(8), INTENT(in) :: nbytes !< Storage of the subdomain inverses [bytes]
+INTEGER(i4) :: sizes(self%nblocks)
+sizes=elem_kr(2:self%nblocks+1)-elem_kr(1:self%nblocks)
+WRITE(*,'(2A,I6,A,I8,A,I8,A,F10.1,A)')oft_indent,'Schwarz subdomains:',self%nblocks,', avg size',SUM(sizes)/self%nblocks, &
+  ', max size',MAXVAL(sizes),', storage',REAL(nbytes,8)/1.d6,' MB'
+END SUBROUTINE tw_hodlr_schwarz_report
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -2919,6 +3095,11 @@ END SUBROUTINE tw_lowrank_recompress
 !! Each diagonal block is inverted explicitly using its LU factorization. If `pre_single`
 !! is set on the HODLR operator each block is rounded to single precision before
 !! factorization, and the inverse is computed, stored, and applied in single precision.
+!!
+!! With `pre_overlap>0` on the HODLR operator the blocks are overlapping subdomains, each leaf with the leaves
+!! within `pre_overlap` adjacency steps (@ref tw_hodlr_schwarz_subdomains), and each subdomain sets the result
+!! only on its own leaf (restricted additive Schwarz), so only those rows of its inverse are kept. The holes and
+!! V-coils form one more block.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE bjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_bjpre), INTENT(inout) :: self !< Solver object
@@ -2932,7 +3113,9 @@ COMPLEX(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 COMPLEX(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
-IF(self%refactor)THEN
+IF(self%refactor.AND.(self%mf_obj%pre_overlap>0))THEN
+  CALL schwarz_factor()
+ELSE IF(self%refactor)THEN
   max_size = 0
   !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
@@ -2969,6 +3152,8 @@ IF(self%refactor)THEN
   DEALLOCATE(imap)
   !$omp end parallel
   self%max_block_size = max_size
+END IF
+IF(self%refactor)THEN
   !---Get holes
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
@@ -3016,6 +3201,9 @@ ALLOCATE(hole_inds(n))
 DO j=1,n
   hole_inds(j)=self%mf_obj%tw_obj%np_active+j
 END DO
+IF(self%mf_obj%pre_overlap>0)THEN
+  CALL schwarz_apply()
+ELSE
 !$omp parallel private(vloc,vloc4,i,level,iblock,n)
 IF(self%mf_obj%pre_single)THEN
   ALLOCATE(vloc4(self%max_block_size,2))
@@ -3038,6 +3226,7 @@ ELSE
   DEALLOCATE(vloc)
 END IF
 !$omp end parallel
+END IF
 IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
   CALL tw_junction_reduce_vec_c(self%mf_obj%tw_obj,ue,utmp)
   DEALLOCATE(ue,ge)
@@ -3107,6 +3296,136 @@ ELSE
   END DO
 END IF
 END SUBROUTINE apply_block
+!------------------------------------------------------------------------------
+!> Factor the overlapping subdomains (restricted additive Schwarz), keeping the rows of each inverse for its own leaf
+!------------------------------------------------------------------------------
+SUBROUTINE schwarz_factor()
+INTEGER(4) :: i,j,k,l,n,nown,max_size
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,inds
+INTEGER(8) :: nstore
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: Lsub
+COMPLEX(c8), POINTER, DIMENSION(:,:) :: Mrows
+COMPLEX(c4), POINTER, DIMENSION(:,:) :: Mrows4
+LOGICAL :: new_subs
+new_subs=.NOT.ASSOCIATED(self%sub_kr)
+IF(new_subs)CALL tw_hodlr_schwarz_subdomains(self%mf_obj,self%mf_obj%pre_overlap,self%sub_lkr,self%sub_llc, &
+  self%sub_kr,self%sub_inds)
+max_size=0
+!$omp parallel private(imap,inds,Lsub,Mrows,Mrows4,i,j,k,l,n,nown) reduction(MAX:max_size)
+ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
+imap=0
+!$omp do schedule(dynamic,1)
+DO i=1,self%mf_obj%nblocks
+  n=self%sub_kr(i+1)-self%sub_kr(i)
+  nown=self%mf_obj%blocks(i)%nelems
+  max_size=MAX(max_size,n)
+  IF(ASSOCIATED(self%inverse_mats(i)%M))DEALLOCATE(self%inverse_mats(i)%M)
+  IF(ASSOCIATED(self%inverse_mats(i)%M4))DEALLOCATE(self%inverse_mats(i)%M4)
+  ALLOCATE(Lsub(n,n),inds(n))
+  CALL tw_hodlr_leaves_L(self%mf_obj,self%sub_llc(self%sub_lkr(i):self%sub_lkr(i+1)-1),inds,Lsub)
+  ALLOCATE(self%inverse_mats(i)%M(n,n))
+  DO k=1,n
+    DO j=1,n
+      self%inverse_mats(i)%M(j,k)=self%alpha*Lsub(j,k)
+    END DO
+  END DO
+  DEALLOCATE(Lsub)
+  DO j=1,n
+    imap(inds(j))=j
+  END DO
+  DO j=1,n
+    k=inds(j)
+    DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
+      IF(imap(self%Rmat%lc(l))>0)THEN
+        self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
+        self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
+      END IF
+    END DO
+  END DO
+  DO j=1,n
+    imap(inds(j))=0
+  END DO
+  DEALLOCATE(inds)
+  CALL invert_block(self%inverse_mats(i),n)
+  !---Keep the rows of the own leaf (first in the subdomain)
+  IF(self%mf_obj%pre_single)THEN
+    ALLOCATE(Mrows4(nown,n))
+    Mrows4=self%inverse_mats(i)%M4(1:nown,:)
+    DEALLOCATE(self%inverse_mats(i)%M4)
+    self%inverse_mats(i)%M4=>Mrows4
+  ELSE
+    ALLOCATE(Mrows(nown,n))
+    Mrows=self%inverse_mats(i)%M(1:nown,:)
+    DEALLOCATE(self%inverse_mats(i)%M)
+    self%inverse_mats(i)%M=>Mrows
+  END IF
+END DO
+!$omp end do
+DEALLOCATE(imap)
+!$omp end parallel
+self%max_block_size=max_size
+IF(new_subs)THEN
+  nstore=0
+  DO i=1,self%mf_obj%nblocks
+    nstore=nstore+INT(self%sub_kr(i+1)-self%sub_kr(i),8)*INT(self%mf_obj%blocks(i)%nelems,8)
+  END DO
+  CALL tw_hodlr_schwarz_report(self%mf_obj,self%sub_kr,nstore*MERGE(8_8,16_8,self%mf_obj%pre_single))
+END IF
+END SUBROUTINE schwarz_factor
+!------------------------------------------------------------------------------
+!> Apply the overlapping subdomains (restricted additive Schwarz) and the hole/V-coil block
+!------------------------------------------------------------------------------
+SUBROUTINE schwarz_apply()
+INTEGER(4) :: i,j,n,nown,ncols
+REAL(8) :: scale
+!$omp parallel private(vloc,vloc4,i,j,n,nown,ncols,scale)
+IF(self%mf_obj%pre_single)THEN
+  ALLOCATE(vloc4(self%max_block_size,2))
+ELSE
+  ALLOCATE(vloc(self%max_block_size,2))
+END IF
+!$omp do schedule(dynamic,1)
+DO i=1,self%mf_obj%nblocks
+  ncols=self%sub_kr(i+1)-self%sub_kr(i)
+  nown=self%mf_obj%blocks(i)%nelems
+  ASSOCIATE(inds=>self%sub_inds(self%sub_kr(i):self%sub_kr(i+1)-1),mat=>self%inverse_mats(i))
+  IF(self%mf_obj%pre_single)THEN
+    scale=0.d0
+    DO j=1,ncols
+      scale=MAX(scale,ABS(REAL(ge(inds(j)),8)),ABS(AIMAG(ge(inds(j)))))
+    END DO
+    IF(scale>0.d0)THEN
+      DO j=1,ncols
+        vloc4(j,1) = CMPLX(ge(inds(j))/scale,KIND=c4)
+      END DO
+      CALL cgemv('N',nown,ncols,(1.0_r4,0.0_r4),mat%M4,nown,vloc4(:,1),1,(0.0_r4,0.0_r4),vloc4(:,2),1)
+      DO j=1,nown
+        ue(inds(j)) = CMPLX(vloc4(j,2),KIND=c8)*scale
+      END DO
+    END IF
+  ELSE
+    DO j=1,ncols
+      vloc(j,1) = ge(inds(j))
+    END DO
+    CALL zgemv('N',nown,ncols,(1.d0,0.d0),mat%M,nown,vloc(:,1),1,(0.d0,0.d0),vloc(:,2),1)
+    DO j=1,nown
+      ue(inds(j)) = vloc(j,2)
+    END DO
+  END IF
+  END ASSOCIATE
+END DO
+!$omp end do nowait
+!$omp single
+n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
+IF(n>0)CALL apply_block(self%inverse_mats(self%mf_obj%ndense+1),n,hole_inds,vloc,vloc4)
+!$omp end single
+IF(self%mf_obj%pre_single)THEN
+  DEALLOCATE(vloc4)
+ELSE
+  DEALLOCATE(vloc)
+END IF
+!$omp end parallel
+END SUBROUTINE schwarz_apply
 END SUBROUTINE bjprecond_apply
 !------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
@@ -3124,6 +3443,7 @@ IF(ASSOCIATED(self%inverse_mats))THEN
   END DO
   DEALLOCATE(self%inverse_mats)
 END IF
+IF(ASSOCIATED(self%sub_kr))DEALLOCATE(self%sub_lkr,self%sub_llc,self%sub_kr,self%sub_inds)
 !---Reset
 self%max_block_size=0
 self%refactor=.TRUE.
@@ -3136,6 +3456,10 @@ end subroutine bjprecond_delete
 !! Each diagonal block is inverted explicitly using its Cholesky factorization. If `pre_single`
 !! is set on the HODLR operator each block is rounded to single precision before
 !! factorization, and the inverse is computed, stored, and applied in single precision.
+!!
+!! With `pre_overlap>0` on the HODLR operator the blocks are overlapping subdomains, each leaf with the leaves
+!! within `pre_overlap` adjacency steps (@ref tw_hodlr_schwarz_subdomains), and the corrections of all subdomains
+!! are added (additive Schwarz, symmetric for use with CG). The holes and V-coils form one more block.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE rbjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
@@ -3149,7 +3473,9 @@ REAL(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 REAL(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
-IF(self%refactor)THEN
+IF(self%refactor.AND.(self%mf_obj%pre_overlap>0))THEN
+  CALL schwarz_factor()
+ELSE IF(self%refactor)THEN
   max_size = 0
   !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
@@ -3186,6 +3512,8 @@ IF(self%refactor)THEN
   DEALLOCATE(imap)
   !$omp end parallel
   self%max_block_size = max_size
+END IF
+IF(self%refactor)THEN
   !---Get holes
   ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
@@ -3243,6 +3571,9 @@ ALLOCATE(hole_inds(n))
 DO j=1,n
   hole_inds(j)=self%mf_obj%tw_obj%np_active+j
 END DO
+IF(self%mf_obj%pre_overlap>0)THEN
+  CALL schwarz_apply()
+ELSE
 !$omp parallel private(vloc,vloc4,i,level,iblock,n)
 IF(self%mf_obj%pre_single)THEN
   ALLOCATE(vloc4(self%max_block_size,2))
@@ -3265,6 +3596,7 @@ ELSE
   DEALLOCATE(vloc)
 END IF
 !$omp end parallel
+END IF
 !---Coarse correction on the expanded residual/solution (same as gtmp/utmp without junctions)
 IF(self%mf_obj%pre_coarse.AND.(self%nz>0))CALL rbjprecond_coarse_apply(self,ge,ue)
 IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
@@ -3336,6 +3668,126 @@ ELSE
   END DO
 END IF
 END SUBROUTINE apply_block
+!------------------------------------------------------------------------------
+!> Factor the overlapping subdomains (additive Schwarz)
+!------------------------------------------------------------------------------
+SUBROUTINE schwarz_factor()
+INTEGER(4) :: i,j,k,l,n,max_size
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,inds
+INTEGER(8) :: nstore
+LOGICAL :: new_subs
+new_subs=.NOT.ASSOCIATED(self%sub_kr)
+IF(new_subs)CALL tw_hodlr_schwarz_subdomains(self%mf_obj,self%mf_obj%pre_overlap,self%sub_lkr,self%sub_llc, &
+  self%sub_kr,self%sub_inds)
+max_size=0
+!$omp parallel private(imap,inds,i,j,k,l,n) reduction(MAX:max_size)
+ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
+imap=0
+!$omp do schedule(dynamic,1)
+DO i=1,self%mf_obj%nblocks
+  n=self%sub_kr(i+1)-self%sub_kr(i)
+  max_size=MAX(max_size,n)
+  IF(ASSOCIATED(self%inverse_mats(i)%M))DEALLOCATE(self%inverse_mats(i)%M)
+  IF(ASSOCIATED(self%inverse_mats(i)%M4))DEALLOCATE(self%inverse_mats(i)%M4)
+  ALLOCATE(self%inverse_mats(i)%M(n,n),inds(n))
+  CALL tw_hodlr_leaves_L(self%mf_obj,self%sub_llc(self%sub_lkr(i):self%sub_lkr(i+1)-1),inds,self%inverse_mats(i)%M)
+  !$omp simd collapse(2)
+  DO k=1,n
+    DO j=1,n
+      self%inverse_mats(i)%M(j,k)=self%alpha*self%inverse_mats(i)%M(j,k)
+    END DO
+  END DO
+  DO j=1,n
+    imap(inds(j))=j
+  END DO
+  DO j=1,n
+    k=inds(j)
+    DO l=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
+      IF(imap(self%Rmat%lc(l))>0)THEN
+        self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) = &
+        self%inverse_mats(i)%M(j,imap(self%Rmat%lc(l))) + self%beta*self%Rmat%M(l)
+      END IF
+    END DO
+  END DO
+  DO j=1,n
+    imap(inds(j))=0
+  END DO
+  DEALLOCATE(inds)
+  CALL invert_block(self%inverse_mats(i),n)
+END DO
+!$omp end do
+DEALLOCATE(imap)
+!$omp end parallel
+self%max_block_size=max_size
+IF(new_subs)THEN
+  nstore=0
+  DO i=1,self%mf_obj%nblocks
+    n=self%sub_kr(i+1)-self%sub_kr(i)
+    nstore=nstore+INT(n,8)**2
+  END DO
+  CALL tw_hodlr_schwarz_report(self%mf_obj,self%sub_kr,nstore*MERGE(4_8,8_8,self%mf_obj%pre_single))
+END IF
+END SUBROUTINE schwarz_factor
+!------------------------------------------------------------------------------
+!> Apply the overlapping subdomains (additive Schwarz) and the hole/V-coil block
+!------------------------------------------------------------------------------
+SUBROUTINE schwarz_apply()
+INTEGER(4) :: i,j,n,nrows
+REAL(8) :: scale
+REAL(8), ALLOCATABLE, DIMENSION(:) :: uacc
+!$omp parallel private(vloc,vloc4,uacc,i,j,n,nrows,scale)
+IF(self%mf_obj%pre_single)THEN
+  ALLOCATE(vloc4(self%max_block_size,2))
+ELSE
+  ALLOCATE(vloc(self%max_block_size,2))
+END IF
+ALLOCATE(uacc(self%mf_obj%tw_obj%np_active))
+uacc=0.d0
+!$omp do schedule(dynamic,1)
+DO i=1,self%mf_obj%nblocks
+  nrows=self%sub_kr(i+1)-self%sub_kr(i)
+  ASSOCIATE(inds=>self%sub_inds(self%sub_kr(i):self%sub_kr(i+1)-1),mat=>self%inverse_mats(i))
+  IF(self%mf_obj%pre_single)THEN
+    scale=0.d0
+    DO j=1,nrows
+      scale=MAX(scale,ABS(ge(inds(j))))
+    END DO
+    IF(scale>0.d0)THEN
+      DO j=1,nrows
+        vloc4(j,1) = REAL(ge(inds(j))/scale,r4)
+      END DO
+      CALL sgemv('N',nrows,nrows,1.0_r4,mat%M4,nrows,vloc4(:,1),1,0.0_r4,vloc4(:,2),1)
+      DO j=1,nrows
+        uacc(inds(j)) = uacc(inds(j)) + REAL(vloc4(j,2),r8)*scale
+      END DO
+    END IF
+  ELSE
+    DO j=1,nrows
+      vloc(j,1) = ge(inds(j))
+    END DO
+    CALL dgemv('N',nrows,nrows,1.d0,mat%M,nrows,vloc(:,1),1,0.d0,vloc(:,2),1)
+    DO j=1,nrows
+      uacc(inds(j)) = uacc(inds(j)) + vloc(j,2)
+    END DO
+  END IF
+  END ASSOCIATE
+END DO
+!$omp end do nowait
+!$omp critical
+ue(1:self%mf_obj%tw_obj%np_active)=ue(1:self%mf_obj%tw_obj%np_active)+uacc
+!$omp end critical
+!$omp single
+n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
+IF(n>0)CALL apply_block(self%inverse_mats(self%mf_obj%ndense+1),n,hole_inds,vloc,vloc4)
+!$omp end single
+DEALLOCATE(uacc)
+IF(self%mf_obj%pre_single)THEN
+  DEALLOCATE(vloc4)
+ELSE
+  DEALLOCATE(vloc)
+END IF
+!$omp end parallel
+END SUBROUTINE schwarz_apply
 END SUBROUTINE rbjprecond_apply
 !------------------------------------------------------------------------------
 !> Build the coarse space of the two-level preconditioner and its projections of L and R
@@ -3610,6 +4062,7 @@ NULLIFY(self%z_glob) ! Not owned
 IF(ASSOCIATED(self%z_gvals))DEALLOCATE(self%z_gvals)
 IF(ASSOCIATED(self%zlz))DEALLOCATE(self%zlz,self%zrz)
 IF(ASSOCIATED(self%einv))DEALLOCATE(self%einv)
+IF(ASSOCIATED(self%sub_kr))DEALLOCATE(self%sub_lkr,self%sub_llc,self%sub_kr,self%sub_inds)
 self%nz=0
 !---Reset
 self%max_block_size=0

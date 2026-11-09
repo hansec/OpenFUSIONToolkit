@@ -1486,3 +1486,73 @@ def test_hodlr_leaves(meshfile, target_size):
         assert np.array_equal(result[1][overlap][2], cells)
         ref = leaf_overlap_reference(adj, overlap)
         assert all(np.array_equal(result[1][overlap][1][i], ref[i]) for i in range(nleaves))
+
+
+#============================================================================
+# Overlapping (additive Schwarz) HODLR block preconditioners
+_SCHWARZ_SCRIPT = '''
+import sys, json
+import numpy as np
+from OpenFUSIONToolkit import OFT_env
+from OpenFUSIONToolkit.ThinCurr import ThinCurr
+from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_XML
+from OpenFUSIONToolkit.io import write_oft_xml
+overlap, single = int(sys.argv[1]), sys.argv[2] == 'T'
+xml = ThinCurr_XML()
+xml.set_eta([10.0*np.pi*4.E-7])
+write_oft_xml([xml], 'oft_in_schwarz.xml')
+tw = ThinCurr(OFT_env(nthreads=2))
+tw.setup_model(mesh_file='tw_test-plate.h5', xml_filename='oft_in_schwarz.xml')
+tw.setup_io(basepath='schwarz_{0}_{1}/'.format(overlap, sys.argv[2]))
+tw.set_hodlr_options(target_size=40, pre_overlap=overlap, pre_single=single)
+tw.compute_Lmat(use_hodlr=True)
+tw.compute_Rmat()
+rng = np.random.default_rng(1)
+fr = tw.compute_freq_response(vdriver=rng.standard_normal((2, tw.nelems)), freq=1.E3)
+volts = np.zeros((3, tw.nelems+1))
+volts[:, 0] = [0.0, 1.E-3, 1.0]
+volts[1:, 1:] = rng.standard_normal(tw.nelems)
+tw.run_td(1.E-4, 3, status_freq=1, plot_freq=3, full_volts=volts, lin_tol=1.E-12, lin_rtol=1.E-12)
+print('RESULT ' + json.dumps({'fr': fr.tolist()}))
+'''
+
+
+def run_schwarz(overlap, single):
+    '''Frequency response (GMRES) and 3 time steps (CG) on the plate in a separate process, returning the GMRES
+    iterations, the CG iterations of each step, the frequency response and the final time-domain solution'''
+    import re
+    import json
+    os.chdir(test_dir)
+    with open('run_schwarz.py', 'w') as fid:
+        fid.write(_SCHWARZ_SCRIPT)
+    timeout = 180*(4 if os.environ.get('OFT_DEBUG_TEST', 0) else 1)
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([python_dir, os.environ.get('PYTHONPATH', '')]))
+    result = subprocess.run([sys.executable, 'run_schwarz.py', str(overlap), 'T' if single else 'F'],
+                            capture_output=True, text=True, timeout=timeout, env=env)
+    print(result.stdout[-5000:])
+    print(result.stderr[-5000:])
+    assert result.returncode == 0
+    gmres = re.findall(r'^\s+(\d+)\s', result.stdout.split('Starting GMRES solver')[1].split('\n\n')[0], re.M)
+    cg = re.findall(r'^\s+\d+\s+[\d.]+E[-+]\d+\s+[\d.]+E[-+]\d+\s+(-?\d+)\s+[\d.]+\s*$', result.stdout, re.M)
+    fr = np.array(json.loads(result.stdout.split('RESULT ')[1])['fr'])
+    with h5py.File('schwarz_{0}_{1}/pThinCurr_0003.rst'.format(overlap, 'T' if single else 'F'), 'r') as fid:
+        td = np.array(fid['U'])
+    return int(gmres[-1]), [int(n) for n in cg], fr, td
+
+
+@pytest.mark.coverage
+def test_hodlr_schwarz():
+    '''Overlapping HODLR block preconditioners: exact with subdomains covering the whole (hole-free) plate, and
+    with overlap 1 no more iterations than block-Jacobi and the same solutions'''
+    ref = run_schwarz(0, False)
+    # Subdomains with every leaf: the preconditioner is the inverse of the HODLR operator (scaled for time-domain)
+    full = run_schwarz(20, False)
+    assert full[0] == 1
+    assert full[1] == [1, 1, 1]
+    for single in (False, True):
+        out = run_schwarz(1, single)
+        assert out[0] <= ref[0]
+        assert sum(out[1]) <= sum(ref[1])
+    for out in (full, out):
+        assert np.allclose(out[2], ref[2], rtol=0.0, atol=1.E-6*np.abs(ref[2]).max())
+        assert np.allclose(out[3], ref[3], rtol=0.0, atol=1.E-8*np.abs(ref[3]).max())
