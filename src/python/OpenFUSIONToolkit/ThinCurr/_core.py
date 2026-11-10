@@ -44,8 +44,7 @@ class ThinCurr():
             'pre_single': 'F',
             'pre_coarse': 'F',
             'pre_neigs': '0',
-            'pre_overlap': '0',
-            'tree_admissibility': '0'
+            'tree_admissibility': 'F'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -384,7 +383,7 @@ class ThinCurr():
 
     def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
                           L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,pre_coarse=None,
-                          pre_neigs=None,pre_overlap=None,tree_admissibility=None):
+                          pre_neigs=None,tree_admissibility=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
@@ -399,12 +398,8 @@ class ThinCurr():
         @param pre_neigs Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires
         `pre_coarse` and ARPACK; computed once and reused by later `run_td` calls on the same model while the
         resistivity is unchanged)
-        @param pre_overlap Overlap of the HODLR block preconditioners in adjacency steps between leaf blocks (0: block-Jacobi,
-        1: each leaf with the leaves adjacent to it, ...; weighted additive Schwarz for time-domain and restricted additive Schwarz
-        for frequency-domain runs)
-        @param tree_admissibility Choose near (refined, SVD on the lowest level) and far (ACA+) interactions by adjacency
-        of the blocks in the partition tree (their cells touch) instead of `aca_sep_thresh` (0: no, 1: on the lowest level
-        only, 2: on all levels)
+        @param tree_admissibility On the lowest level, use SVD for blocks whose cells touch in the partition tree and ACA+
+        for the others, instead of the separation threshold `aca_sep_thresh[0]`?
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
@@ -428,14 +423,8 @@ class ThinCurr():
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_coarse'] = 'T' if pre_coarse else 'F'
         if pre_neigs is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_neigs'] = '{0:d}'.format(pre_neigs)
-        if pre_overlap is not None:
-            if pre_overlap < 0:
-                raise ValueError('"pre_overlap" must be >= 0')
-            self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_overlap'] = '{0:d}'.format(pre_overlap)
         if tree_admissibility is not None:
-            if tree_admissibility not in (0, 1, 2):
-                raise ValueError('"tree_admissibility" must be 0, 1 or 2')
-            self._oft_env.oft_in_groups['thincurr_hodlr_options']['tree_admissibility'] = '{0:d}'.format(int(tree_admissibility))
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['tree_admissibility'] = 'T' if tree_admissibility else 'F'
         self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
@@ -475,41 +464,6 @@ class ThinCurr():
                 raise ValueError('Lmat not computed, call `compute_Lmat()` first')
             thincurr_apply_Lmat(self.tw_obj,field_in,c_void_p())
         return field_in
-
-    def get_hodlr_leaves(self,overlap=0):
-        '''! Get the leaf blocks of the HODLR inductance matrix and overlapping subdomains built from them
-
-        The mesh vertices are partitioned with a binary space partitioning (k-d) tree, in which each block owns a
-        cell (the part of its parent's cell on its side of the split plane), so that the cells of the leaves tile
-        the bounding box of the mesh. Two leaves are adjacent if their cells touch (share a face, an edge or a
-        corner). The subdomain of each leaf holds the leaves within `overlap` adjacency steps of it: the leaf alone
-        for `overlap=0` (the blocks of the block-Jacobi preconditioners), the leaf and the leaves adjacent to it for
-        `overlap=1`, and so on.
-
-        @note Requires a HODLR inductance matrix, see \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.compute_Lmat "compute_Lmat()".
-
-        @param overlap Number of adjacency steps (>= 0)
-        @result `pt_leaf` Leaf containing each mesh vertex [np] (0-based),
-        `subdomains` Leaves of the subdomain of each leaf, including the leaf itself (sorted, 0-based) [nleaves],
-        `cells` Cell of each leaf, lower and upper corners [nleaves,2,3]
-        '''
-        if not self.Lmat_hodlr:
-            raise ValueError('HODLR matrix not computed, call `compute_Lmat(use_hodlr=True)` first')
-        pt_leaf = numpy.zeros((self.np,), dtype=numpy.int32)
-        sizes = numpy.zeros((2,), dtype=numpy.int32)
-        kr_loc = c_int_ptr()
-        lc_loc = c_int_ptr()
-        cell_loc = c_double_ptr()
-        error_string = self._oft_env.get_c_errorbuff()
-        thincurr_hodlr_leaves(self.Lmat_hodlr,c_int(overlap),pt_leaf,sizes,ctypes.byref(kr_loc),ctypes.byref(lc_loc),
-                              ctypes.byref(cell_loc),error_string)
-        if error_string.value != b'':
-            raise ValueError(error_string.value.decode())
-        kr = numpy.ctypeslib.as_array(kr_loc,shape=(sizes[0]+1,)) - 1
-        lc = numpy.ctypeslib.as_array(lc_loc,shape=(sizes[1],)) - 1
-        subdomains = [lc[kr[i]:kr[i+1]].copy() for i in range(sizes[0])]
-        cells = numpy.ctypeslib.as_array(cell_loc,shape=(sizes[0],3,2)).transpose(0,2,1).copy()
-        return pt_leaf - 1, subdomains, cells
 
     def compute_Bmat(self,cache_file=None,B_dx=-1.E-2):
         '''! Compute magnetic field reconstruction operators for this model

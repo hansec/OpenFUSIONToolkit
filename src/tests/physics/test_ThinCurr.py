@@ -1405,163 +1405,9 @@ def test_mirnov_point(coil_type):
 
 
 #============================================================================
-# Adjacency of HODLR leaf blocks (cells of the partition tree)
-def leaf_overlap_reference(adj, overlap):
-    '''Leaves within `overlap` steps of each leaf for the adjacency matrix `adj` (diagonal included)'''
-    import scipy.sparse
-    adj = scipy.sparse.csr_array(adj.astype(np.int64))
-    reach = scipy.sparse.identity(adj.shape[0], dtype=np.int64, format='csr')
-    for _ in range(overlap):
-        reach = ((reach @ adj) > 0).astype(np.int64)
-    return [np.sort(reach[[i], :].indices) for i in range(adj.shape[0])]
-
-
-def run_hodlr_leaves(meshfile, target_size, mp_q):
-    '''Leaf of each vertex, leaf cells and overlapping leaf subdomains (overlap 0-3) of the HODLR inductance matrix'''
-    result = None
-    try:
-        from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        tw_model = ThinCurr(_get_oft_env())
-        tw_model.setup_model(mesh_file=meshfile)
-        checks = []
-        try:
-            tw_model.get_hodlr_leaves()  # HODLR matrix not computed yet
-            checks.append(False)
-        except ValueError:
-            checks.append(True)
-        tw_model.set_hodlr_options(target_size=target_size)
-        tw_model.compute_Lmat(use_hodlr=True)
-        try:
-            tw_model.get_hodlr_leaves(-1)
-            checks.append(False)
-        except ValueError:
-            checks.append(True)
-        leaves = {}
-        for overlap in range(4):
-            leaves[overlap] = tw_model.get_hodlr_leaves(overlap)
-        result = (all(checks), leaves)
-    except BaseException as e:
-        print(e)
-    oftpy_dump_cov()
-    mp_q.put(result)
-
-
-@pytest.mark.coverage
-# Plate with target size 61: blocks of 123 vertices split into 61 (leaf) and 62 (split again), so leaves end at
-# different depths
-@pytest.mark.parametrize("meshfile,target_size", (("tw_test-plate.h5", 20), ("tw_test-plate.h5", 61),
-                                                  ("tw_test-torus.h5", 60), ("tw_test-torus.h5", 30)))
-def test_hodlr_leaves(meshfile, target_size):
-    from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh
-    os.chdir(test_dir)
-    r = read_ThinCurr_mesh(meshfile)['r']
-    result = mp_run(run_hodlr_leaves, (meshfile, target_size))
-    assert result  # False (timeout or crash) or None (exception)
-    assert result[0]
-    pt_leaf, sub, cells = result[1][0]
-    nleaves = len(sub)
-    # Leaves tile the mesh vertices, and there are enough of them to test the adjacency
-    assert pt_leaf.shape[0] == r.shape[0]
-    assert np.array_equal(np.unique(pt_leaf), np.arange(nleaves))
-    assert nleaves > 4
-    # Cells tile the root cell (volumes add up, no two overlap) and hold the vertices of their leaf
-    assert np.all(cells[:, 1, :] > cells[:, 0, :])
-    lower = np.maximum(cells[:, None, 0, :], cells[None, :, 0, :])
-    upper = np.minimum(cells[:, None, 1, :], cells[None, :, 1, :])
-    overlaps = np.all(upper > lower, axis=2)
-    assert np.array_equal(overlaps, np.eye(nleaves, dtype=bool))
-    root = np.prod(cells[:, 1, :].max(axis=0) - cells[:, 0, :].min(axis=0))
-    assert np.prod(cells[:, 1, :] - cells[:, 0, :], axis=1).sum() == pytest.approx(root, rel=1.E-10)
-    assert np.all(r >= cells[pt_leaf, 0, :]) and np.all(r <= cells[pt_leaf, 1, :])
-    # Adjacency (overlap 1): leaves whose cells touch, from all pairs of cells
-    adj = np.zeros((nleaves, nleaves), dtype=bool)
-    for i, leaves in enumerate(result[1][1][1]):
-        adj[i, leaves] = True
-    assert np.array_equal(adj, np.all(upper >= lower, axis=2))
-    sizes = adj.sum(axis=1)
-    assert sizes.min() > 1 and sizes.max() < nleaves
-    # Subdomains for each overlap: breadth-first search of the adjacency
-    for overlap in range(4):
-        assert np.array_equal(result[1][overlap][0], pt_leaf)
-        assert np.array_equal(result[1][overlap][2], cells)
-        ref = leaf_overlap_reference(adj, overlap)
-        assert all(np.array_equal(result[1][overlap][1][i], ref[i]) for i in range(nleaves))
-
-
-#============================================================================
-# Overlapping (additive Schwarz) HODLR block preconditioners
-_SCHWARZ_SCRIPT = '''
-import sys, json
-import numpy as np
-from OpenFUSIONToolkit import OFT_env
-from OpenFUSIONToolkit.ThinCurr import ThinCurr
-from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_XML
-from OpenFUSIONToolkit.io import write_oft_xml
-overlap, single = int(sys.argv[1]), sys.argv[2] == 'T'
-xml = ThinCurr_XML()
-xml.set_eta([10.0*np.pi*4.E-7])
-write_oft_xml([xml], 'oft_in_schwarz.xml')
-tw = ThinCurr(OFT_env(nthreads=2))
-tw.setup_model(mesh_file='tw_test-plate.h5', xml_filename='oft_in_schwarz.xml')
-tw.setup_io(basepath='schwarz_{0}_{1}/'.format(overlap, sys.argv[2]))
-tw.set_hodlr_options(target_size=40, pre_overlap=overlap, pre_single=single)
-tw.compute_Lmat(use_hodlr=True)
-tw.compute_Rmat()
-rng = np.random.default_rng(1)
-fr = tw.compute_freq_response(vdriver=rng.standard_normal((2, tw.nelems)), freq=1.E3)
-volts = np.zeros((3, tw.nelems+1))
-volts[:, 0] = [0.0, 1.E-3, 1.0]
-volts[1:, 1:] = rng.standard_normal(tw.nelems)
-tw.run_td(1.E-4, 3, status_freq=1, plot_freq=3, full_volts=volts, lin_tol=1.E-12, lin_rtol=1.E-12)
-print('RESULT ' + json.dumps({'fr': fr.tolist()}))
-'''
-
-
-def run_schwarz(overlap, single):
-    '''Frequency response (GMRES) and 3 time steps (CG) on the plate in a separate process, returning the GMRES
-    iterations, the CG iterations of each step, the frequency response and the final time-domain solution'''
-    import re
-    import json
-    os.chdir(test_dir)
-    with open('run_schwarz.py', 'w') as fid:
-        fid.write(_SCHWARZ_SCRIPT)
-    timeout = 180*(4 if os.environ.get('OFT_DEBUG_TEST', 0) else 1)
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join([python_dir, os.environ.get('PYTHONPATH', '')]))
-    result = subprocess.run([sys.executable, 'run_schwarz.py', str(overlap), 'T' if single else 'F'],
-                            capture_output=True, text=True, timeout=timeout, env=env)
-    print(result.stdout[-5000:])
-    print(result.stderr[-5000:])
-    assert result.returncode == 0
-    gmres = re.findall(r'^\s+(\d+)\s', result.stdout.split('Starting GMRES solver')[1].split('\n\n')[0], re.M)
-    cg = re.findall(r'^\s+\d+\s+[\d.]+E[-+]\d+\s+[\d.]+E[-+]\d+\s+(-?\d+)\s+[\d.]+\s*$', result.stdout, re.M)
-    fr = np.array(json.loads(result.stdout.split('RESULT ')[1])['fr'])
-    with h5py.File('schwarz_{0}_{1}/pThinCurr_0003.rst'.format(overlap, 'T' if single else 'F'), 'r') as fid:
-        td = np.array(fid['U'])
-    return int(gmres[-1]), [int(n) for n in cg], fr, td
-
-
-@pytest.mark.coverage
-def test_hodlr_schwarz():
-    '''Overlapping HODLR block preconditioners: exact with subdomains covering the whole (hole-free) plate, and
-    with overlap 1 no more iterations than block-Jacobi and the same solutions'''
-    ref = run_schwarz(0, False)
-    # Subdomains with every leaf: the preconditioner is the inverse of the HODLR operator (scaled for time-domain)
-    full = run_schwarz(20, False)
-    assert full[0] == 1
-    assert full[1] == [1, 1, 1]
-    for single in (False, True):
-        out = run_schwarz(1, single)
-        assert out[0] <= ref[0]
-        assert sum(out[1]) <= sum(ref[1])
-    for out in (full, out):
-        assert np.allclose(out[2], ref[2], rtol=0.0, atol=1.E-6*np.abs(ref[2]).max())
-        assert np.allclose(out[3], ref[3], rtol=0.0, atol=1.E-8*np.abs(ref[3]).max())
-
-
-#============================================================================
-# Near and far HODLR interactions from partition tree adjacency
+# Lowest-level SVD/ACA+ selection from partition tree adjacency
 def run_hodlr_admissibility(tree, mp_q):
-    '''Products of the dense and HODLR inductance matrices with random vectors, and the near/far interactions'''
+    '''Products of the dense and HODLR inductance matrices with random vectors'''
     result = None
     try:
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
@@ -1581,7 +1427,7 @@ def run_hodlr_admissibility(tree, mp_q):
 
 
 @pytest.mark.coverage
-@pytest.mark.parametrize("tree", (0, 1, 2))
+@pytest.mark.parametrize("tree", (False, True))
 def test_hodlr_admissibility(tree):
     result = mp_run(run_hodlr_admissibility, (tree,))
     assert result  # False (timeout or crash) or None (exception)
