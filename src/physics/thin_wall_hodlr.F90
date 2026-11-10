@@ -59,7 +59,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   INTEGER(4) :: min_rank = 10 !< Minimum rank of compressed off-diagonal matrices (>= 1)
   REAL(r8) :: times(4) = 0 !< Timing information for diagonal and sparse matrix products
   REAL(8) :: aca_sep_thresh(2) = [1.1d0,1.1d0] !< Separation threshold for blocks ACA+ vs SVD [lowest level, all other levels]
-  LOGICAL :: tree_admissibility = .FALSE. !< Choose near and far interactions by adjacency in the partition tree (cells touch) instead of `aca_sep_thresh`?
+  INTEGER(4) :: tree_admissibility = 0 !< Choose near and far interactions by adjacency in the partition tree (cells touch) instead of `aca_sep_thresh` (0: no, 1: lowest level only, 2: all levels)
   REAL(8) :: L_svd_tol = -1.d0 !< SVD tolerance for inductance matrix
   REAL(8) :: L_aca_tol = -1.d0 !< ACA+ tolerance for inductance matrix
   REAL(8) :: B_svd_tol = -1.d0 !< SVD tolerance for B-field operators
@@ -698,7 +698,7 @@ LOGICAL :: pre_single = .FALSE.
 LOGICAL :: pre_coarse = .FALSE.
 INTEGER(4) :: pre_neigs = 0
 INTEGER(4) :: pre_overlap = 0
-LOGICAL :: tree_admissibility = .FALSE.
+INTEGER(4) :: tree_admissibility = 0
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
   L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse,pre_neigs,pre_overlap,tree_admissibility
 !
@@ -726,6 +726,8 @@ IF((L_svd_tol>0.d0).AND.(min_rank>aca_min_its))CALL oft_abort('"min_rank" must b
   "tw_hodlr_setup",__FILE__)
 IF(min_rank<1)CALL oft_abort('"min_rank" must be >= 1',"tw_hodlr_setup",__FILE__)
 IF(pre_overlap<0)CALL oft_abort('"pre_overlap" must be >= 0',"tw_hodlr_setup",__FILE__)
+IF((tree_admissibility<0).OR.(tree_admissibility>2))CALL oft_abort('"tree_admissibility" must be 0, 1 or 2', &
+  "tw_hodlr_setup",__FILE__)
 !
 self%leaf_target=target_size
 self%min_rank=min_rank
@@ -780,7 +782,7 @@ DO i=1,self%nlevels
       ! WRITE(*,*)i,j,k,magnitude(self%levels(i)%blocks(j)%center-self%levels(i)%blocks(k)%center), &
       ! (self%levels(i)%blocks(j)%extent+self%levels(i)%blocks(k)%extent)
       IF(self%levels(i)%mat_mask(j,k)/=0)CYCLE
-      IF(self%tree_admissibility)THEN
+      IF((self%tree_admissibility==2).OR.((self%tree_admissibility==1).AND.(i==self%nlevels)))THEN
         !---Far if the cells do not touch, otherwise refine (SVD on the lowest level)
         IF(ANY(self%levels(i)%blocks(j)%cell(1,:)>self%levels(i)%blocks(k)%cell(2,:)).OR. &
           ANY(self%levels(i)%blocks(k)%cell(1,:)>self%levels(i)%blocks(j)%cell(2,:)))THEN
@@ -820,7 +822,7 @@ DO i=1,self%nlevels
 END DO
 ! WRITE(*,*)self%ndense,self%nsparse
 !---Leaf pairs: contact in the partition tree (face, or edge/corner only) against the separation criterion
-IF(self%tree_admissibility)THEN
+IF(self%tree_admissibility>0)THEN
   ntouch=0; ncorner=0; nsep_only=0; ntouch_only=0
   ASSOCIATE(blks=>self%levels(self%nlevels)%blocks)
   DO j=1,self%levels(self%nlevels)%nblocks
@@ -895,7 +897,8 @@ WRITE(*,'(2A,I6)')oft_indent,'# of SVD  =      ',sparse_count(2)
 WRITE(*,'(2A,I6)')oft_indent,'# of ACA+ =      ',sparse_count(1)
 IF(self%pre_single)WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
 IF(self%pre_coarse)WRITE(*,'(2A)')oft_indent,'Using two-level block preconditioners'
-IF(self%tree_admissibility)WRITE(*,'(2A)')oft_indent,'Near and far interactions from partition tree adjacency'
+IF(self%tree_admissibility==1)WRITE(*,'(2A)')oft_indent,'Near and far interactions from partition tree adjacency on the lowest level'
+IF(self%tree_admissibility==2)WRITE(*,'(2A)')oft_indent,'Near and far interactions from partition tree adjacency'
 IF(self%pre_overlap>0)WRITE(*,'(2A,I4)')oft_indent,'Using additive Schwarz block preconditioners, overlap = ',self%pre_overlap
 !---Diagnostic block field (only when plot output has been set up)
 IF(self%tw_obj%xdmf%n_grids>0)CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')

@@ -45,7 +45,7 @@ class ThinCurr():
             'pre_coarse': 'F',
             'pre_neigs': '0',
             'pre_overlap': '0',
-            'tree_admissibility': 'F'
+            'tree_admissibility': '0'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -403,7 +403,8 @@ class ThinCurr():
         1: each leaf with the leaves adjacent to it, ...; weighted additive Schwarz for time-domain and restricted additive Schwarz
         for frequency-domain runs)
         @param tree_admissibility Choose near (refined, SVD on the lowest level) and far (ACA+) interactions by adjacency
-        of the blocks in the partition tree (their cells touch) instead of `aca_sep_thresh`?
+        of the blocks in the partition tree (their cells touch) instead of `aca_sep_thresh` (0: no, 1: on the lowest level
+        only, 2: on all levels)
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
@@ -432,7 +433,9 @@ class ThinCurr():
                 raise ValueError('"pre_overlap" must be >= 0')
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_overlap'] = '{0:d}'.format(pre_overlap)
         if tree_admissibility is not None:
-            self._oft_env.oft_in_groups['thincurr_hodlr_options']['tree_admissibility'] = 'T' if tree_admissibility else 'F'
+            if tree_admissibility not in (0, 1, 2):
+                raise ValueError('"tree_admissibility" must be 0, 1 or 2')
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['tree_admissibility'] = '{0:d}'.format(int(tree_admissibility))
         self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):

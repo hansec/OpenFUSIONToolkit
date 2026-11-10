@@ -1581,7 +1581,7 @@ def run_hodlr_admissibility(tree, mp_q):
 
 
 @pytest.mark.coverage
-@pytest.mark.parametrize("tree", (False, True))
+@pytest.mark.parametrize("tree", (0, 1, 2))
 def test_hodlr_admissibility(tree):
     result = mp_run(run_hodlr_admissibility, (tree,))
     assert result  # False (timeout or crash) or None (exception)
