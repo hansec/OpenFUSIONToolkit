@@ -22,11 +22,27 @@ USE oft_mesh_type, ONLY: oft_bmesh, oft_mesh, bmesh_findcell, mesh_findcell
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr
 USE fem_base, ONLY: oft_fem_type, oft_bfem_type
+USE fem_composite, ONLY: oft_fem_comp_type
+USE fem_utils, ONLY: fem_interp, bfem_interp
 USE oft_lag_basis, ONLY: oft_scalar_bfem
 USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_rinterp
 IMPLICIT NONE
 #include "local.h"
+!---------------------------------------------------------------------------------
+!> Field evaluation object for FE fields exposed through the Python interface
+!!
+!! Holds a volume or surface interpolator, along with any vectors owned by the
+!! interpolator, so that all FE fields can be evaluated and destroyed through
+!! \ref oft_apply_field_eval and \ref oft_destroy_field_eval.
+!---------------------------------------------------------------------------------
+TYPE :: oftpy_field_eval
+  CLASS(fem_interp), POINTER :: vinterp => NULL() !< Volume (3D) interpolator
+  CLASS(bfem_interp), POINTER :: binterp => NULL() !< Surface (2D) interpolator
+  TYPE(oft_vector_ptr), POINTER, DIMENSION(:) :: vecs => NULL() !< Vectors owned by the interpolator
+END TYPE oftpy_field_eval
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -257,121 +273,256 @@ lc_loc=C_LOC(mg_mesh%mesh%lc)
 reg_loc=C_LOC(mg_mesh%mesh%reg)
 END SUBROUTINE oft_vmesh_get
 !---------------------------------------------------------------------------------
-!> Create an interpolation object for general FE fields (only 2D Lagrange for now)
+!> Wrap an FE interpolator in a field evaluation object that can be passed to
+!! \ref oft_apply_field_eval and \ref oft_destroy_field_eval
+!!
+!! This allows tool-specific interpolators (eg. Marklin's composite magnetic field)
+!! to share the generic evaluation and destruction interface. Ownership of the
+!! interpolator and of any vectors in `vecs` is transferred to the evaluation object,
+!! so they are deleted and deallocated by \ref oft_destroy_field_eval.
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_field_eval_wrap(int_obj,vinterp,binterp,vecs)
+TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to field evaluation object
+CLASS(fem_interp), OPTIONAL, TARGET, INTENT(inout) :: vinterp !< Volume (3D) interpolator (must be allocated)
+CLASS(bfem_interp), OPTIONAL, TARGET, INTENT(inout) :: binterp !< Surface (2D) interpolator (must be allocated)
+TYPE(oft_vector_ptr), OPTIONAL, INTENT(in) :: vecs(:) !< Vectors owned by interpolator (must be allocated)
+INTEGER(i4) :: i
+TYPE(oftpy_field_eval), POINTER :: eval_obj
+IF(PRESENT(vinterp).EQV.PRESENT(binterp))CALL oft_abort("Exactly one of vinterp or binterp is required", &
+  "oft_field_eval_wrap",__FILE__)
+ALLOCATE(eval_obj)
+IF(PRESENT(vinterp))eval_obj%vinterp=>vinterp
+IF(PRESENT(binterp))eval_obj%binterp=>binterp
+IF(PRESENT(vecs))THEN
+  ALLOCATE(eval_obj%vecs(SIZE(vecs)))
+  DO i=1,SIZE(vecs)
+    eval_obj%vecs(i)%f=>vecs(i)%f
+  END DO
+END IF
+int_obj=C_LOC(eval_obj)
+END SUBROUTINE oft_field_eval_wrap
+!---------------------------------------------------------------------------------
+!> Convert C pointer to a field evaluation object, checking that it is associated
+!---------------------------------------------------------------------------------
+FUNCTION oft_field_eval_ccast(int_obj,eval_obj,error_str) RESULT(success)
+TYPE(c_ptr), INTENT(in) :: int_obj !< C pointer to field evaluation object
+TYPE(oftpy_field_eval), POINTER, INTENT(out) :: eval_obj !< Fortran pointer to field evaluation object
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: success
+IF(PRESENT(error_str))CALL copy_string('',error_str)
+IF(.NOT.c_associated(int_obj))THEN
+  IF(PRESENT(error_str))CALL copy_string('Field evaluation object not associated',error_str)
+  NULLIFY(eval_obj)
+  success=.FALSE.
+  RETURN
+END IF
+CALL c_f_pointer(int_obj,eval_obj)
+success=.TRUE.
+END FUNCTION oft_field_eval_ccast
+!---------------------------------------------------------------------------------
+!> Create a field evaluation object for a general FE field from a weight vector
+!!
+!! Supported field types (`imode`):
+!! - `211`: Surface Lagrange scalar field (requires `lag_rep`)
+!! - `212`: Gradient of surface Lagrange scalar field (requires `lag_rep`)
+!! - `331`: Volume H(Curl) + Grad(H^1) vector field (requires `hcurl_grad_rep`)
+!!
+!! Ownership of `u` is transferred to the evaluation object (`u` is nullified on output).
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_field_eval_setup(imode,u,int_obj,error_str,lag_rep,hcurl_grad_rep)
+INTEGER(i4), INTENT(in) :: imode !< Field type
+CLASS(oft_vector), POINTER, INTENT(inout) :: u !< FE weight vector for field
+TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to field evaluation object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+CLASS(oft_scalar_bfem), OPTIONAL, TARGET, INTENT(inout) :: lag_rep !< Surface Lagrange FE representation
+TYPE(oft_fem_comp_type), OPTIONAL, TARGET, INTENT(inout) :: hcurl_grad_rep !< Composite H(Curl) + Grad(H^1) FE representation
+TYPE(oft_vector_ptr) :: vecs(1)
+TYPE(oft_lag_brinterp), POINTER :: br_obj
+TYPE(oft_lag_bginterp), POINTER :: bg_obj
+TYPE(oft_hcurl_grad_rinterp), POINTER :: hcg_obj
+CALL copy_string('',error_str)
+int_obj=c_null_ptr
+vecs(1)%f=>u
+SELECT CASE(imode)
+CASE(211)
+  IF(.NOT.PRESENT(lag_rep))THEN
+    CALL copy_string('Lagrange FE representation required for field type',error_str)
+    RETURN
+  END IF
+  ALLOCATE(br_obj)
+  br_obj%u=>u
+  CALL br_obj%setup(lag_rep)
+  CALL oft_field_eval_wrap(int_obj,binterp=br_obj,vecs=vecs)
+CASE(212)
+  IF(.NOT.PRESENT(lag_rep))THEN
+    CALL copy_string('Lagrange FE representation required for field type',error_str)
+    RETURN
+  END IF
+  ALLOCATE(bg_obj)
+  bg_obj%u=>u
+  CALL bg_obj%setup(lag_rep)
+  CALL oft_field_eval_wrap(int_obj,binterp=bg_obj,vecs=vecs)
+CASE(331)
+  IF(.NOT.PRESENT(hcurl_grad_rep))THEN
+    CALL copy_string('H(Curl) + Grad(H^1) FE representation required for field type',error_str)
+    RETURN
+  END IF
+  ALLOCATE(hcg_obj)
+  hcg_obj%u=>u
+  CALL hcg_obj%setup(hcurl_grad_rep)
+  CALL oft_field_eval_wrap(int_obj,vinterp=hcg_obj,vecs=vecs)
+CASE DEFAULT
+  CALL copy_string('Invalid field type for interpolation',error_str)
+  RETURN
+END SELECT
+NULLIFY(u)
+END SUBROUTINE oft_field_eval_setup
+!---------------------------------------------------------------------------------
+!> Create a field evaluation object for a general FE field
+!!
+!! See \ref oft_field_eval_setup for supported field types and the corresponding
+!! type of FE object that `fe_ptr` must reference.
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_get_field_eval(fe_ptr,vals,imode,int_obj,error_str) BIND(C,NAME="oft_get_field_eval")
 TYPE(c_ptr), VALUE, INTENT(in) :: fe_ptr !< Pointer to FE object
-TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< FE weight values for field [ne]
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Field type
-TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to interpolation object
+TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to field evaluation object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CLASS(oft_vector), POINTER :: u
 TYPE(oft_scalar_bfem), POINTER :: lag_rep
-TYPE(oft_lag_brinterp), POINTER :: br_obj
-TYPE(oft_lag_bginterp), POINTER :: bg_obj
+TYPE(oft_fem_comp_type), POINTER :: hcurl_grad_rep
+int_obj=c_null_ptr
+IF(.NOT.c_associated(fe_ptr))THEN
+  CALL copy_string('FE object not associated',error_str)
+  RETURN
+END IF
 SELECT CASE(imode)
-CASE(211)
+CASE(211,212)
   CALL c_f_pointer(fe_ptr, lag_rep)
-  CALL c_f_pointer(vals, vals_tmp, [lag_rep%ne])
-  ALLOCATE(br_obj)
-  CALL lag_rep%vec_create(br_obj%u)
-  CALL br_obj%u%restore_local(vals_tmp)
-  CALL br_obj%setup(lag_rep)
-  int_obj=C_LOC(br_obj)
-CASE(212)
-  CALL c_f_pointer(fe_ptr, lag_rep)
-  CALL c_f_pointer(vals, vals_tmp, [lag_rep%ne])
-  ALLOCATE(bg_obj)
-  CALL lag_rep%vec_create(bg_obj%u)
-  CALL bg_obj%u%restore_local(vals_tmp)
-  CALL bg_obj%setup(lag_rep)
-  int_obj=C_LOC(bg_obj)
+  CALL lag_rep%vec_create(u)
+  CALL c_f_pointer(vals, vals_tmp, [u%n])
+  CALL u%restore_local(vals_tmp)
+  CALL oft_field_eval_setup(imode,u,int_obj,error_str,lag_rep=lag_rep)
+CASE(331)
+  CALL c_f_pointer(fe_ptr, hcurl_grad_rep)
+  CALL hcurl_grad_rep%vec_create(u)
+  CALL c_f_pointer(vals, vals_tmp, [u%n])
+  CALL u%restore_local(vals_tmp)
+  CALL oft_field_eval_setup(imode,u,int_obj,error_str,hcurl_grad_rep=hcurl_grad_rep)
 CASE DEFAULT
   CALL copy_string('Invalid field type for interpolation',error_str)
-  int_obj=c_null_ptr
+  RETURN
 END SELECT
 END SUBROUTINE oft_get_field_eval
 !---------------------------------------------------------------------------------
-!> Evaluate a general FE field with an interpolation object created by
-!! \ref oft_get_field_eval
+!> Evaluate a field with a field evaluation object created by \ref oft_get_field_eval
+!! or a tool-specific constructor using \ref oft_field_eval_wrap
+!!
+!! Points outside the mesh, or whose logical coordinates fall outside the cell by more
+!! than `fbary_tol`, are returned as NaN.
 !---------------------------------------------------------------------------------
-SUBROUTINE oft_apply_field_eval(fe_ptr,int_obj,int_type,pt_ptr,npts,fbary_tol,dim,field_ptr) BIND(C,NAME="oft_apply_field_eval")
-TYPE(c_ptr), VALUE, INTENT(in) :: fe_ptr !< Pointer to FE object
-TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to interpolation object
-INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Field type (negative to destroy)
-TYPE(c_ptr), VALUE, INTENT(in)  :: pt_ptr !< Location for evaluation [X,Y,Z] (3D) or [X,Y,0] (2D)
+SUBROUTINE oft_apply_field_eval(int_obj,pt_ptr,npts,fbary_tol,dim,cell,field_ptr) BIND(C,NAME="oft_apply_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to field evaluation object
+TYPE(c_ptr), VALUE, INTENT(in)  :: pt_ptr !< Locations for evaluation [3,npts], as [X,Y,Z] (3D) or [X,Y,0] (2D)
 INTEGER(c_int), VALUE, INTENT(in) :: npts !< Number of points to evaluate
 REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Tolerance for physical to logical mapping
 INTEGER(c_int), VALUE, INTENT(in) :: dim !< Dimension of field
-TYPE(c_ptr), VALUE, INTENT(in) :: field_ptr !< Field at locations specified by `pt_ptr`
-INTEGER(i4) :: i,cell
+INTEGER(c_int), INTENT(inout) :: cell !< Guess for cell containing first point on input (`<=0` for none);
+!! cell containing last point on output (`0` if not found, negative if outside of `fbary_tol`)
+TYPE(c_ptr), VALUE, INTENT(in) :: field_ptr !< Field at locations specified by `pt_ptr` [dim,npts]
+LOGICAL :: vol_eval
+INTEGER(i4) :: i,nf,icell,guess
+REAL(r8) :: f(4),goptmp(3,4),vol
 REAL(r8), POINTER, DIMENSION(:,:) :: pts,field
-CLASS(oft_bmesh), POINTER :: smesh
-CLASS(oft_mesh), POINTER :: vmesh
-TYPE(oft_lag_brinterp), POINTER :: br_obj
-TYPE(oft_lag_bginterp), POINTER :: bg_obj
-REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
-IF(int_type<0)THEN
-  SELECT CASE(ABS(int_type))
-  CASE(211)
-    CALL c_f_pointer(int_obj, br_obj)
-    CALL br_obj%u%delete()
-    DEALLOCATE(br_obj%u)
-    CALL br_obj%delete
-    DEALLOCATE(br_obj)
-  CASE(212)
-    CALL c_f_pointer(int_obj, bg_obj)
-    CALL bg_obj%u%delete()
-    DEALLOCATE(bg_obj%u)
-    CALL bg_obj%delete
-    DEALLOCATE(bg_obj)
-  CASE DEFAULT
-    CALL oft_abort("Invalid field type","oft_apply_field_eval",__FILE__)
-  END SELECT
-  RETURN
+TYPE(oftpy_field_eval), POINTER :: eval_obj
+IF(.NOT.oft_field_eval_ccast(int_obj,eval_obj))CALL oft_abort("Field evaluation object not associated","oft_apply_field_eval",__FILE__)
+vol_eval=ASSOCIATED(eval_obj%vinterp)
+IF(vol_eval)THEN
+  nf=4
+ELSE IF(ASSOCIATED(eval_obj%binterp))THEN
+  nf=3
+ELSE
+  CALL oft_abort("Interpolator not associated","oft_apply_field_eval",__FILE__)
 END IF
-!---
-SELECT CASE(int_type)
-CASE(211)
-  CALL c_f_pointer(int_obj, br_obj)
-  smesh=>br_obj%mesh
-CASE(212)
-  CALL c_f_pointer(int_obj, bg_obj)
-  smesh=>bg_obj%mesh
-CASE DEFAULT
-  CALL oft_abort("Invalid field type","oft_apply_field_eval",__FILE__)
-END SELECT
 !---Sample fields
 CALL c_f_pointer(pt_ptr, pts, [3,npts])
 CALL c_f_pointer(field_ptr, field, [dim,npts])
-!$omp parallel do private(cell,f,goptmp,vol,fmin,fmax) if(npts>1000)
+icell=cell
+!$omp parallel do firstprivate(icell) lastprivate(icell) private(guess,f,goptmp,vol) if(npts>1000)
 DO i=1,npts
-  cell=0
-  IF((int_type>200).AND.(int_type<300))THEN
-    call bmesh_findcell(smesh,cell,pts(:,i),f)
-  ELSE IF((int_type>300).AND.(int_type<400))THEN
-    call mesh_findcell(vmesh,cell,pts(:,i),f)
+  !---Use previous cell as initial guess, falling back to full search if not found
+  guess=ABS(icell)
+  icell=guess
+  CALL locate_point(pts(:,i),icell,f)
+  IF((guess>0).AND.(.NOT.in_cell(icell,f)))THEN
+    icell=0
+    CALL locate_point(pts(:,i),icell,f)
+  END IF
+  IF(icell==0)THEN
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
+  END IF
+  IF(.NOT.in_cell(icell,f))THEN
+    icell=-icell
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
+  END IF
+  IF(vol_eval)THEN
+    CALL eval_obj%vinterp%mesh%jacobian(icell,f,goptmp,vol)
+    CALL eval_obj%vinterp%interp(icell,f,goptmp,field(:,i))
   ELSE
-    CALL oft_abort("Invalid field spatial dimension","oft_apply_field_eval",__FILE__)
+    CALL eval_obj%binterp%mesh%jacobian(icell,f(1:3),goptmp,vol)
+    CALL eval_obj%binterp%interp(icell,f(1:3),goptmp(:,1:3),field(:,i))
   END IF
-  IF(cell==0)THEN
-    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
-    CYCLE
-  END IF
-  fmin=MINVAL(f); fmax=MAXVAL(f)
-  IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
-    ! cell=-ABS(cell)
-    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
-    CYCLE
-  END IF
-  SELECT CASE(int_type)
-  CASE(211)
-    goptmp=0.d0
-    CALL br_obj%interp(cell,f,goptmp,field(:,i))
-  CASE(212)
-    CALL smesh%jacobian(cell,f,goptmp,vol)
-    CALL bg_obj%interp(cell,f,goptmp,field(:,i))
-  END SELECT
 END DO
+cell=icell
+CONTAINS
+!> Locate point in mesh (thread-local quantities are passed explicitly for OpenMP safety)
+SUBROUTINE locate_point(pt,jcell,fl)
+REAL(r8), INTENT(in) :: pt(3) !< Point to locate
+INTEGER(i4), INTENT(inout) :: jcell !< Cell guess on input, containing cell on output (`0` if not found)
+REAL(r8), INTENT(out) :: fl(4) !< Logical position in cell
+fl=0.d0
+IF(vol_eval)THEN
+  CALL mesh_findcell(eval_obj%vinterp%mesh,jcell,pt,fl)
+ELSE
+  CALL bmesh_findcell(eval_obj%binterp%mesh,jcell,pt(1:2),fl(1:3))
+END IF
+END SUBROUTINE locate_point
+!> Check if logical position lies in cell within tolerance
+LOGICAL FUNCTION in_cell(jcell,fl)
+INTEGER(i4), INTENT(in) :: jcell !< Cell index (`0` if not found)
+REAL(r8), INTENT(in) :: fl(4) !< Logical position in cell
+in_cell=(jcell/=0).AND.(MAXVAL(fl(1:nf))<=1.d0+fbary_tol).AND.(MINVAL(fl(1:nf))>=-fbary_tol)
+END FUNCTION in_cell
 END SUBROUTINE oft_apply_field_eval
+!---------------------------------------------------------------------------------
+!> Destroy a field evaluation object, including its interpolator and any owned vectors
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_destroy_field_eval(int_obj) BIND(C,NAME="oft_destroy_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to field evaluation object
+INTEGER(i4) :: i
+TYPE(oftpy_field_eval), POINTER :: eval_obj
+IF(.NOT.oft_field_eval_ccast(int_obj,eval_obj))RETURN
+IF(ASSOCIATED(eval_obj%vinterp))THEN
+  CALL eval_obj%vinterp%delete()
+  DEALLOCATE(eval_obj%vinterp)
+END IF
+IF(ASSOCIATED(eval_obj%binterp))THEN
+  CALL eval_obj%binterp%delete()
+  DEALLOCATE(eval_obj%binterp)
+END IF
+IF(ASSOCIATED(eval_obj%vecs))THEN
+  DO i=1,SIZE(eval_obj%vecs)
+    IF(ASSOCIATED(eval_obj%vecs(i)%f))THEN
+      CALL eval_obj%vecs(i)%f%delete()
+      DEALLOCATE(eval_obj%vecs(i)%f)
+    END IF
+  END DO
+  DEALLOCATE(eval_obj%vecs)
+END IF
+DEALLOCATE(eval_obj)
+END SUBROUTINE oft_destroy_field_eval
 END MODULE oft_base_f

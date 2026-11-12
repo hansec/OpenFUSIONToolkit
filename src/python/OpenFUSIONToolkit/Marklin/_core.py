@@ -13,40 +13,22 @@ import warnings
 import numpy
 from ._interface import *
 from ..io import build_XDMF
+from ..fe import FE_field_interpolator
 
 
-class Marklin_field_interpolator():
+class Marklin_field_interpolator(FE_field_interpolator):
     '''! Interpolation class for force-free eigenstate vector fields'''
-    def __init__(self,marklin_obj,int_ptr,int_type,dim,fbary_tol=1.E-8):
+    def __init__(self,marklin_obj,int_obj,dim=3,fbary_tol=1.E-8):
         '''! Initialize interpolation object
 
         @param marklin_obj Marklin instance for interpolator
-        @param int_ptr Address of FORTRAN interpolation class
-        @param int_type Interpolation type (1: vector potential; 2: magnetic field)
+        @param int_obj Address of Fortran field evaluation object
         @param dim Dimension of vector field
         @param fbary_tol Tolerance for physical to logical mapping
         '''
-        self.cell = c_int(-1)
-        self.int_type = int_type
-        self.dim = dim
-        self.val = numpy.zeros((self.dim,), dtype=numpy.float64)
+        # Keep reference to Marklin object, which owns the underlying FE representation
         self.marklin_obj = marklin_obj
-        self._int_ptr = int_ptr
-        self.fbary_tol = fbary_tol
-
-    def __del__(self):
-        '''Destroy underlying interpolation object'''
-        pt_eval = numpy.zeros((3,), dtype=numpy.float64)
-        marklin_apply_int(self.marklin_obj._marklin_ptr,self._int_ptr,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.val)
-
-    def eval(self,pt):
-        '''! Evaluate field at a given location
-
-        @param pt Location for evaluation [3]
-        @result Field at evaluation point [self.dim]
-        '''
-        marklin_apply_int(self.marklin_obj._marklin_ptr,self._int_ptr,self.int_type,pt,self.fbary_tol,ctypes.byref(self.cell),self.val)
-        return self.val
+        super().__init__(int_obj,dim,fbary_tol=fbary_tol)
 
 
 class Marklin():
@@ -304,31 +286,34 @@ class Marklin():
     def compute_par_diff(self,interpolator,k_perp):
         r'''! Compute parallel diffusion with specified vector field and diffusivity
 
-        @param interpolator Interpolator defining vector field
+        @param interpolator Interpolator defining vector field (eg. from @ref get_binterp)
         @param k_perp Perpendicular diffusion value (k_par = 1.0)
         '''
-        cstring = c_char_p(b""*200)
-        marklin_compute_pardiff(self._marklin_ptr,interpolator._int_ptr,interpolator.int_type,k_perp,cstring)
-        if cstring.value != b'':
-            raise Exception(cstring.value)
+        if not isinstance(interpolator,FE_field_interpolator):
+            raise TypeError('"interpolator" must be an FE field interpolator')
+        error_string = self._oft_env.get_c_errorbuff()
+        marklin_compute_pardiff(self._marklin_ptr,interpolator._int_obj,k_perp,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
 
     def save_field(self,field,tag):
         '''! Save field to XDMF files for VisIt/Paraview
 
-        @param field Field interpolation object
+        @param field Field interpolation object (eg. from @ref get_ainterp or @ref get_binterp)
         @param tag Name for field in XDMF files
         '''
-        #
+        if not isinstance(field,FE_field_interpolator):
+            raise TypeError('"field" must be an FE field interpolator')
         error_string = self._oft_env.get_c_errorbuff()
         ctag = self._oft_env.path2c(tag)
-        marklin_save_visit(self._marklin_ptr,field._int_ptr,field.int_type,ctag,error_string)
+        marklin_save_visit(self._marklin_ptr,field._int_obj,ctag,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
     def get_ainterp(self,hmode_facs,bn_gauge=False):
         r'''! Create field interpolator for vector potential
 
-        @param imode Index of eigenstate
+        @param hmode_facs Weight for each eigenstate [nm]
         @param bn_gauge Use B-field gauge (A_t = 0 @ wall)?
         @result Field interpolation object
         '''
@@ -339,12 +324,13 @@ class Marklin():
         marklin_get_aint(self._marklin_ptr,hmode_facs,ctypes.byref(interpolation_ptr),bn_gauge,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return Marklin_field_interpolator(self,interpolation_ptr,1,3)
+        return Marklin_field_interpolator(self,interpolation_ptr,3)
 
     def get_binterp(self,hmode_facs=None,vac_facs=None):
         r'''! Create field interpolator for magnetic field
 
-        @param imode Index of eigenstate
+        @param hmode_facs Weight for each eigenstate [nm]
+        @param vac_facs Weight for each vacuum field [nh]
         @result Field interpolation object
         '''
         if hmode_facs is None:
@@ -361,4 +347,4 @@ class Marklin():
         marklin_get_bint(self._marklin_ptr,hmode_facs,vac_facs,ctypes.byref(interpolation_ptr),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return Marklin_field_interpolator(self,interpolation_ptr,2,3)
+        return Marklin_field_interpolator(self,interpolation_ptr,3)

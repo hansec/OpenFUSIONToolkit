@@ -66,6 +66,8 @@ contains
   procedure :: setup2 => taylor_rinterp_setup2
   !> Reconstruct field
   procedure :: interp => taylor_rinterp
+  !> Destroy temporary internal storage
+  procedure :: delete => taylor_rinterp_delete
 end type oft_taylor_rinterp
 !------------------------------------------------------------------------------
 !> Force-free, uniform \f$ \lambda \f$ eigenmode object
@@ -1271,4 +1273,18 @@ end do
 deallocate(j,rop)
 DEBUG_STACK_POP
 end subroutine taylor_rinterp
+!------------------------------------------------------------------------------
+!> Destroy temporary internal storage for composite Taylor state interpolator
+!!
+!! @note Vectors `ua` and `uvac` are not deleted, only nullified
+!------------------------------------------------------------------------------
+subroutine taylor_rinterp_delete(self)
+class(oft_taylor_rinterp), intent(inout) :: self
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%acurl))DEALLOCATE(self%acurl)
+IF(ASSOCIATED(self%vac_curl))DEALLOCATE(self%vac_curl)
+IF(ASSOCIATED(self%vac_grad))DEALLOCATE(self%vac_grad)
+NULLIFY(self%ua,self%uvac,self%grad_rep,self%curl_rep,self%mesh)
+DEBUG_STACK_POP
+end subroutine taylor_rinterp_delete
 end module taylor

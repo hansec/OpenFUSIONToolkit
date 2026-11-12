@@ -145,9 +145,13 @@ oft_vmesh_get = ctypes_subroutine(oftpy_lib.oft_vmesh_get,
 oft_get_field_eval = ctypes_subroutine(oftpy_lib.oft_get_field_eval,
     [c_void_p, ctypes_numpy_array(float64,1), c_int, c_void_ptr_ptr, c_char_p])
 
-# Create general FE interpolation object: oft_apply_field_eval(fe_ptr,int_obj,int_type,pt_ptr,npts,fbary_tol,dim,field)
+# Evaluate general FE interpolation object: oft_apply_field_eval(int_obj,pt_ptr,npts,fbary_tol,dim,cell,field)
 oft_apply_field_eval = ctypes_subroutine(oftpy_lib.oft_apply_field_eval,
-    [c_void_p, c_void_p, c_int, ctypes_numpy_array(numpy.float64,2), c_int, c_double, c_int, ctypes_numpy_array(numpy.float64,2)])
+    [c_void_p, ctypes_numpy_array(numpy.float64,2), c_int, c_double, c_int, c_int_ptr, ctypes_numpy_array(numpy.float64,2)])
+
+# Destroy general FE interpolation object: oft_destroy_field_eval(int_obj)
+oft_destroy_field_eval = ctypes_subroutine(oftpy_lib.oft_destroy_field_eval,
+    [c_void_p])
 
 # Dump coverage information if needed
 oftpy_dump_cov = ctypes_subroutine(oftpy_lib.dump_cov)

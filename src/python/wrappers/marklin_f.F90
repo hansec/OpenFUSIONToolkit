@@ -18,18 +18,16 @@ USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 !--Grid
-USE oft_mesh_type, ONLY: mesh_findcell
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
 USE multigrid, ONLY: multigrid_mesh, multigrid_reset
 USE multigrid_build, ONLY: multigrid_construct
 !---Linear Algebra
-USE oft_la_base, ONLY: oft_vector, oft_matrix
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !---
 USE fem_base, ONLY: oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
-USE fem_utils, ONLY: fem_interp
 !---Lagrange FE space
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: lag_lop_eigs, lag_setup_interp, lag_mloptions, &
@@ -43,13 +41,14 @@ USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
 USE oft_hcurl_operators, ONLY: oft_hcurl_cinterp, hcurl_setup_interp, &
     hcurl_mloptions
 USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_divout, oft_hcurl_grad_zeroi, hcurl_grad_mc, oft_hcurl_grad_czerob, &
-  hcurl_grad_setup_interp, oft_hcurl_grad_rinterp, hcurl_grad_mloptions
+  hcurl_grad_setup_interp, hcurl_grad_mloptions
 !---Taylor state
 USE taylor, ONLY: oft_taylor_hmodes, oft_taylor_ifield, taylor_hmodes, oft_taylor_rinterp, &
   taylor_vacuum, taylor_injectors
 USE mhd_utils, ONLY: mu0
 !---Wrappers
-USE oft_base_f, ONLY: copy_string, copy_string_rev
+USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_field_eval, oft_field_eval_ccast, &
+  oft_field_eval_setup, oft_field_eval_wrap
 IMPLICIT NONE
 #include "local.h"
 TYPE :: marklin_obj
@@ -268,14 +267,14 @@ ELSE
 END IF
 END SUBROUTINE marklin_compute_vac
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute anisotropic (parallel) diffusion along a vector field and save the
+!! result to plot files
 !---------------------------------------------------------------------------------
-SUBROUTINE marklin_compute_pardiff(marklin_ptr,int_obj,int_type,k_perp,error_str) BIND(C,NAME="marklin_compute_pardiff")
-TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: k_perp !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(80) !< Needs docs
+SUBROUTINE marklin_compute_pardiff(marklin_ptr,int_obj,k_perp,error_str) BIND(C,NAME="marklin_compute_pardiff")
+TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Pointer to Marklin object
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Field evaluation object defining vector field (see \ref oft_base_f::oft_get_field_eval)
+REAL(c_double), VALUE, INTENT(in) :: k_perp !< Perpendicular diffusion coefficient (\f$ k_{\parallel} = 1 \f$)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: mop => NULL()
 CLASS(oft_matrix), POINTER :: pdop => NULL()
@@ -287,35 +286,16 @@ REAL(r8), POINTER, DIMENSION(:,:) :: hcpc_tmp,hcpv_tmp
 CLASS(oft_vector), POINTER :: u,v,check
 CHARACTER(LEN=3) :: pltnum
 TYPE(marklin_obj), POINTER :: self
-CLASS(fem_interp), POINTER :: interp_obj
-TYPE(oft_hcurl_grad_rinterp), POINTER :: ainterp_obj
-TYPE(oft_taylor_rinterp), POINTER :: binterp_obj
-!---Clear error flag
-CALL copy_string('',error_str)
-IF(.NOT.c_associated(marklin_ptr))THEN
-  CALL copy_string('Marklin object not associated',error_str)
-  RETURN
-END IF
-CALL c_f_pointer(marklin_ptr,self)
-!---Check that interpolator is allocated
-IF(.NOT.C_ASSOCIATED(int_obj))THEN
-  CALL copy_string('Interpolation object not associated',error_str)
+TYPE(oftpy_field_eval), POINTER :: eval_obj
+IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
+IF(.NOT.oft_field_eval_ccast(int_obj,eval_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(eval_obj%vinterp))THEN
+  CALL copy_string('Field evaluation object must be a volume field',error_str)
   RETURN
 END IF
 !
 NULLIFY(pdop,mop,vals)
-SELECT CASE(int_type)
-  CASE(1)
-    CALL c_f_pointer(int_obj, ainterp_obj)
-    interp_obj=>ainterp_obj
-  CASE(2)
-    CALL c_f_pointer(int_obj, binterp_obj)
-    interp_obj=>binterp_obj
-  CASE DEFAULT
-    CALL copy_string('Invalid interpolation type',error_str)
-    RETURN
-END SELECT
-CALL oft_lag_getpdop(self%ML_lagrange%current_level,pdop,interp_obj,'zerob',k_perp)
+CALL oft_lag_getpdop(self%ML_lagrange%current_level,pdop,eval_obj%vinterp,'zerob',k_perp)
 !---Setup solver
 CALL create_cg_solver(pdinv)
 CALL create_diag_pre(pdinv%pre)
@@ -364,14 +344,13 @@ ELSE
 END IF
 END SUBROUTINE marklin_setup_io
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Project a vector field onto the plotting (Lagrange) basis and save to plot files
 !---------------------------------------------------------------------------------
-SUBROUTINE marklin_save_visit(marklin_ptr,int_obj,int_type,key,error_str) BIND(C,NAME="marklin_save_visit")
-TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: key(OFT_SLEN) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+SUBROUTINE marklin_save_visit(marklin_ptr,int_obj,key,error_str) BIND(C,NAME="marklin_save_visit")
+TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Pointer to Marklin object
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Field evaluation object for vector field (see \ref oft_base_f::oft_get_field_eval)
+CHARACTER(KIND=c_char), INTENT(in) :: key(OFT_SLEN) !< Name of field in plot files
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 !---Lagrange mass solver
 CLASS(oft_matrix), POINTER :: lmop => NULL()
 CLASS(oft_solver), POINTER :: lminv => NULL()
@@ -381,10 +360,14 @@ REAL(r8), POINTER, DIMENSION(:) :: vals => NULL()
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:,:) :: bvout
 TYPE(marklin_obj), POINTER :: self
 CLASS(oft_vector), POINTER :: u,v
-TYPE(oft_hcurl_grad_rinterp), POINTER :: ainterp_obj
-TYPE(oft_taylor_rinterp), POINTER :: binterp_obj
+TYPE(oftpy_field_eval), POINTER :: eval_obj
 CHARACTER(LEN=80) :: name_tmp = ''
 IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
+IF(.NOT.oft_field_eval_ccast(int_obj,eval_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(eval_obj%vinterp))THEN
+  CALL copy_string('Field evaluation object must be a volume field',error_str)
+  RETURN
+END IF
 CALL copy_string_rev(key,name_tmp)
 !---Construct operator
 NULLIFY(lmop)
@@ -399,14 +382,7 @@ CALL self%ML_vlagrange%vec_create(u)
 CALL self%ML_vlagrange%vec_create(v)
 ALLOCATE(bvout(3,u%n/3))
 !---Project field onto plotting mesh
-SELECT CASE(int_type)
-CASE(1)
-  CALL c_f_pointer(int_obj, ainterp_obj)
-  CALL oft_lag_vproject(self%ML_lagrange%current_level,ainterp_obj,v)
-CASE(2)
-  CALL c_f_pointer(int_obj, binterp_obj)
-  CALL oft_lag_vproject(self%ML_lagrange%current_level,binterp_obj,v)
-END SELECT
+CALL oft_lag_vproject(self%ML_lagrange%current_level,eval_obj%vinterp,v)
 CALL u%set(0.d0)
 CALL lminv%apply(u,v)
 !---Retrieve local values and save
@@ -427,18 +403,22 @@ CALL lminv%delete()
 DEALLOCATE(u,v,lmop,lminv)
 END SUBROUTINE marklin_save_visit
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Build the vector potential from a combination of eigenmodes and create a field
+!! evaluation object for it
+!!
+!! The vector potential is cleaned (gauged) using a divergence cleaning
+!! projection and then passed to the generic H(Curl) + Grad(H^1) interpolator
+!! (field type `331` in \ref oft_base_f::oft_field_eval_setup).
 !---------------------------------------------------------------------------------
 SUBROUTINE marklin_get_aint(marklin_ptr,hmode_facs,int_obj,zero_norm,error_str) BIND(C,NAME="marklin_get_aint")
-TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: hmode_facs !< Needs docs
-TYPE(c_ptr), INTENT(out) :: int_obj !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: zero_norm !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Pointer to Marklin object
+TYPE(c_ptr), VALUE, INTENT(in) :: hmode_facs !< Weight for each eigenmode [nm]
+TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to field evaluation object
+LOGICAL(c_bool), VALUE, INTENT(in) :: zero_norm !< Use magnetic field gauge (\f$ A_t = 0 \f$ at wall)?
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
-CLASS(oft_vector), POINTER :: utmp
+CLASS(oft_vector), POINTER :: u,utmp
 TYPE(marklin_obj), POINTER :: self
-TYPE(oft_hcurl_grad_rinterp), POINTER :: interp_obj
 CLASS(oft_solver), POINTER :: linv => NULL()
 TYPE(oft_hcurl_grad_divout) :: divout
 CLASS(oft_matrix), POINTER :: lop => NULL()
@@ -481,22 +461,22 @@ END IF
 !------------------------------------------------------------------------------
 ! Setup initial conditions
 !------------------------------------------------------------------------------
-ALLOCATE(interp_obj)
-CALL self%ML_hcurl_grad%vec_create(interp_obj%u)
+NULLIFY(u)
+CALL self%ML_hcurl_grad%vec_create(u)
 CALL self%ML_hcurl_grad%vec_create(utmp)
 CALL c_f_pointer(hmode_facs, facs_tmp, [self%eig_obj%nm])
 DO i=1,self%eig_obj%nm
   CALL self%eig_obj%hffa(i,self%ML_hcurl%level)%f%get_local(tmp)
   CALL utmp%restore_local(tmp,1)
-  CALL interp_obj%u%add(1.d0,facs_tmp(i),utmp)
+  CALL u%add(1.d0,facs_tmp(i),utmp)
 END DO
 CALL utmp%delete()
 DEALLOCATE(tmp,utmp)
 IF(zero_norm)WRITE(*,*)'Setting gauge'
 divout%pm=.TRUE.
-CALL divout%apply(interp_obj%u)
-CALL interp_obj%setup(self%ML_hcurl%current_level,self%ML_h1%current_level)
-int_obj=C_LOC(interp_obj)
+CALL divout%apply(u)
+!---Create interpolator (takes ownership of u)
+CALL oft_field_eval_setup(331,u,int_obj,error_str,hcurl_grad_rep=self%ML_hcurl_grad%current_level)
 !---Cleanup
 CALL lop%delete()
 DEALLOCATE(lop)
@@ -509,18 +489,23 @@ NULLIFY(divout%bc)
 CALL divout%delete()
 END SUBROUTINE marklin_get_aint
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Build the magnetic field from a combination of eigenmodes and vacuum fields and
+!! create a field evaluation object for it
+!!
+!! The composite (plasma + vacuum) field uses a Marklin-specific interpolator, which
+!! is wrapped for use with the generic \ref oft_base_f::oft_apply_field_eval interface.
 !---------------------------------------------------------------------------------
 SUBROUTINE marklin_get_bint(marklin_ptr,hmode_facs,vac_facs,int_obj,error_str) BIND(C,NAME="marklin_get_bint")
-TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: hmode_facs !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: vac_facs !< Needs docs
-TYPE(c_ptr), INTENT(out) :: int_obj !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Pointer to Marklin object
+TYPE(c_ptr), VALUE, INTENT(in) :: hmode_facs !< Weight for each eigenmode [nm]
+TYPE(c_ptr), VALUE, INTENT(in) :: vac_facs !< Weight for each vacuum field [nh]
+TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to field evaluation object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
 REAL(r8), POINTER, DIMENSION(:) :: hmode_tmp,vac_tmp
 TYPE(marklin_obj), POINTER :: self
 TYPE(oft_taylor_rinterp), POINTER :: interp_obj
+TYPE(oft_vector_ptr) :: vecs(2)
 IF(.NOT.marklin_ccast(marklin_ptr,self,error_str))RETURN
 ALLOCATE(interp_obj)
 CALL self%ML_hcurl_grad%vec_create(interp_obj%uvac)
@@ -534,59 +519,9 @@ DO i=1,self%eig_obj%nm
   CALL interp_obj%ua%add(1.d0,hmode_tmp(i),self%eig_obj%hffa(i,self%ML_hcurl%level)%f)
 END DO
 CALL interp_obj%setup(self%ML_hcurl_grad%current_level)
-int_obj=C_LOC(interp_obj)
+!---Wrap interpolator for generic evaluation (takes ownership of ua and uvac)
+vecs(1)%f=>interp_obj%ua
+vecs(2)%f=>interp_obj%uvac
+CALL oft_field_eval_wrap(int_obj,vinterp=interp_obj,vecs=vecs)
 END SUBROUTINE marklin_get_bint
-!---------------------------------------------------------------------------------
-!> Needs docs
-!---------------------------------------------------------------------------------
-SUBROUTINE marklin_apply_int(marklin_ptr,int_obj,int_type,pt,fbary_tol,cell,field) BIND(C,NAME="marklin_apply_int")
-TYPE(c_ptr), VALUE, INTENT(in) :: marklin_ptr !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Needs docs
-REAL(c_double), INTENT(in) :: pt(3) !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Needs docs
-INTEGER(c_int), INTENT(inout) :: cell !< Needs docs
-REAL(c_double), INTENT(out) :: field(3) !< Needs docs
-TYPE(marklin_obj), POINTER :: self
-TYPE(oft_hcurl_grad_rinterp), POINTER :: ainterp_obj
-TYPE(oft_taylor_rinterp), POINTER :: binterp_obj
-REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
-IF(.NOT.c_associated(marklin_ptr))THEN
-  cell=-1
-  RETURN
-END IF
-CALL c_f_pointer(marklin_ptr,self)
-IF(int_type<0)THEN
-  SELECT CASE(int_type)
-  CASE(1)
-    CALL c_f_pointer(int_obj, ainterp_obj)
-    CALL ainterp_obj%u%delete()
-    CALL ainterp_obj%delete()
-  CASE(2)
-    CALL c_f_pointer(int_obj, binterp_obj)
-    CALL binterp_obj%uvac%delete()
-    CALL binterp_obj%ua%delete()
-    CALL binterp_obj%delete()
-  END SELECT
-  RETURN
-END IF
-call mesh_findcell(self%ml_mesh%mesh,cell,pt,f)
-IF(cell==0)RETURN
-fmin=MINVAL(f); fmax=MAXVAL(f)
-IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
-  cell=-ABS(cell)
-  RETURN
-END IF
-CALL self%ml_mesh%mesh%jacobian(cell,f,goptmp,vol)
-SELECT CASE(int_type)
-  CASE(1)
-    CALL c_f_pointer(int_obj, ainterp_obj)
-    CALL ainterp_obj%interp(cell,f,goptmp,field)
-  CASE(2)
-    CALL c_f_pointer(int_obj, binterp_obj)
-    CALL binterp_obj%interp(cell,f,goptmp,field)
-  CASE DEFAULT
-    cell=-(self%ml_mesh%mesh%np+1)
-END SELECT
-END SUBROUTINE marklin_apply_int
 END MODULE marklin_f
