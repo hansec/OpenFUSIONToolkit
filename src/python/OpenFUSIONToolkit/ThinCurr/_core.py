@@ -42,6 +42,7 @@ class ThinCurr():
             'B_svd_tol': '-1.E-5',
             'B_aca_rel_tol': '0.05',
             'lowrank_single': 'F',
+            'dense_single': 'F',
             'pre_single': 'F',
             'pre_coarse': 'F',
             'pre_neigs': '0'
@@ -383,7 +384,7 @@ class ThinCurr():
 
     def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
                           L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,pre_coarse=None,
-                          pre_neigs=None,lowrank_single=None):
+                          pre_neigs=None,lowrank_single=None,dense_single=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
@@ -395,6 +396,8 @@ class ThinCurr():
         @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
         @param lowrank_single Store low-rank factors of compressed off-diagonal blocks in single precision? (products
         are accumulated in double precision)
+        @param dense_single Store dense diagonal blocks in single precision? (products are accumulated in double
+        precision)
         @param pre_single Compute, store, and apply HODLR block-Jacobi preconditioners in single precision?
         @param pre_coarse Add a global coarse correction to HODLR block-Jacobi preconditioners (two-level preconditioner)?
         @param pre_neigs Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires
@@ -419,6 +422,8 @@ class ThinCurr():
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_aca_rel_tol'] = '{0:.4E}'.format(B_aca_rel_tol)
         if lowrank_single is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['lowrank_single'] = 'T' if lowrank_single else 'F'
+        if dense_single is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['dense_single'] = 'T' if dense_single else 'F'
         if pre_single is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_single'] = 'T' if pre_single else 'F'
         if pre_coarse is not None:

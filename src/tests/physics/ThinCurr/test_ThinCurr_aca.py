@@ -116,13 +116,24 @@ def test_td_volt_aca_coarse(pre_single,pre_neigs):
     assert validate_td(sigs_final,jumpers_final)
 
 
+# HODLR block storage precision options: low-rank factors only, diagonal blocks only, and both (with the
+# preconditioner also in single precision)
+SINGLE_PREC_OPTS = (
+    {'lowrank_single': True},
+    {'dense_single': True},
+    {'lowrank_single': True, 'dense_single': True, 'pre_single': True},
+)
+SINGLE_PREC_IDS = ('lowrank', 'dense', 'all')
+
+
 @pytest.mark.coverage
-def test_td_aca_lowrank_single():
-    '''Time-dependent run (and reduced model with B-field operators) with the low-rank factors of the compressed
-    inductance and B-field operators stored in single precision'''
+@pytest.mark.parametrize("hodlr_opts", SINGLE_PREC_OPTS, ids=SINGLE_PREC_IDS)
+def test_td_aca_block_single(hodlr_opts):
+    '''Time-dependent run (and reduced model with B-field operators) with blocks of the compressed inductance and
+    B-field operators stored in single precision'''
     sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((7.205529E-4, 6.100309E-4), rel=1.E-3)
     jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([5.453372E3, 5.453372E3], rel=1.E-3)
-    assert ThinCurr_setup("tw_test-cyl_hr.h5",'td','F',use_aca=True,hodlr_opts={'lowrank_single': True},
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",'td','F',use_aca=True,hodlr_opts=hodlr_opts,
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            curr_waveform=((0.0, 0.0), (1.0, 1.0)),
@@ -131,21 +142,22 @@ def test_td_aca_lowrank_single():
 
 
 @pytest.mark.coverage
-def test_fr_aca_lowrank_single():
-    '''Frequency response with the low-rank factors of the compressed inductance matrix stored in single precision'''
+@pytest.mark.parametrize("hodlr_opts", SINGLE_PREC_OPTS, ids=SINGLE_PREC_IDS)
+def test_fr_aca_block_single(hodlr_opts):
+    '''Frequency response with blocks of the compressed inductance matrix stored in single precision'''
     fr_real = approx_list((5.888736E-2, 4.881440E-3), rel=1.E-3)
     fr_imag = approx_list((-2.017045E-3, -2.313881E-3), rel=1.E-3)
-    assert ThinCurr_setup("tw_test-cyl_hr.h5",'fr','F',use_aca=True,hodlr_opts={'lowrank_single': True},freq=5.E3,
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",'fr','F',use_aca=True,hodlr_opts=hodlr_opts,freq=5.E3,
                            fr_limit=0,icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            jumper_start=2)
     assert validate_fr(fr_real, fr_imag)
 
 
-def run_hodlr_products(lowrank_single,cache_tag,mp_q):
+def run_hodlr_products(hodlr_opts,cache_tag,mp_q):
     '''Products of the inductance and B-field operators with a fixed potential on the high-resolution cylinder, with
-    dense operators (`lowrank_single=None`) or HODLR operators, and the precision of the low-rank factors saved to the
-    HODLR cache files'''
+    dense operators (`hodlr_opts=None`) or HODLR operators, and the precision of the diagonal blocks ('DENSE_') and
+    low-rank factors ('SPARSE_U_') saved to the HODLR cache files'''
     result = None
     try:
         import h5py
@@ -153,10 +165,10 @@ def run_hodlr_products(lowrank_single,cache_tag,mp_q):
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
         tw_model = ThinCurr(OFT_env(nthreads=-1))
         tw_model.setup_model(mesh_file='tw_test-cyl_hr.h5',jumper_start=2)
-        use_hodlr = lowrank_single is not None
+        use_hodlr = hodlr_opts is not None
         cache_files = (None, None)
         if use_hodlr:
-            tw_model.set_hodlr_options(lowrank_single=lowrank_single)
+            tw_model.set_hodlr_options(**hodlr_opts)
             if cache_tag is not None:
                 cache_files = ('Lmat_{0}.save'.format(cache_tag), 'Bmat_{0}.save'.format(cache_tag))
         tw_model.compute_Lmat(use_hodlr=use_hodlr,cache_file=cache_files[0])
@@ -164,46 +176,54 @@ def run_hodlr_products(lowrank_single,cache_tag,mp_q):
         pot = np.sin(np.arange(tw_model.nelems)*0.37)
         Lx = np.array(tw_model.apply_Lmat(pot))
         Bx = np.array(tw_model.reconstruct_Bfield(pot))
-        dtypes = set()
+        dtypes = {'DENSE_': set(), 'SPARSE_U_': set()}
         for cache_file in cache_files:
             if cache_file is None:
                 continue
             with h5py.File(cache_file,'r') as fid:
-                dtypes |= {str(fid[key].dtype) for key in fid.keys() if key.startswith('SPARSE_U_')}
+                for key in fid.keys():
+                    for prefix in dtypes:
+                        if key.startswith(prefix) and not key.startswith(prefix+'hash'):
+                            dtypes[prefix].add(str(fid[key].dtype))
         result = (Lx, Bx, dtypes)
     except BaseException as e:
         print(e)
     mp_q.put(result)
 
 
-def test_hodlr_lowrank_single():
-    '''Rounding the low-rank factors of the HODLR operators to single precision changes products by much less than the
-    HODLR approximation itself, single and double precision cache files are kept apart, and single precision factors
-    are reused from a cache file'''
-    cache_tag = 'lowrank_single'
+def test_hodlr_block_single():
+    '''Rounding the low-rank factors and/or diagonal blocks of the HODLR operators to single precision changes
+    products by much less than the HODLR approximation itself, cache files with different storage precisions are kept
+    apart, and single precision blocks are reused from a cache file'''
+    cache_tag = 'block_single'
     for cache_file in ('Lmat_{0}.save'.format(cache_tag), 'Bmat_{0}.save'.format(cache_tag)):
         cache_file = os.path.join(test_dir, cache_file)
         if os.path.exists(cache_file):
             os.remove(cache_file)
     dense = mp_run(run_hodlr_products, (None, None))
-    double = mp_run(run_hodlr_products, (False, cache_tag))
-    single = mp_run(run_hodlr_products, (True, cache_tag))  # Must not reuse the double precision cache
-    single_cached = mp_run(run_hodlr_products, (True, cache_tag))
-    double_after = mp_run(run_hodlr_products, (False, cache_tag))  # Must not reuse the single precision cache
-    for res in (dense, double, single, single_cached, double_after):
-        assert res is not None
-    assert double[2] == {'float64'}
-    assert single[2] == {'float32'}
-    assert single_cached[2] == {'float32'}
-    assert double_after[2] == {'float64'}
-    for i in range(2):
-        ref = dense[i]
-        scale = np.linalg.norm(ref)
-        hodlr_err = np.linalg.norm(double[i]-ref)/scale
-        single_diff = np.linalg.norm(single[i]-double[i])/scale
-        print('Operator {0}: HODLR error = {1:.3E}, single vs double = {2:.3E}'.format(i, hodlr_err, single_diff))
-        assert hodlr_err < 1.E-3
-        assert single_diff < 1.E-6
-        assert np.linalg.norm(single[i]-ref)/scale < hodlr_err + 1.E-6
-        # Factors loaded from the cache are identical to those written
-        assert np.allclose(single_cached[i], single[i], rtol=0.0, atol=1.E-12*np.abs(ref).max())
+    double = mp_run(run_hodlr_products, ({}, cache_tag))
+    assert dense is not None and double is not None
+    assert double[2] == {'DENSE_': {'float64'}, 'SPARSE_U_': {'float64'}}
+    for opts in SINGLE_PREC_OPTS[:2] + ({'lowrank_single': True, 'dense_single': True},):
+        # Each setting must not reuse the cache written with the previous one, then must reuse its own
+        single = mp_run(run_hodlr_products, (opts, cache_tag))
+        single_cached = mp_run(run_hodlr_products, (opts, cache_tag))
+        assert single is not None and single_cached is not None
+        expected = {'DENSE_': {'float32' if opts.get('dense_single', False) else 'float64'},
+                    'SPARSE_U_': {'float32' if opts.get('lowrank_single', False) else 'float64'}}
+        assert single[2] == expected
+        assert single_cached[2] == expected
+        for i in range(2):
+            ref = dense[i]
+            scale = np.linalg.norm(ref)
+            hodlr_err = np.linalg.norm(double[i]-ref)/scale
+            single_diff = np.linalg.norm(single[i]-double[i])/scale
+            print('{0} operator {1}: HODLR error = {2:.3E}, single vs double = {3:.3E}'.format(opts, i, hodlr_err, single_diff))
+            assert hodlr_err < 1.E-3
+            assert single_diff < 1.E-6
+            assert np.linalg.norm(single[i]-ref)/scale < hodlr_err + 1.E-6
+            # Blocks loaded from the cache are identical to those written
+            assert np.allclose(single_cached[i], single[i], rtol=0.0, atol=1.E-12*np.abs(ref).max())
+    double_after = mp_run(run_hodlr_products, ({}, cache_tag))  # Must not reuse a single precision cache
+    assert double_after is not None
+    assert double_after[2] == {'DENSE_': {'float64'}, 'SPARSE_U_': {'float64'}}
