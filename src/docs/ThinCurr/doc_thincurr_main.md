@@ -326,9 +326,9 @@ By default all blocks of the HODLR operators are stored in double precision. Set
 (`lowrank_single=True` in \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") rounds
 the low-rank factors (\f$ \textrm{U} \f$ and \f$ \textrm{V} \f$) of the off-diagonal blocks to single precision once they
 are computed, and `dense_single=T` does the same for the dense diagonal blocks. Both apply to the \f$ \textrm{L} \f$ matrix and
-the magnetic field reconstruction operator. Products with single precision blocks promote each entry to double precision and
-accumulate in double precision, so the only additional error is the rounding of the stored values (relative error
-\f$ \approx 6 \times 10^{-8} \f$ per entry), which is well below typical SVD tolerances. This halves the memory needed for
+the magnetic field reconstruction operator. Products with single precision blocks are computed in single precision (`sgemv`)
+and summed into double precision vectors, so the additional error comes from single precision rounding within each block
+product (relative error \f$ \sim 10^{-7} \f$), which is well below typical SVD tolerances. This halves the memory needed for
 (and data moved when applying) the corresponding part of the operator. With `dense_single=T` the block-Jacobi preconditioner
 is built from the rounded diagonal blocks. The dense fallback for off-diagonal blocks that cannot be compressed and the hole
 and V-coil columns are always stored in double precision. Cache files store blocks in the precision they are kept in and

@@ -394,9 +394,9 @@ class ThinCurr():
         @param L_aca_rel_tol Relative tolerance for ACA compression of L-matrix blocks
         @param B_svd_tol Tolerance for SVD compression of B-matrix blocks
         @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
-        @param lowrank_single Store low-rank factors of compressed off-diagonal blocks in single precision? (products
-        are accumulated in double precision)
-        @param dense_single Store dense diagonal blocks in single precision? (products are accumulated in double
+        @param lowrank_single Store low-rank factors of compressed off-diagonal blocks in single precision? (block
+        products are summed in double precision)
+        @param dense_single Store dense diagonal blocks in single precision? (block products are summed in double
         precision)
         @param pre_single Compute, store, and apply HODLR block-Jacobi preconditioners in single precision?
         @param pre_coarse Add a global coarse correction to HODLR block-Jacobi preconditioners (two-level preconditioner)?

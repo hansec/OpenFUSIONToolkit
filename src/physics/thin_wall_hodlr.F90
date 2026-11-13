@@ -50,8 +50,8 @@ end type oft_tw_level
 !!
 !! Blocks are always computed in double precision and, if `lowrank_single` (low-rank factors) or `dense_single`
 !! (diagonal blocks) is set on the HODLR operator, rounded to single precision afterwards
-!! (see @ref tw_block_to_single). Products with single precision blocks are accumulated in double precision
-!! (see @ref tw_block_gemv).
+!! (see @ref tw_block_to_single). Products with single precision blocks use single precision BLAS and are summed
+!! into double precision vectors (see @ref tw_block_gemv).
 !---------------------------------------------------------------------------------
 TYPE :: oft_tw_block_mat
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: M => NULL() !< Double precision values
@@ -1721,6 +1721,7 @@ class(oft_vector), target, intent(inout) :: a
 class(oft_vector), intent(inout) :: b
 integer(4) :: i,j,k,iblock,jblock,level
 real(8), allocatable :: row_tmp(:),col_tmp(:),int_tmp1(:),int_tmp2(:)
+real(4), allocatable :: x4_tmp(:),y4_tmp(:)
 REAL(8), POINTER :: avals(:),bvals(:),ared(:),bred(:)
 NULLIFY(avals,bvals,ared,bred)
 CALL a%get_local(ared)
@@ -1735,9 +1736,10 @@ ELSE
   avals=>ared
   bvals=>bred
 END IF
-!$omp parallel private(j,k,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
+!$omp parallel private(j,k,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2,x4_tmp,y4_tmp)
 ALLOCATE(col_tmp(self%tw_obj%np_active),row_tmp(self%tw_obj%np_active))
 ALLOCATE(int_tmp1(self%tw_obj%np_active),int_tmp2(self%tw_obj%np_active))
+ALLOCATE(x4_tmp(self%tw_obj%np_active),y4_tmp(self%tw_obj%np_active))
 int_tmp2=0.d0
 ! !$omp do schedule(dynamic,4)
 DO j=self%L_thread_ptr(1,oft_tid+1),self%L_thread_ptr(1,oft_tid+2)-1
@@ -1772,8 +1774,8 @@ DO j=self%L_thread_ptr(1,oft_tid+1),self%L_thread_ptr(1,oft_tid+2)-1
     DO k=1,self%levels(level)%blocks(iblock)%nelems
       col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
     END DO
-    CALL tw_block_gemv('N',self%aca_V_mats(j),col_tmp,int_tmp1)
-    CALL tw_block_gemv('N',self%aca_U_mats(j),int_tmp1,row_tmp)
+    CALL tw_block_gemv('N',self%aca_V_mats(j),col_tmp,int_tmp1,x4_tmp,y4_tmp)
+    CALL tw_block_gemv('N',self%aca_U_mats(j),int_tmp1,row_tmp,x4_tmp,y4_tmp)
     !$omp simd
     DO k=1,self%levels(level)%blocks(jblock)%nelems
       int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))+row_tmp(k)
@@ -1783,8 +1785,8 @@ DO j=self%L_thread_ptr(1,oft_tid+1),self%L_thread_ptr(1,oft_tid+2)-1
     DO k=1,self%levels(level)%blocks(jblock)%nelems
       col_tmp(k)=avals(self%levels(level)%blocks(jblock)%ielem(k))
     END DO
-    CALL tw_block_gemv('T',self%aca_U_mats(j),col_tmp,int_tmp1)
-    CALL tw_block_gemv('T',self%aca_V_mats(j),int_tmp1,row_tmp)
+    CALL tw_block_gemv('T',self%aca_U_mats(j),col_tmp,int_tmp1,x4_tmp,y4_tmp)
+    CALL tw_block_gemv('T',self%aca_V_mats(j),int_tmp1,row_tmp,x4_tmp,y4_tmp)
     !$omp simd
     DO k=1,self%levels(level)%blocks(iblock)%nelems
       int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))+row_tmp(k)
@@ -1801,7 +1803,7 @@ DO j=self%L_thread_ptr(2,oft_tid+1),self%L_thread_ptr(2,oft_tid+2)-1
   DO k=1,self%levels(level)%blocks(iblock)%nelems
     col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
   END DO
-  CALL tw_block_gemv('N',self%dense_mats(j),col_tmp,row_tmp)
+  CALL tw_block_gemv('N',self%dense_mats(j),col_tmp,row_tmp,x4_tmp,y4_tmp)
   !$omp simd
   DO k=1,self%levels(level)%blocks(jblock)%nelems
     int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))+row_tmp(k)
@@ -1811,7 +1813,7 @@ END DO
 !$omp critical
 bvals(1:self%tw_obj%np_active)=bvals(1:self%tw_obj%np_active)+int_tmp2
 !$omp end critical
-DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2)
+DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2,x4_tmp,y4_tmp)
 !$omp end parallel
 IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
   CALL dgemv('N',tw_nelems_exp(self%tw_obj),self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
@@ -1837,6 +1839,7 @@ class(oft_vector), target, intent(inout) :: a
 class(oft_vector), intent(inout) :: bx,by,bz
 integer(4) :: i,j,jj,k,dim,iblock,jblock,level,flip
 real(8), allocatable :: row_tmp(:),col_tmp(:),int_tmp1(:),int_tmp2(:,:)
+real(4), allocatable :: x4_tmp(:),y4_tmp(:)
 REAL(8), POINTER :: avals(:),bvals(:,:),btmp(:),ared(:)
 NULLIFY(avals,bvals,ared)
 CALL a%get_local(ared)
@@ -1857,9 +1860,10 @@ btmp=>bvals(:,2)
 CALL by%get_local(btmp)
 btmp=>bvals(:,3)
 CALL bz%get_local(btmp)
-!$omp parallel private(j,k,dim,jj,flip,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
+!$omp parallel private(j,k,dim,jj,flip,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2,x4_tmp,y4_tmp)
 ALLOCATE(col_tmp(self%tw_obj%np_active),row_tmp(self%tw_obj%mesh%np))
 ALLOCATE(int_tmp1(self%tw_obj%mesh%np),int_tmp2(self%tw_obj%mesh%np,3))
+ALLOCATE(x4_tmp(MAX(self%tw_obj%np_active,self%tw_obj%mesh%np)),y4_tmp(MAX(self%tw_obj%np_active,self%tw_obj%mesh%np)))
 int_tmp2=0.d0
 !!$omp do schedule(dynamic,1)
 DO j=self%B_thread_ptr(1,oft_tid+1),self%B_thread_ptr(1,oft_tid+2)-1
@@ -1889,8 +1893,8 @@ DO j=self%B_thread_ptr(1,oft_tid+1),self%B_thread_ptr(1,oft_tid+2)-1
         DO k=1,self%levels(level)%blocks(iblock)%nelems
           col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
         END DO
-        CALL tw_block_gemv('N',self%aca_BV_mats(jj,dim),col_tmp,int_tmp1)
-        CALL tw_block_gemv('N',self%aca_BU_mats(jj,dim),int_tmp1,row_tmp)
+        CALL tw_block_gemv('N',self%aca_BV_mats(jj,dim),col_tmp,int_tmp1,x4_tmp,y4_tmp)
+        CALL tw_block_gemv('N',self%aca_BU_mats(jj,dim),int_tmp1,row_tmp,x4_tmp,y4_tmp)
         !$omp simd
         DO k=1,self%levels(level)%blocks(jblock)%np
           int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)=int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)+row_tmp(k)
@@ -1910,7 +1914,7 @@ DO j=self%B_thread_ptr(2,oft_tid+1),self%B_thread_ptr(2,oft_tid+2)-1
     col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
   END DO
   DO dim=1,3
-    CALL tw_block_gemv('N',self%dense_B_mats(j,dim),col_tmp,row_tmp)
+    CALL tw_block_gemv('N',self%dense_B_mats(j,dim),col_tmp,row_tmp,x4_tmp,y4_tmp)
     !$omp simd
     DO k=1,self%levels(level)%blocks(jblock)%np
       int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)=int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)+row_tmp(k)
@@ -1922,7 +1926,7 @@ DO dim=1,3
   bvals(1:self%tw_obj%mesh%np,dim)=bvals(1:self%tw_obj%mesh%np,dim)+int_tmp2(:,dim)
 END DO
 !$omp end critical
-DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2)
+DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2,x4_tmp,y4_tmp)
 !$omp end parallel
 IF((self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   DO dim=1,3
@@ -2775,83 +2779,36 @@ END FUNCTION tw_prec_cache_hash
 !------------------------------------------------------------------------------
 !> Product with a HODLR block, \f$ y = F x \f$ (`trans='N'`) or \f$ y = F^T x \f$ (`trans='T'`)
 !!
-!! Double precision blocks use BLAS (`dgemv`). For single precision blocks each entry is promoted to
-!! double precision and the products are accumulated in double precision.
+!! Double precision blocks use `dgemv`. For single precision blocks `x` is rounded to single precision, the
+!! product is computed with `sgemv`, and the result is returned in double precision (block products are summed
+!! into double precision vectors by the callers).
 !------------------------------------------------------------------------------
-SUBROUTINE tw_block_gemv(trans,F,x,y)
-CHARACTER(LEN=1), INTENT(in) :: trans !< Transpose factor ('N' or 'T')
+SUBROUTINE tw_block_gemv(trans,F,x,y,x4,y4)
+CHARACTER(LEN=1), INTENT(in) :: trans !< Transpose block ('N' or 'T')
 TYPE(oft_tw_block_mat), INTENT(in) :: F !< Block [m,n]
 REAL(r8), INTENT(in) :: x(*) !< Input vector [n] ('N') or [m] ('T')
 REAL(r8), INTENT(inout) :: y(*) !< Output vector [m] ('N') or [n] ('T')
-INTEGER(4) :: m,n
+REAL(r4), INTENT(inout) :: x4(*) !< Single precision work array (size of `x`), only used for single precision blocks
+REAL(r4), INTENT(inout) :: y4(*) !< Single precision work array (size of `y`), only used for single precision blocks
+INTEGER(4) :: i,m,n,nx,ny
 IF(ASSOCIATED(F%M4))THEN
   m=SIZE(F%M4,DIM=1); n=SIZE(F%M4,DIM=2)
   IF(trans=='N')THEN
-    CALL gemv_r4_n(m,n,F%M4,x,y)
+    nx=n; ny=m
   ELSE
-    CALL gemv_r4_t(m,n,F%M4,x,y)
+    nx=m; ny=n
   END IF
+  DO i=1,nx
+    x4(i)=REAL(x(i),r4)
+  END DO
+  CALL sgemv(trans,m,n,1.0_r4,F%M4,m,x4,1,0.0_r4,y4,1)
+  DO i=1,ny
+    y(i)=REAL(y4(i),r8)
+  END DO
 ELSE
   m=SIZE(F%M,DIM=1); n=SIZE(F%M,DIM=2)
   CALL dgemv(trans,m,n,1.d0,F%M,m,x,1,0.d0,y,1)
 END IF
-CONTAINS
-!> y = A x, single precision A, double precision x, y and accumulation
-!!
-!! Four columns per pass, so each entry of y is loaded and stored once per four columns
-SUBROUTINE gemv_r4_n(m,n,A,x,y)
-INTEGER(4), INTENT(in) :: m,n
-REAL(r4), INTENT(in) :: A(m,n)
-REAL(r8), INTENT(in) :: x(n)
-REAL(r8), INTENT(out) :: y(m)
-INTEGER(4) :: i,j
-REAL(r8) :: x1,x2,x3,x4
-y=0.d0
-DO j=1,n-3,4
-  x1=x(j); x2=x(j+1); x3=x(j+2); x4=x(j+3)
-  !$omp simd
-  DO i=1,m
-    y(i)=y(i)+REAL(A(i,j),r8)*x1+REAL(A(i,j+1),r8)*x2+REAL(A(i,j+2),r8)*x3+REAL(A(i,j+3),r8)*x4
-  END DO
-END DO
-DO j=j,n
-  x1=x(j)
-  !$omp simd
-  DO i=1,m
-    y(i)=y(i)+REAL(A(i,j),r8)*x1
-  END DO
-END DO
-END SUBROUTINE gemv_r4_n
-!> y = A^T x, single precision A, double precision x, y and accumulation
-!!
-!! Four columns per pass, so each entry of x is loaded once per four columns
-SUBROUTINE gemv_r4_t(m,n,A,x,y)
-INTEGER(4), INTENT(in) :: m,n
-REAL(r4), INTENT(in) :: A(m,n)
-REAL(r8), INTENT(in) :: x(m)
-REAL(r8), INTENT(out) :: y(n)
-INTEGER(4) :: i,j
-REAL(r8) :: t1,t2,t3,t4
-DO j=1,n-3,4
-  t1=0.d0; t2=0.d0; t3=0.d0; t4=0.d0
-  !$omp simd reduction(+:t1,t2,t3,t4)
-  DO i=1,m
-    t1=t1+REAL(A(i,j),r8)*x(i)
-    t2=t2+REAL(A(i,j+1),r8)*x(i)
-    t3=t3+REAL(A(i,j+2),r8)*x(i)
-    t4=t4+REAL(A(i,j+3),r8)*x(i)
-  END DO
-  y(j)=t1; y(j+1)=t2; y(j+2)=t3; y(j+3)=t4
-END DO
-DO j=j,n
-  t1=0.d0
-  !$omp simd reduction(+:t1)
-  DO i=1,m
-    t1=t1+REAL(A(i,j),r8)*x(i)
-  END DO
-  y(j)=t1
-END DO
-END SUBROUTINE gemv_r4_t
 END SUBROUTINE tw_block_gemv
 !------------------------------------------------------------------------------
 !> Recompress a low-rank factorization \f$ U V \f$ (from ACA+) with the SVD truncation rule
