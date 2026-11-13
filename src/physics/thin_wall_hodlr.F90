@@ -2797,37 +2797,59 @@ ELSE
 END IF
 CONTAINS
 !> y = A x, single precision A, double precision x, y and accumulation
+!!
+!! Four columns per pass, so each entry of y is loaded and stored once per four columns
 SUBROUTINE gemv_r4_n(m,n,A,x,y)
 INTEGER(4), INTENT(in) :: m,n
 REAL(r4), INTENT(in) :: A(m,n)
 REAL(r8), INTENT(in) :: x(n)
 REAL(r8), INTENT(out) :: y(m)
 INTEGER(4) :: i,j
-REAL(r8) :: xj
+REAL(r8) :: x1,x2,x3,x4
 y=0.d0
-DO j=1,n
-  xj=x(j)
+DO j=1,n-3,4
+  x1=x(j); x2=x(j+1); x3=x(j+2); x4=x(j+3)
   !$omp simd
   DO i=1,m
-    y(i)=y(i)+REAL(A(i,j),r8)*xj
+    y(i)=y(i)+REAL(A(i,j),r8)*x1+REAL(A(i,j+1),r8)*x2+REAL(A(i,j+2),r8)*x3+REAL(A(i,j+3),r8)*x4
+  END DO
+END DO
+DO j=j,n
+  x1=x(j)
+  !$omp simd
+  DO i=1,m
+    y(i)=y(i)+REAL(A(i,j),r8)*x1
   END DO
 END DO
 END SUBROUTINE gemv_r4_n
 !> y = A^T x, single precision A, double precision x, y and accumulation
+!!
+!! Four columns per pass, so each entry of x is loaded once per four columns
 SUBROUTINE gemv_r4_t(m,n,A,x,y)
 INTEGER(4), INTENT(in) :: m,n
 REAL(r4), INTENT(in) :: A(m,n)
 REAL(r8), INTENT(in) :: x(m)
 REAL(r8), INTENT(out) :: y(n)
 INTEGER(4) :: i,j
-REAL(r8) :: tmp
-DO j=1,n
-  tmp=0.d0
-  !$omp simd reduction(+:tmp)
+REAL(r8) :: t1,t2,t3,t4
+DO j=1,n-3,4
+  t1=0.d0; t2=0.d0; t3=0.d0; t4=0.d0
+  !$omp simd reduction(+:t1,t2,t3,t4)
   DO i=1,m
-    tmp=tmp+REAL(A(i,j),r8)*x(i)
+    t1=t1+REAL(A(i,j),r8)*x(i)
+    t2=t2+REAL(A(i,j+1),r8)*x(i)
+    t3=t3+REAL(A(i,j+2),r8)*x(i)
+    t4=t4+REAL(A(i,j+3),r8)*x(i)
   END DO
-  y(j)=tmp
+  y(j)=t1; y(j+1)=t2; y(j+2)=t3; y(j+3)=t4
+END DO
+DO j=j,n
+  t1=0.d0
+  !$omp simd reduction(+:t1)
+  DO i=1,m
+    t1=t1+REAL(A(i,j),r8)*x(i)
+  END DO
+  y(j)=t1
 END DO
 END SUBROUTINE gemv_r4_t
 END SUBROUTINE tw_block_gemv
