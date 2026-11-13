@@ -152,7 +152,7 @@ def run_hodlr_products(lowrank_single,cache_tag,mp_q):
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
         tw_model = ThinCurr(OFT_env(nthreads=-1))
-        tw_model.setup_model(mesh_file='tw_test-cyl_hr.h5')
+        tw_model.setup_model(mesh_file='tw_test-cyl_hr.h5',jumper_start=2)
         use_hodlr = lowrank_single is not None
         cache_files = (None, None)
         if use_hodlr:
