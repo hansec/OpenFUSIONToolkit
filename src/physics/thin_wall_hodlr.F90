@@ -45,6 +45,17 @@ type oft_tw_level
   TYPE(oft_tw_block), POINTER, DIMENSION(:) :: blocks => NULL()
 end type oft_tw_level
 !---------------------------------------------------------------------------------
+!> Factor (U or V) of a compressed off-diagonal block, stored in double (`M`) or single (`M4`) precision
+!!
+!! Factors are always computed in double precision and, if `lowrank_single` is set on the HODLR operator,
+!! rounded to single precision afterwards (see @ref tw_lr_to_single). Products with single precision factors
+!! are accumulated in double precision (see @ref tw_lr_gemv).
+!---------------------------------------------------------------------------------
+TYPE :: oft_tw_lowrank_factor
+  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: M => NULL() !< Double precision values
+  REAL(r4), POINTER, CONTIGUOUS, DIMENSION(:,:) :: M4 => NULL() !< Single precision values
+END TYPE oft_tw_lowrank_factor
+!---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
@@ -62,6 +73,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: B_svd_tol = -1.d0 !< SVD tolerance for B-field operators
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
   LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
+  LOGICAL :: lowrank_single = .FALSE. !< Store low-rank factors of compressed off-diagonal blocks in single precision?
   LOGICAL :: pre_coarse = .FALSE. !< Add a global coarse correction to block-Jacobi preconditioners (two-level preconditioner)?
   INTEGER(4) :: pre_neigs = 0 !< Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires pre_coarse and ARPACK)
   INTEGER(4) :: pre_evecs_hash = 0 !< Hash of the resistance matrix used for `pre_evecs`
@@ -70,13 +82,13 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
   INTEGER(4), POINTER, DIMENSION(:,:) :: B_thread_ptr => NULL()
-  TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:) :: aca_U_mats => NULL() !< U matrices for compressed off-diagonal interactions (L)
-  TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:) :: aca_V_mats => NULL() !< V matrices for compressed off-diagonal interactions (L)
+  TYPE(oft_tw_lowrank_factor), POINTER, DIMENSION(:) :: aca_U_mats => NULL() !< U matrices for compressed off-diagonal interactions (L)
+  TYPE(oft_tw_lowrank_factor), POINTER, DIMENSION(:) :: aca_V_mats => NULL() !< V matrices for compressed off-diagonal interactions (L)
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:) :: aca_dense => NULL() !< Fallback dense matrices for compressed off-diagonal interactions (L)
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:) :: dense_mats => NULL() !< Dense matrices for diagonal interactions (L)
   TYPE(oft_native_dense_matrix) :: hole_Vcoil_mat !< Dense coupling matrix to holes and Vcoils (L)
-  TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:,:) :: aca_BU_mats => NULL() !< U matrices for compressed off-diagonal interactions (B-field)
-  TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:,:) :: aca_BV_mats => NULL() !< V matrices for compressed off-diagonal interactions (B-field)
+  TYPE(oft_tw_lowrank_factor), POINTER, DIMENSION(:,:) :: aca_BU_mats => NULL() !< U matrices for compressed off-diagonal interactions (B-field)
+  TYPE(oft_tw_lowrank_factor), POINTER, DIMENSION(:,:) :: aca_BV_mats => NULL() !< V matrices for compressed off-diagonal interactions (B-field)
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:,:) :: aca_B_dense => NULL() !< Fallback dense matrices for compressed off-diagonal interactions (B-field)
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:,:) :: dense_B_mats => NULL() !< Dense matrices for diagonal interactions (B-field)
   REAL(8), POINTER, DIMENSION(:,:,:) :: hole_Vcoil_Bmat => NULL() !< Dense coupling matrix to holes and Vcoils (B-field)
@@ -669,11 +681,12 @@ REAL(8) :: L_svd_tol = -1.d99
 REAL(8) :: L_aca_rel_tol = -1.d0
 REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
+LOGICAL :: lowrank_single = .FALSE.
 LOGICAL :: pre_single = .FALSE.
 LOGICAL :: pre_coarse = .FALSE.
 INTEGER(4) :: pre_neigs = 0
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse,pre_neigs
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,lowrank_single,pre_single,pre_coarse,pre_neigs
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -703,6 +716,7 @@ self%leaf_target=target_size
 self%min_rank=min_rank
 self%aca_min_its=aca_min_its
 self%aca_sep_thresh=aca_sep_thresh
+self%lowrank_single=lowrank_single
 self%pre_single=pre_single
 self%pre_coarse=pre_coarse
 self%pre_neigs=pre_neigs
@@ -878,6 +892,7 @@ WRITE(*,'(2A)')oft_indent,'Building block low rank inductance operator'
 CALL oft_increase_indent
 WRITE(*,'(2A,ES9.2)')oft_indent,'SVD tolerance:  ',self%L_svd_tol
 WRITE(*,'(2A,ES9.2)')oft_indent,'ACA+ tolerance: ',self%L_aca_tol
+IF(self%lowrank_single)WRITE(*,'(2A)')oft_indent,'Storing low-rank factors in single precision'
 IF(self%L_svd_tol<0.d0)CALL oft_abort('"L_svd_tol" must be > 0','tw_Lmat_MF_Lcompute',__FILE__)
 !---Build matrix with ACA+ or SVD compression of off-diagonal blocks
 CALL mytimer%tick()
@@ -961,6 +976,8 @@ DO i=1,self%nsparse
       CALL compress_block(i,self%L_svd_tol,size_out)
     END IF
   END IF
+  !---Round low-rank factors to single precision (after computation)
+  IF(self%lowrank_single)CALL tw_lr_to_single(self%aca_U_mats(i),self%aca_V_mats(i))
   sparse_sizes(i) = size_out
   compressed_size = compressed_size + sparse_sizes(i)
   !$omp critical
@@ -1025,6 +1042,7 @@ IF(TRIM(save_file)/='none')THEN
   DO i=1,self%nlevels
     hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
   END DO
+  hash_tmp(4) = tw_lr_cache_hash(self%lowrank_single,hash_tmp(4))
   hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
   WRITE(*,'(3A)')oft_indent,'Saving HODLR matrix to file: ',TRIM(save_file)
@@ -1057,10 +1075,10 @@ IF(TRIM(save_file)/='none')THEN
       CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)))
       CALL hdf5_write(self%aca_dense(i)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id)))
     ELSE
-      hash_tmp(6)=SIZE(self%aca_V_mats(i)%M,DIM=1)
+      hash_tmp(6)=tw_lr_size(self%aca_V_mats(i),1)
       CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id)))
-      CALL hdf5_write(self%aca_U_mats(i)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id)))
-      CALL hdf5_write(self%aca_V_mats(i)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id)))
+      CALL tw_lr_save(self%aca_U_mats(i),TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id)))
+      CALL tw_lr_save(self%aca_V_mats(i),TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id)))
     END IF
   END DO
   ! TODO: Save create appropriate hash to enable saving Vcoil matrix
@@ -1089,6 +1107,7 @@ IF(TRIM(save_file)/='none')THEN
     DO i=1,self%nlevels
       hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
     END DO
+    hash_tmp(4) = tw_lr_cache_hash(self%lowrank_single,hash_tmp(4))
     hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
     hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
     WRITE(*,'(3A)')oft_indent,'Reading HODLR matrix from file: ',TRIM(save_file)
@@ -1242,6 +1261,7 @@ WRITE(*,'(2A)')oft_indent,'Building block low rank magnetic field operator'
 CALL oft_increase_indent
 WRITE(*,'(2A,ES9.2)')oft_indent,'SVD tolerance:  ',self%B_svd_tol
 WRITE(*,'(2A,ES9.2)')oft_indent,'ACA+ tolerance: ',self%B_aca_tol
+IF(self%lowrank_single)WRITE(*,'(2A)')oft_indent,'Storing low-rank factors in single precision'
 IF(self%B_svd_tol<0.d0)CALL oft_abort('"B_svd_tol" must be > 0','tw_Lmat_MF_Bcompute',__FILE__)
 !---Build matrix with SVD compression of off-diagonal blocks
 ! approximation with ACA+ planned
@@ -1364,6 +1384,12 @@ DO i=1,self%nsparse
         END DO
       END IF
     END IF
+    !---Round low-rank factors to single precision (after computation)
+    IF(self%lowrank_single)THEN
+      DO dim=1,3
+        CALL tw_lr_to_single(self%aca_BU_mats(ii,dim),self%aca_BV_mats(ii,dim))
+      END DO
+    END IF
     IF(ALLOCATED(Btmp))DEALLOCATE(Btmp)
   END DO
   compressed_size = compressed_size + sparse_sizes(i)
@@ -1431,6 +1457,7 @@ IF(TRIM(save_file)/='none')THEN
   DO i=1,self%nlevels
     hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
   END DO
+  hash_tmp(4) = tw_lr_cache_hash(self%lowrank_single,hash_tmp(4))
   hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
   WRITE(*,'(3A)')oft_indent,'Saving HODLR matrix from file: ',TRIM(save_file)
@@ -1474,10 +1501,10 @@ IF(TRIM(save_file)/='none')THEN
           CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
           CALL hdf5_write(self%aca_B_dense(ii,dim)%M,TRIM(save_file),'SPARSE_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
         ELSE
-          hash_tmp(6)=SIZE(self%aca_BV_mats(ii,dim)%M,DIM=1)
+          hash_tmp(6)=tw_lr_size(self%aca_BV_mats(ii,dim),1)
           CALL hdf5_write(hash_tmp,TRIM(save_file),'SPARSE_hash_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
-          CALL hdf5_write(self%aca_BU_mats(ii,dim)%M,TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
-          CALL hdf5_write(self%aca_BV_mats(ii,dim)%M,TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+          CALL tw_lr_save(self%aca_BU_mats(ii,dim),TRIM(save_file),'SPARSE_U_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
+          CALL tw_lr_save(self%aca_BV_mats(ii,dim),TRIM(save_file),'SPARSE_V_'//TRIM(ADJUSTL(matrix_id))//'_'//dim_id)
         END IF
       END DO
     END DO
@@ -1508,6 +1535,7 @@ IF(TRIM(save_file)/='none')THEN
     DO i=1,self%nlevels
       hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
     END DO
+    hash_tmp(4) = tw_lr_cache_hash(self%lowrank_single,hash_tmp(4))
     hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
     hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
     WRITE(*,'(3A)')oft_indent,'Reading HODLR matrix from file: ',TRIM(save_file)
@@ -1725,11 +1753,8 @@ DO j=self%L_thread_ptr(1,oft_tid+1),self%L_thread_ptr(1,oft_tid+2)-1
     DO k=1,self%levels(level)%blocks(iblock)%nelems
       col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
     END DO
-    k=SIZE(self%aca_V_mats(j)%M,DIM=1)
-    CALL dgemv('N',k,self%levels(level)%blocks(iblock)%nelems,1.d0,self%aca_V_mats(j)%M, &
-      k,col_tmp,1,0.d0,int_tmp1,1)
-    CALL dgemv('N',self%levels(level)%blocks(jblock)%nelems,k,1.d0,self%aca_U_mats(j)%M, &
-      self%levels(level)%blocks(jblock)%nelems,int_tmp1,1,0.d0,row_tmp,1)
+    CALL tw_lr_gemv('N',self%aca_V_mats(j),col_tmp,int_tmp1)
+    CALL tw_lr_gemv('N',self%aca_U_mats(j),int_tmp1,row_tmp)
     !$omp simd
     DO k=1,self%levels(level)%blocks(jblock)%nelems
       int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(jblock)%ielem(k))+row_tmp(k)
@@ -1739,11 +1764,8 @@ DO j=self%L_thread_ptr(1,oft_tid+1),self%L_thread_ptr(1,oft_tid+2)-1
     DO k=1,self%levels(level)%blocks(jblock)%nelems
       col_tmp(k)=avals(self%levels(level)%blocks(jblock)%ielem(k))
     END DO
-    k=SIZE(self%aca_V_mats(j)%M,DIM=1)
-    CALL dgemv('T',self%levels(level)%blocks(jblock)%nelems,k,1.d0,self%aca_U_mats(j)%M, &
-      self%levels(level)%blocks(jblock)%nelems,col_tmp,1,0.d0,int_tmp1,1)
-    CALL dgemv('T',k,self%levels(level)%blocks(iblock)%nelems,1.d0,self%aca_V_mats(j)%M, &
-      k,int_tmp1,1,0.d0,row_tmp,1)
+    CALL tw_lr_gemv('T',self%aca_U_mats(j),col_tmp,int_tmp1)
+    CALL tw_lr_gemv('T',self%aca_V_mats(j),int_tmp1,row_tmp)
     !$omp simd
     DO k=1,self%levels(level)%blocks(iblock)%nelems
       int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))=int_tmp2(self%levels(level)%blocks(iblock)%ielem(k))+row_tmp(k)
@@ -1849,11 +1871,8 @@ DO j=self%B_thread_ptr(1,oft_tid+1),self%B_thread_ptr(1,oft_tid+2)-1
         DO k=1,self%levels(level)%blocks(iblock)%nelems
           col_tmp(k)=avals(self%levels(level)%blocks(iblock)%ielem(k))
         END DO
-        k=SIZE(self%aca_BV_mats(jj,dim)%M,DIM=1)
-        CALL dgemv('N',k,self%levels(level)%blocks(iblock)%nelems,1.d0,self%aca_BV_mats(jj,dim)%M, &
-          k,col_tmp,1,0.d0,int_tmp1,1)
-        CALL dgemv('N',self%levels(level)%blocks(jblock)%np,k,1.d0,self%aca_BU_mats(jj,dim)%M, &
-          self%levels(level)%blocks(jblock)%np,int_tmp1,1,0.d0,row_tmp,1)
+        CALL tw_lr_gemv('N',self%aca_BV_mats(jj,dim),col_tmp,int_tmp1)
+        CALL tw_lr_gemv('N',self%aca_BU_mats(jj,dim),int_tmp1,row_tmp)
         !$omp simd
         DO k=1,self%levels(level)%blocks(jblock)%np
           int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)=int_tmp2(self%levels(level)%blocks(jblock)%ipts(k),dim)+row_tmp(k)
@@ -2024,7 +2043,11 @@ DO lev=1,self%nlevels
   IF(ASSOCIATED(self%aca_dense(isp)%M))THEN
     val=self%aca_dense(isp)%M(r,c)
   ELSE
-    val=DOT_PRODUCT(self%aca_U_mats(isp)%M(r,:),self%aca_V_mats(isp)%M(:,c))
+    IF(ASSOCIATED(self%aca_U_mats(isp)%M4))THEN
+      val=DOT_PRODUCT(REAL(self%aca_U_mats(isp)%M4(r,:),8),REAL(self%aca_V_mats(isp)%M4(:,c),8))
+    ELSE
+      val=DOT_PRODUCT(self%aca_U_mats(isp)%M(r,:),self%aca_V_mats(isp)%M(:,c))
+    END IF
   END IF
   RETURN
 END DO
@@ -2654,6 +2677,126 @@ IF(INFO/=0)CALL oft_abort("QR factorization failed","tw_Lmat_MF_setup::get_qr",_
 DEALLOCATE(WORK,TAU)
 END SUBROUTINE get_qr
 !------------------------------------------------------------------------------
+!> Round a pair of low-rank factors to single precision, releasing the double precision values
+!!
+!! Does nothing for factors that are not set (dense fallback blocks) or are already in single precision.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_lr_to_single(Umat,Vmat)
+TYPE(oft_tw_lowrank_factor), INTENT(inout) :: Umat !< Left factor
+TYPE(oft_tw_lowrank_factor), INTENT(inout) :: Vmat !< Right factor
+CALL convert(Umat)
+CALL convert(Vmat)
+CONTAINS
+SUBROUTINE convert(F)
+TYPE(oft_tw_lowrank_factor), INTENT(inout) :: F
+IF(.NOT.ASSOCIATED(F%M))RETURN
+ALLOCATE(F%M4(SIZE(F%M,DIM=1),SIZE(F%M,DIM=2)))
+F%M4=REAL(F%M,r4)
+DEALLOCATE(F%M)
+END SUBROUTINE convert
+END SUBROUTINE tw_lr_to_single
+!------------------------------------------------------------------------------
+!> Size of a low-rank factor along a given dimension (either precision)
+!------------------------------------------------------------------------------
+FUNCTION tw_lr_size(F,dim) RESULT(n)
+TYPE(oft_tw_lowrank_factor), INTENT(in) :: F !< Low-rank factor
+INTEGER(4), INTENT(in) :: dim !< Dimension
+INTEGER(4) :: n
+IF(ASSOCIATED(F%M4))THEN
+  n=SIZE(F%M4,DIM=dim)
+ELSE
+  n=SIZE(F%M,DIM=dim)
+END IF
+END FUNCTION tw_lr_size
+!------------------------------------------------------------------------------
+!> Save a low-rank factor to an HDF5 cache file (single precision factors are saved in single precision)
+!------------------------------------------------------------------------------
+SUBROUTINE tw_lr_save(F,filename,path)
+TYPE(oft_tw_lowrank_factor), INTENT(in) :: F !< Low-rank factor
+CHARACTER(LEN=*), INTENT(in) :: filename !< Path to file
+CHARACTER(LEN=*), INTENT(in) :: path !< Variable path in file
+IF(ASSOCIATED(F%M4))THEN
+  CALL hdf5_write(REAL(F%M4,r8),filename,path,single_prec=.TRUE.)
+ELSE
+  CALL hdf5_write(F%M,filename,path)
+END IF
+END SUBROUTINE tw_lr_save
+!------------------------------------------------------------------------------
+!> Add the storage precision of low-rank factors to the settings hash of a HODLR cache file
+!!
+!! The hash is unchanged for double precision storage, so existing cache files remain valid. Cache files
+!! with single precision factors are only used when `lowrank_single` is set (and vice versa).
+!------------------------------------------------------------------------------
+FUNCTION tw_lr_cache_hash(lowrank_single,hash_in) RESULT(hash)
+LOGICAL, INTENT(in) :: lowrank_single !< Are low-rank factors stored in single precision?
+INTEGER(4), INTENT(in) :: hash_in !< Settings hash
+INTEGER(4) :: hash
+INTEGER(4), TARGET :: prec_bytes
+hash=hash_in
+IF(.NOT.lowrank_single)RETURN
+prec_bytes=4
+hash=oft_simple_hash(C_LOC(prec_bytes),INT(4,8),starting_value=hash_in)
+END FUNCTION tw_lr_cache_hash
+!------------------------------------------------------------------------------
+!> Product with a low-rank factor, \f$ y = F x \f$ (`trans='N'`) or \f$ y = F^T x \f$ (`trans='T'`)
+!!
+!! Double precision factors use BLAS (`dgemv`). For single precision factors each entry is promoted to
+!! double precision and the products are accumulated in double precision.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_lr_gemv(trans,F,x,y)
+CHARACTER(LEN=1), INTENT(in) :: trans !< Transpose factor ('N' or 'T')
+TYPE(oft_tw_lowrank_factor), INTENT(in) :: F !< Low-rank factor [m,n]
+REAL(r8), INTENT(in) :: x(*) !< Input vector [n] ('N') or [m] ('T')
+REAL(r8), INTENT(inout) :: y(*) !< Output vector [m] ('N') or [n] ('T')
+INTEGER(4) :: m,n
+IF(ASSOCIATED(F%M4))THEN
+  m=SIZE(F%M4,DIM=1); n=SIZE(F%M4,DIM=2)
+  IF(trans=='N')THEN
+    CALL gemv_r4_n(m,n,F%M4,x,y)
+  ELSE
+    CALL gemv_r4_t(m,n,F%M4,x,y)
+  END IF
+ELSE
+  m=SIZE(F%M,DIM=1); n=SIZE(F%M,DIM=2)
+  CALL dgemv(trans,m,n,1.d0,F%M,m,x,1,0.d0,y,1)
+END IF
+CONTAINS
+!> y = A x, single precision A, double precision x, y and accumulation
+SUBROUTINE gemv_r4_n(m,n,A,x,y)
+INTEGER(4), INTENT(in) :: m,n
+REAL(r4), INTENT(in) :: A(m,n)
+REAL(r8), INTENT(in) :: x(n)
+REAL(r8), INTENT(out) :: y(m)
+INTEGER(4) :: i,j
+REAL(r8) :: xj
+y=0.d0
+DO j=1,n
+  xj=x(j)
+  !$omp simd
+  DO i=1,m
+    y(i)=y(i)+REAL(A(i,j),r8)*xj
+  END DO
+END DO
+END SUBROUTINE gemv_r4_n
+!> y = A^T x, single precision A, double precision x, y and accumulation
+SUBROUTINE gemv_r4_t(m,n,A,x,y)
+INTEGER(4), INTENT(in) :: m,n
+REAL(r4), INTENT(in) :: A(m,n)
+REAL(r8), INTENT(in) :: x(m)
+REAL(r8), INTENT(out) :: y(n)
+INTEGER(4) :: i,j
+REAL(r8) :: tmp
+DO j=1,n
+  tmp=0.d0
+  !$omp simd reduction(+:tmp)
+  DO i=1,m
+    tmp=tmp+REAL(A(i,j),r8)*x(i)
+  END DO
+  y(j)=tmp
+END DO
+END SUBROUTINE gemv_r4_t
+END SUBROUTINE tw_lr_gemv
+!------------------------------------------------------------------------------
 !> Recompress a low-rank factorization \f$ U V \f$ (from ACA+) with the SVD truncation rule
 !!
 !! QR factorizations \f$ U = Q_U R_U \f$, \f$ V^T = Q_V R_V \f$ and an SVD of the small core \f$ R_U R_V^T \f$; the
@@ -2661,8 +2804,8 @@ END SUBROUTINE get_qr
 !! `tol` (at least `min_rank`), with the singular values included in U.
 !------------------------------------------------------------------------------
 SUBROUTINE tw_lowrank_recompress(Umat,Vmat,tol,min_rank,warn_rank,size_out)
-TYPE(oft_native_dense_matrix), INTENT(inout) :: Umat !< Left factor [M,k], replaced by [M,rank]
-TYPE(oft_native_dense_matrix), INTENT(inout) :: Vmat !< Right factor [k,N], replaced by [rank,N]
+TYPE(oft_tw_lowrank_factor), INTENT(inout) :: Umat !< Left factor [M,k], replaced by [M,rank]
+TYPE(oft_tw_lowrank_factor), INTENT(inout) :: Vmat !< Right factor [k,N], replaced by [rank,N]
 REAL(8), INTENT(in) :: tol !< Absolute tolerance on the Frobenius norm of the discarded part
 INTEGER(4), INTENT(in) :: min_rank !< Minimum rank to keep
 INTEGER(4), INTENT(in) :: warn_rank !< Warn if the rank is not reduced and k is above this

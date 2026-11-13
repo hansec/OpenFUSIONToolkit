@@ -321,6 +321,18 @@ to run consistency.
 `B_svd_tol` and `B_aca_rel_tol`. However, as these tolerances are absolute the magnetic versions should generally be 4-5 orders of
 magnitude larger than those for the \f$ \textrm{L} \f$ matrix.
 
+\subsection doc_tw_main_hodlr_single Single precision storage of low-rank blocks
+By default the low-rank factors (\f$ \textrm{U} \f$ and \f$ \textrm{V} \f$) of the off-diagonal blocks are stored in double
+precision. Setting `lowrank_single=T` (`lowrank_single=True` in
+\ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") rounds each block's factors to single
+precision once they are computed, for both the \f$ \textrm{L} \f$ matrix and the magnetic field reconstruction operator.
+Products with these blocks promote each entry to double precision and accumulate in double precision, so the only
+additional error is the rounding of the stored factors (relative error \f$ \approx 6 \times 10^{-8} \f$ per entry), which
+is well below typical SVD tolerances. This halves the memory needed for (and data moved when applying) the low-rank part of
+the operator. The dense diagonal blocks, the dense fallback for off-diagonal blocks that cannot be compressed, and the
+hole and V-coil columns are always stored in double precision. Cache files written with this option store the low-rank
+factors in single precision and are only reused by runs that also set `lowrank_single=T`.
+
 \subsection doc_tw_main_hodlr_pre Block-Jacobi preconditioning
 When iterative solvers are used with a HODLR \f$ \textrm{L} \f$ matrix (time-dependent and frequency-response runs), a block-Jacobi
 preconditioner is constructed from the dense diagonal blocks of the HODLR operator. By default the inverse of each block is computed and

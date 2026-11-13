@@ -482,7 +482,7 @@ def run_jumpers(path, mp_q):
     mp_q.put(result)
 
 
-def run_hodlr_coarse(path, use_hodlr, mp_q):
+def run_hodlr_coarse(path, use_hodlr, lowrank_single, mp_q):
     '''Current potential after a short time-domain run: HODLR L with the two-level preconditioner (iterative), or
     dense L (direct)'''
     result = False
@@ -496,7 +496,7 @@ def run_hodlr_coarse(path, use_hodlr, mp_q):
         basepath = f'junction_coarse_{use_hodlr}/'
         tw.setup_io(basepath=basepath)
         if use_hodlr:
-            tw.set_hodlr_options(target_size=150, L_svd_tol=1.E-12, pre_coarse=True)
+            tw.set_hodlr_options(target_size=150, L_svd_tol=1.E-12, pre_coarse=True, lowrank_single=lowrank_single)
         tw.compute_Mcoil()
         tw.compute_Lmat(use_hodlr=use_hodlr)
         tw.compute_Rmat()
@@ -509,13 +509,14 @@ def run_hodlr_coarse(path, use_hodlr, mp_q):
     mp_q.put(result)
 
 
-def test_hodlr_coarse():
+@pytest.mark.parametrize("lowrank_single", (False, True))
+def test_hodlr_coarse(lowrank_single):
     '''Time-dependent run on a junction mesh with a compressed inductance matrix and the two-level preconditioner
-    matches the dense direct solution'''
+    matches the dense direct solution, also with the low-rank factors stored in single precision'''
     r, lc, reg = ring()
     files, _ = write_pair(r, lc, reg, 'junction_ring_coarse')
-    ref = mp_run(run_hodlr_coarse, (files[0], False))
-    out = mp_run(run_hodlr_coarse, (files[0], True))
+    ref = mp_run(run_hodlr_coarse, (files[0], False, False))
+    out = mp_run(run_hodlr_coarse, (files[0], True, lowrank_single))
     # None on timeout, False if the run failed
     assert not any(res is None or res is False for res in (ref, out))
     assert np.max(np.abs(ref)) > 0.0
