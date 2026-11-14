@@ -232,17 +232,34 @@ cell a physical \f$ P_k \f$ field maps to a reference field of degree \f$ k+1 \f
 `cube` and `sphere` mesh types, become asymptotically affine and are not affected. Fine unstructured hexahedral meshes used without
 refinement may be.
 
-The table below shows observed convergence rates (from the two finest meshes, up to 4096 hexahedra or 6144 tetrahedra) for the L2 projection
+The optional enriched hexahedral basis (`hex_enrich`, see \ref doc_fem_hcurl_hex_enrich) restores the rates of affine meshes on
+such meshes, at the cost of more unknowns. It is off by default.
+
+The table below shows observed convergence rates (from the two finest meshes, up to 4096 hexahedra or 6144 tetrahedra, and up to 512
+hexahedra for \f$ k=4 \f$) for the L2 projection
 of the smooth field \f$ \mathbf{B} = \left( \sin(2y+z)\cos x,\ e^{x/2}\sin z,\ \cos(x+y)\, e^{z/3} \right) \f$ onto the composite space
 on a unit cube. "Smoothly mapped" applies a smooth global distortion to a regular mesh (curved, non-affine cells that become affine under
 refinement). "Distorted" randomly moves each interior vertex by up to \f$ 0.25 h \f$, so cells remain non-affine at every resolution.
+Each entry gives the rate for \f$ \mathbf{B} \f$ / \f$ \nabla \times \mathbf{B} \f$.
 
-| Mesh | \f$ k=1 \f$: \f$ \mathbf{B} \f$ / \f$ \nabla \times \mathbf{B} \f$ | \f$ k=2 \f$: \f$ \mathbf{B} \f$ / \f$ \nabla \times \mathbf{B} \f$ | \f$ k=3 \f$: \f$ \mathbf{B} \f$ / \f$ \nabla \times \mathbf{B} \f$ |
-|:---|:---:|:---:|:---:|
-| Tetrahedra             | 2.07 / 1.06  | 2.99 / 2.05 | 4.15 / 3.14 |
-| Regular hexahedra      | 2.00 / 1.00  | 2.89 / 2.04 | 4.00 / 3.00 |
-| Smoothly mapped hexahedra | 1.99 / 1.00 | 2.88 / 2.04 | 4.00 / 3.00 |
-| Distorted hexahedra    | 0.89 / -0.09 | 1.18 / 0.87 | 2.76 / 1.83 |
+| Mesh | \f$ k=1 \f$ | \f$ k=2 \f$ | \f$ k=3 \f$ | \f$ k=4 \f$ |
+|:---|:---:|:---:|:---:|:---:|
+| Tetrahedra                          | 2.07 / 1.06  | 2.99 / 2.05 | 4.15 / 3.14 | -           |
+| Regular hexahedra                   | 2.00 / 1.00  | 2.89 / 2.04 | 4.00 / 3.00 | 4.85 / 4.07 |
+| Smoothly mapped hexahedra           | 1.99 / 1.00  | 2.88 / 2.04 | 4.00 / 2.99 | 4.77 / 4.04 |
+| Distorted hexahedra                 | 0.89 / -0.09 | 1.18 / 0.87 | 2.76 / 1.83 | 3.77 / 2.79 |
+| Regular hexahedra, enriched         | 2.01 / 2.02  | 3.02 / 3.00 | 4.02 / 4.07 | 5.38 / 5.00 |
+| Smoothly mapped hexahedra, enriched | 2.00 / 1.27  | 3.00 / 2.86 | 3.99 / 3.15 | 4.93 / 4.81 |
+| Distorted hexahedra, enriched       | 1.90 / 0.87  | 2.81 / 0.11 (a) | 3.88 / 2.93 | 4.85 / 4.07 |
+
+With the enriched basis the distorted-mesh rates are \f$ k+1 \f$ for the field and \f$ k \f$ for the curl, as on affine meshes. On regular
+meshes the enriched curl converges one order faster; on smoothly mapped meshes this extra order is lost gradually as the mapping is
+resolved, so the measured curl rates there lie between \f$ k \f$ and \f$ k+1 \f$. Absolute errors with the enriched basis are lower in
+all cases (on distorted meshes by 1 to 2 orders of magnitude at equal mesh size).
+
+(a) The curl error for this case stagnates between the two finest meshes (\f$ 1.50 \times 10^{-4} \f$ and \f$ 1.39 \times 10^{-4} \f$)
+after converging at rate 2.00 between the previous pair. The L2 projection does not control the curl directly, so this may reflect a
+few badly shaped cells of the random distortion rather than the space; it is under investigation.
 
 \subsection doc_fem_hcurl_limits_div Divergence of composite fields
 
