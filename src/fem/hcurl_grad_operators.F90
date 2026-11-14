@@ -83,7 +83,11 @@ contains
   procedure :: interp => cinterp_apply
 end type oft_hcurl_grad_cinterp
 !------------------------------------------------------------------------------
-!> Interpolate \f$ \nabla \times \f$ of a H(Curl) + Grad(H^1) vector field
+!> Interpolate \f$ \nabla \cdot \f$ of a H(Curl) + Grad(H^1) vector field
+!!
+!! @warning Only the divergence of the Grad(H^1) component is included. Higher order
+!! (\f$ k \ge 2 \f$) H(Curl) basis functions are not divergence free, so for those orders the
+!! result is not the full divergence of the field.
 !------------------------------------------------------------------------------
 type, extends(oft_hcurl_grad_rinterp) :: oft_hcurl_grad_dinterp
 contains
@@ -428,6 +432,8 @@ DEBUG_STACK_POP
 end subroutine cinterp_apply
 !------------------------------------------------------------------------------
 !> Reconstruct \f$ \nabla \cdot \f$ of a H(Curl) + Grad(H^1) vector field
+!!
+!! @warning Only the Grad(H^1) component is included (see \ref oft_hcurl_grad_operators::oft_hcurl_grad_dinterp "oft_hcurl_grad_dinterp")
 !------------------------------------------------------------------------------
 subroutine dinterp_apply(self,cell,f,gop,val)
 class(oft_hcurl_grad_dinterp), intent(inout) :: self
