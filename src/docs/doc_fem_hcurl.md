@@ -39,6 +39,17 @@ Number of basis functions associated with each geometric entity (the `gstruct` a
 
 On hexahedra the face and cell counts are \f$ (k-1)^2 + 2(k-1) \f$ and \f$ 2(k-1)^3 + 3(k-1)^2 \f$ respectively.
 
+With the optional enriched hexahedral basis (see \ref doc_fem_hcurl_hex_enrich) the counts become
+
+| Order \f$ k \f$ | Enriched hex edge | Enriched hex face | Enriched hex cell | Enriched hex `nce` |
+|:---:|:---:|:---:|:---:|:---:|
+| 1 | 1 | 2  | 3   | 27  |
+| 2 | 1 | 7  | 26  | 80  |
+| 3 | 1 | 14 | 79  | 175 |
+| 4 | 1 | 23 | 174 | 324 |
+
+with face and cell counts \f$ k^2 + 2k - 1 \f$ and \f$ 2k^3 + 3k^2 - 2 \f$ respectively.
+
 \section doc_fem_hcurl_orient Orientation and hierarchy
 
 All higher order functions are evaluated using the global (oriented) vertex ordering of their edge or face, so neighboring
@@ -99,6 +110,73 @@ with \f$ i,j \ge 1 \f$, defines one function. Each is multiplied by the coordina
 
 Forms 0 and 1 are the two non-gradient sign combinations of \f$ \nabla (U_i V_j W_l) \f$; the gradient itself is supplied by \f$ H^1 \f$.
 
+\subsection doc_fem_hcurl_hex_enrich Enriched hexahedral basis
+
+An enriched hexahedral basis can be selected with `hex_enrich=.TRUE.` in \ref oft_hcurl_basis::oft_hcurl_setup "oft_hcurl_setup"
+(default `.FALSE.`). It restores optimal convergence on hexahedral meshes whose cells remain non-affine at all resolutions
+(see \ref doc_fem_hcurl_limits_hex). It has no effect on tetrahedral meshes.
+
+The order \f$ k \f$ enriched space uses the face and cell functions of the standard order \f$ k+1 \f$ space (same functions,
+index lists and orientation as above), except for the last entry of the face list, \f$ (i,j,\mathrm{form}) = (k,k,0) \f$, and the last
+two entries of the cell list, \f$ (i,j,l,\mathrm{form}) = (k,k,k,0) \f$ and \f$ (k,k,k,1) \f$. Equivalently, the standard order
+\f$ k \f$ space is enlarged by the order \f$ k+1 \f$ face and cell functions with bubble index \f$ \max(i,j) = k \f$ or
+\f$ \max(i,j,l) = k \f$, minus these three. The composite space still pairs it with \f$ H^1 \f$ of order \f$ k+1 \f$, so it is a
+subspace of the first kind Nedelec space \f$ N_{k+1} = Q_{k,k+1,k+1} \times Q_{k+1,k,k+1} \times Q_{k+1,k+1,k} \f$ (the composite
+order \f$ k+1 \f$ H(Curl) plus \f$ \nabla Q_{k+1} \f$ space). As the enriched functions are a subset of an existing tangentially
+continuous basis evaluated in the global orientation, tangential continuity is unchanged. The order \f$ k \f$ standard functions are a
+prefix of the order \f$ k \f$ enriched functions, which are in turn a prefix of the order \f$ k+1 \f$ enriched functions, so p-multigrid
+interpolation remains injection. The vertex functions of \f$ H^1 \f$ are the only redundant functions in the composite space, as for
+the standard basis. As the enriched functions have one higher polynomial degree, the quadrature order used by the H(Curl) space (and
+the composite operators) is increased from \f$ 2k+1 \f$ to \f$ 2k+3 \f$.
+
+**Why this enrichment.** Let \f$ F \f$ be the trilinear map of a cell. H(Curl) functions map covariantly, \f$ \hat{\mathbf{u}} = DF^T (\mathbf{u} \circ F) \f$,
+and curls map with the contravariant Piola transform, \f$ \hat{\nabla} \times \hat{\mathbf{u}} = \mathrm{adj}(DF) \left( (\nabla \times \mathbf{u}) \circ F \right) \f$.
+By the same argument as Arnold, Boffi and Falk (quadrilaterals) and Falk, Gatto and Monk (hexahedra, "Hexahedral H(div) and H(curl) finite elements",
+ESAIM: M2AN 45, 2011), approximation of order \f$ k+1 \f$ for the field requires the reference space to contain
+\f$ S_k = \{ DF^T (\mathbf{p} \circ F) : \mathbf{p} \in [P_k]^3 \} \f$ for every trilinear \f$ F \f$, and approximation of order \f$ k \f$ for the
+curl requires the reference curls to contain \f$ \hat{\nabla} \times S_k \f$. Since \f$ DF \f$ has entries in \f$ Q_1 \f$, \f$ S_k \subset N_{k+1} \f$, and the
+gradient part of \f$ S_k \f$ is in \f$ \nabla Q_{k+1} \f$. For a subspace \f$ V \f$ of \f$ N_{k+1} \f$ paired with \f$ \nabla Q_{k+1} \f$ both conditions
+therefore reduce to \f$ \hat{\nabla} \times V \supseteq \hat{\nabla} \times S_k \f$, so the same enrichment serves the H(Curl) space on its own
+(curl) and the composite space (field and curl). Computing the span of \f$ S_k \f$ over random trilinear maps gives, per cell,
+
+| Order \f$ k \f$ | Standard composite | Span of \f$ S_k \f$ | \f$ N_{k+1} \f$ | Enriched composite |
+|:---:|:---:|:---:|:---:|:---:|
+| 1 | 31  | 46  | 54  | 46  |
+| 2 | 91  | 133 | 144 | 136 |
+| 3 | 205 | 286 | 300 | 292 |
+| 4 | 391 | 521 | 540 | 532 |
+
+where all counts are dimensions of the spanned spaces (redundant functions counted once). The span of \f$ S_k \f$ contains the standard composite space, so the
+missing content lies entirely in \f$ N_{k+1} \f$. On a face the normal component of \f$ \hat{\nabla} \times S_k \f$ is
+\f$ (\partial_1 F \times \partial_2 F) \cdot (\mathbf{q} \circ F) \f$ with \f$ \mathbf{q} \in [P_{k-1}]^3 \f$. The cross product has no
+\f$ x_1 x_2 \f$ term, so this lies in \f$ Q_{k,k} \f$ without the \f$ x_1^k x_2^k \f$ term. The only face function that is not needed is
+therefore the one whose curl has degree \f$ (k,k) \f$, entry \f$ (k,k,0) \f$. Similarly, the cofactors of \f$ DF \f$ have no
+\f$ x_1^2 x_2 x_3 \f$-type terms, which removes the two cell functions of top degree. For \f$ k=1 \f$ the enriched composite space equals
+the span of \f$ S_1 \f$ exactly. For \f$ k \ge 2 \f$ a few more cell functions (3, 6 and 11 for \f$ k = \f$ 2, 3, 4) are not needed, but
+they cannot be removed by dropping basis functions, so they are kept. This analysis is for trilinear cells. Higher order (eg. quadratic) cell
+maps whose deviation from a trilinear map vanishes under refinement, such as curved boundary cells of a smooth geometry, are expected to
+behave the same way, but this has not been tested; cells with \f$ \mathcal{O}(1) \f$ curvature at every resolution need even more content.
+
+**Cost.** Per cell, counting shared entities once on a large mesh (about 3 edges, 3 faces and 1 vertex per cell), the number of
+unknowns is
+
+| Order \f$ k \f$ | Standard composite | Enriched composite | Standard composite of order \f$ k+1 \f$ |
+|:---:|:---:|:---:|:---:|
+| 1 | 10  | 19  | 43  |
+| 2 | 43  | 76  | 118 |
+| 3 | 118 | 187 | 253 |
+| 4 | 253 | 370 | -   |
+
+The enriched order \f$ k \f$ space gives on distorted meshes the rates the standard order \f$ k \f$ space gives on regular meshes, at
+about 1.5 to 1.9 times the unknowns and with \f$ (k+2)^3/(k+1)^3 \f$ times the quadrature points. Raising the standard order to
+\f$ k+1 \f$ to recover the same rates costs more and still loses one order on distorted meshes. On regular meshes the enriched space
+contains the standard space, so errors are never larger, and its curl converges one order faster (as \f$ \mathcal{O}(h^{k+1}) \f$).
+
+**Compatibility.** The DOF layout (`gstruct`, `nce`) of the enriched space differs from the standard one, so vectors and restart files
+cannot be exchanged between the two; loading a restart file written with the other option fails with a size mismatch. Any code that
+reconstructs a saved field (eg. post-processing tools) must construct the space with the same option. Solver iteration counts also
+change, and multigrid smoother settings tuned for the standard space may need to be adjusted.
+
 \section doc_fem_hcurl_spaces Spanned polynomial spaces
 
 Here \f$ P_k \f$ denotes polynomials of total degree \f$ \le k \f$ and \f$ Q_k \f$ polynomials of degree \f$ \le k \f$ in
@@ -118,6 +196,10 @@ each variable separately. All statements are per cell, on the reference element.
  - The composite space (H(Curl) plus \f$ \nabla Q_{k+1} \f$) contains \f$ [P_k]^3 \f$ but not \f$ [Q_k]^3 \f$. For example
    \f$ (x y z)^k \hat{x} \f$ cannot be represented. The composite space is not smaller than \f$ [Q_k]^3 \f$ (91 vs 81 functions per
    cell for \f$ k=2 \f$); it has different content.
+
+**Hexahedra, enriched basis**
+ - H(Curl) of order \f$ k \f$ plus \f$ \nabla Q_{k+1} \f$ is a subspace of \f$ N_{k+1} \f$ of codimension 8 that contains \f$ [P_k]^3 \f$ and,
+   on every trilinear cell, the covariant pullback of \f$ [P_k]^3 \f$ (see \ref doc_fem_hcurl_hex_enrich).
 
 **Composite redundancy**: on both cell types the gradients of the \f$ H^1 \f$ vertex functions are also spanned by the H(Curl) edge
 functions, so the composite space contains exactly one redundant function per mesh vertex. These must be removed, see

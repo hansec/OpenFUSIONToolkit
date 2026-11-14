@@ -19,6 +19,8 @@
 !! plus only the rotational (non-gradient) higher order functions, on tetrahedra and hexahedra.
 !! Gradients are added by pairing with \f$ H^1 \f$ of order \f$ k+1 \f$ in the composite
 !! H(Curl) + Grad(\f$ H^1 \f$) space (see \ref oft_hcurl_grad_setup).
+!! An optional enriched hexahedral basis (`hex_enrich` in \ref oft_hcurl_setup) restores optimal
+!! convergence on distorted hexahedral meshes.
 !!
 !! For basis definitions, spanned polynomial spaces, and known limitations see \ref doc_fem_hcurl.
 !!
@@ -48,6 +50,7 @@ IMPLICIT NONE
 type, extends(oft_fem_type) :: oft_hcurl_fem
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL() !< Hex face function indices `(i,j,form)` [3,nfdofs] (see \ref oft_hcurl_basis::hcurl_2d_grid "hcurl_2d_grid")
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsc => NULL() !< Hex cell function indices `(i,j,l,form)` [4,ncdofs] (see \ref oft_hcurl_basis::hcurl_3d_grid "hcurl_3d_grid")
+  LOGICAL :: hex_enrich = .FALSE. !< Use the enriched hexahedral basis (see \ref doc_fem_hcurl_hex_enrich)
 CONTAINS
   !> Delete H(Curl) FE object and free memory
   PROCEDURE :: delete => oft_hcurl_delete
@@ -59,6 +62,7 @@ end type oft_hcurl_fem
 !------------------------------------------------------------------------------
 type, extends(oft_bfem_type) :: oft_hcurl_bfem
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL() !< Quad face function indices `(i,j,form)` [3,nfdofs] (see \ref oft_hcurl_basis::hcurl_2d_grid "hcurl_2d_grid")
+  LOGICAL :: hex_enrich = .FALSE. !< Use the enriched quadrilateral face basis (see \ref doc_fem_hcurl_hex_enrich)
 CONTAINS
   !> Delete H(Curl) FE object and free memory
   PROCEDURE :: delete => oft_bhcurl_delete
@@ -135,21 +139,26 @@ END SUBROUTINE oft_bhcurl_delete
 !!
 !! @note Highest supported representation is quartic (`order=4`).
 !------------------------------------------------------------------------------
-subroutine oft_hcurl_setup(mg_mesh,order,ML_hcurl_obj,ML_bhcurl_obj,minlev)
+subroutine oft_hcurl_setup(mg_mesh,order,ML_hcurl_obj,ML_bhcurl_obj,minlev,hex_enrich)
 type(multigrid_mesh), target, intent(inout) :: mg_mesh !< Multigrid mesh
 integer(i4), intent(in) :: order !< Order of representation desired
 type(oft_ml_fem_type), optional, intent(inout) :: ML_hcurl_obj !< Volume (3D) FE object
 type(oft_ml_fem_type), optional, intent(inout) :: ML_bhcurl_obj !< Surface (2D) FE object
 integer(i4), optional, intent(in) :: minlev !< Lowest level to construct
+logical, optional, intent(in) :: hex_enrich !< Use enriched basis on hexahedral meshes (default: `.FALSE.`, see \ref doc_fem_hcurl_hex_enrich)
 integer(i4) :: i,j,nlevels,minlev_out
+logical :: enrich
 DEBUG_STACK_PUSH
 minlev_out=1
 IF(PRESENT(minlev))minlev_out=minlev
+enrich=.FALSE.
+IF(PRESENT(hex_enrich))enrich=hex_enrich
 IF(oft_env%head_proc)THEN
   WRITE(*,*)
   WRITE(*,'(A)')'**** Creating H(Curl) FE space'
   WRITE(*,'(2X,A,I4)')'Order  = ',order
   WRITE(*,'(2X,A,I4)')'Minlev = ',minlev_out
+  IF(enrich.AND.mg_mesh%mesh%type==3)WRITE(*,'(2X,A)')'Using enriched hexahedral basis'
 END IF
 !---Allocate multigrid operators
 nlevels=mg_mesh%mgdim+(order-1)
@@ -177,13 +186,13 @@ do i=1,mg_mesh%mgdim-1
   IF(i<minlev_out)CYCLE
   CALL multigrid_level(mg_mesh,i)
   IF(PRESENT(ML_hcurl_obj))THEN
-    CALL oft_hcurl_setup_vol(ML_hcurl_obj%levels(i)%fe,mg_mesh%mesh,1)
+    CALL oft_hcurl_setup_vol(ML_hcurl_obj%levels(i)%fe,mg_mesh%mesh,1,enrich)
     IF(mg_mesh%level==mg_mesh%nbase)ML_hcurl_obj%blevel=i
     CALL ML_hcurl_obj%set_level(i)
     IF(mg_mesh%level==mg_mesh%nbase)ML_hcurl_obj%blevel=i
   END IF
   IF(PRESENT(ML_bhcurl_obj))THEN
-    CALL oft_hcurl_setup_surf(ML_bhcurl_obj%levels(i)%fe,mg_mesh%smesh,1)
+    CALL oft_hcurl_setup_surf(ML_bhcurl_obj%levels(i)%fe,mg_mesh%smesh,1,enrich)
     IF(mg_mesh%level==mg_mesh%nbase)ML_bhcurl_obj%blevel=i
   END IF
 end do
@@ -192,11 +201,11 @@ call multigrid_level(mg_mesh,mg_mesh%mgdim)
 do i=1,order
   IF(i>1.AND.mg_mesh%mgdim+i-1<minlev_out)CYCLE
   IF(PRESENT(ML_hcurl_obj))THEN
-    CALL oft_hcurl_setup_vol(ML_hcurl_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i)
+    CALL oft_hcurl_setup_vol(ML_hcurl_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%mesh,i,enrich)
     CALL ML_hcurl_obj%set_level(mg_mesh%mgdim+i-1)
   END IF
   IF(PRESENT(ML_bhcurl_obj))THEN
-    CALL oft_hcurl_setup_surf(ML_bhcurl_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%smesh,i)
+    CALL oft_hcurl_setup_surf(ML_bhcurl_obj%levels(mg_mesh%mgdim+i-1)%fe,mg_mesh%smesh,i,enrich)
   END IF
 end do
 IF(PRESENT(ML_hcurl_obj))CALL ML_hcurl_obj%set_level(ML_hcurl_obj%nlevels)
@@ -277,43 +286,40 @@ end subroutine oft_hcurl_grad_setup
 !------------------------------------------------------------------------------
 !> Construct 3D H(Curl) FE space on a given mesh
 !------------------------------------------------------------------------------
-subroutine oft_hcurl_setup_vol(self,tmesh,order)
+subroutine oft_hcurl_setup_vol(self,tmesh,order,hex_enrich)
 class(oft_afem_type), pointer, intent(out) :: self !< FE object to construct
 class(oft_mesh), target, intent(in) :: tmesh !< Volume mesh
 integer(i4), intent(in) :: order !< Order of representation desired
+logical, optional, intent(in) :: hex_enrich !< Use enriched basis on hexahedral meshes (default: `.FALSE.`, see \ref doc_fem_hcurl_hex_enrich)
+integer(i4) :: quad_order
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2A)')oft_indent,'Creating 3D H(Curl) FE space'
   WRITE(*,'(A,2X,A,I4)')oft_indent,'Order  = ',order
 END IF
 CALL oft_increase_indent
+IF(order<1.OR.order>4)CALL oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup_vol',__FILE__)
+quad_order=order*2+1
 !---
 ALLOCATE(oft_hcurl_fem::self)
 SELECT TYPE(self)
 CLASS IS(oft_hcurl_fem)
-  ! IF(tmesh%type==3)hex_mesh=.TRUE.
   self%mesh=>tmesh
   self%order=order
   self%dim=1
   self%type=oft_hcurl_id
   IF(self%mesh%type==3)THEN
-    CALL hcurl_2d_grid(self%order-1, self%indsf)
-    CALL hcurl_3d_grid(self%order-1, self%indsc)
-    select case(self%order)
-      case(1)
-        self%gstruct=(/0,1,0,0/)
-      case(2)
-        self%gstruct=(/0,1,(self%order-1)**2 + 2*(self%order-1), &
-                                2*(self%order-1)**3 + 3*(self%order-1)**2/)
-      case(3)
-        self%gstruct=(/0,1,(self%order-1)**2 + 2*(self%order-1), &
-                                2*(self%order-1)**3 + 3*(self%order-1)**2/)
-      case(4)
-        self%gstruct=(/0,1,(self%order-1)**2 + 2*(self%order-1), &
-                                2*(self%order-1)**3 + 3*(self%order-1)**2/)
-      case default
-        call oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup_vol',__FILE__)
-    end select
+    IF(PRESENT(hex_enrich))self%hex_enrich=hex_enrich
+    IF(self%hex_enrich)THEN
+      ! Order k+1 functions without the highest face (1) and cell (2) functions
+      CALL hcurl_2d_grid(self%order, self%indsf, 1)
+      CALL hcurl_3d_grid(self%order, self%indsc, 2)
+      quad_order=order*2+3
+    ELSE
+      CALL hcurl_2d_grid(self%order-1, self%indsf)
+      CALL hcurl_3d_grid(self%order-1, self%indsc)
+    END IF
+    self%gstruct=(/0,1,SIZE(self%indsf,DIM=2),SIZE(self%indsc,DIM=2)/)
   ELSE
     select case(self%order)
       case(1)
@@ -324,24 +330,24 @@ CLASS IS(oft_hcurl_fem)
         self%gstruct=(/0,1,5,3/)
       case(4)
         self%gstruct=(/0,1,9,11/)
-      case default
-        call oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup_vol',__FILE__)
     end select
   END IF
 CLASS DEFAULT
   CALL oft_abort("Error allocating H(Curl) FE object","oft_hcurl_setup_vol",__FILE__)
 END SELECT
-call self%setup(self%order*2+1)
+call self%setup(quad_order)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine oft_hcurl_setup_vol
 !------------------------------------------------------------------------------
 !> Construct 2D (surface) H(Curl) FE space on a given mesh
 !------------------------------------------------------------------------------
-subroutine oft_hcurl_setup_surf(self,tmesh,order)
+subroutine oft_hcurl_setup_surf(self,tmesh,order,hex_enrich)
 class(oft_afem_type), pointer, intent(out) :: self !< FE object to construct
 class(oft_bmesh), target, intent(in) :: tmesh !< Surface mesh
 integer(i4), intent(in) :: order !< Order of representation desired
+logical, optional, intent(in) :: hex_enrich !< Use enriched basis on quadrilateral meshes (default: `.FALSE.`, see \ref doc_fem_hcurl_hex_enrich)
+integer(i4) :: quad_order
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2A)')oft_indent,'Creating 2D H(Curl) FE space'
@@ -352,7 +358,7 @@ CALL oft_increase_indent
 ALLOCATE(oft_hcurl_bfem::self)
 SELECT TYPE(self)
 CLASS IS(oft_hcurl_bfem)
-  !---
+  quad_order=order*2+1
   self%mesh=>tmesh
   self%order=order
   self%dim=1
@@ -360,8 +366,14 @@ CLASS IS(oft_hcurl_bfem)
   IF(self%order<1.OR.self%order>4)CALL oft_abort('Invalid polynomial degree (npmax=4)','oft_hcurl_setup_surf',__FILE__)
   IF(self%mesh%type==3)THEN
     ! Quadrilateral faces (match face DOFs of 3D hexahedral elements)
-    CALL hcurl_2d_grid(self%order-1, self%indsf)
-    self%gstruct=(/0,1,(self%order-1)**2 + 2*(self%order-1)/)
+    IF(PRESENT(hex_enrich))self%hex_enrich=hex_enrich
+    IF(self%hex_enrich)THEN
+      CALL hcurl_2d_grid(self%order, self%indsf, 1)
+      quad_order=order*2+3
+    ELSE
+      CALL hcurl_2d_grid(self%order-1, self%indsf)
+    END IF
+    self%gstruct=(/0,1,SIZE(self%indsf,DIM=2)/)
   ELSE
     select case(self%order)
       case(1)
@@ -377,7 +389,7 @@ CLASS IS(oft_hcurl_bfem)
 CLASS DEFAULT
   CALL oft_abort("Error allocating H(Curl) FE object","oft_hcurl_setup_surf",__FILE__)
 END SELECT
-call self%setup(self%order*2+1)
+call self%setup(quad_order)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 end subroutine oft_hcurl_setup_surf
@@ -389,12 +401,15 @@ end subroutine oft_hcurl_setup_surf
 !! (see \ref doc_fem_hcurl_hex). Entries are ordered by increasing `max(i,j)`, so the
 !! list for a given order is a prefix of the list for all higher orders.
 !---------------------------------------------------------------------------------
-subroutine hcurl_2d_grid(order,inds)
-integer(i4), intent(in) :: order !< Maximum bubble index (FE order - 1)
-integer(i4), pointer, intent(out) :: inds(:,:) !< Index list [3,order**2 + 2*order]
-integer(i4) :: i,j,k,m
-ALLOCATE(inds(3,order**2 + 2*order))
-inds=-1
+subroutine hcurl_2d_grid(order,inds,ntrim)
+integer(i4), intent(in) :: order !< Maximum bubble index (FE order - 1, or FE order if enriched)
+integer(i4), pointer, intent(out) :: inds(:,:) !< Index list [3,order**2 + 2*order - ntrim]
+integer(i4), optional, intent(in) :: ntrim !< Number of entries to remove from the end of the list (default: 0)
+integer(i4) :: i,j,k,m,nfull
+integer(i4), allocatable :: tmp(:,:)
+nfull=order**2 + 2*order
+ALLOCATE(tmp(3,nfull))
+tmp=-1
 m=0
 DO k=1,order
   DO i=1,k
@@ -402,15 +417,19 @@ DO k=1,order
       IF(i<k.AND.j<k)CYCLE
       IF(j==1)THEN
         m=m+1
-        inds(:,m)=(/i,i,1/)
+        tmp(:,m)=(/i,i,1/)
         m=m+1
-        inds(:,m)=(/i,i,2/)
+        tmp(:,m)=(/i,i,2/)
       END IF
       m=m+1
-      inds(:,m)=(/i,j,0/)
+      tmp(:,m)=(/i,j,0/)
     END DO
   END DO
 END DO
+IF(PRESENT(ntrim))m=m-ntrim
+ALLOCATE(inds(3,m))
+inds=tmp(:,1:m)
+DEALLOCATE(tmp)
 end subroutine hcurl_2d_grid
 !---------------------------------------------------------------------------------
 !> Build index list for hexahedral cell functions
@@ -420,12 +439,15 @@ end subroutine hcurl_2d_grid
 !! \ref doc_fem_hcurl_hex). Entries are ordered by increasing `max(i,j,l)`, so the list for a
 !! given order is a prefix of the list for all higher orders.
 !---------------------------------------------------------------------------------
-subroutine hcurl_3d_grid(order,inds)
-integer(i4), intent(in) :: order !< Maximum bubble index (FE order - 1)
-integer(i4), pointer, intent(out) :: inds(:,:) !< Index list [4,2*order**3 + 3*order**2]
-integer(i4) :: i,j,k,l,m
-ALLOCATE(inds(4,2*order**3 + 3*order**2))
-inds=-1
+subroutine hcurl_3d_grid(order,inds,ntrim)
+integer(i4), intent(in) :: order !< Maximum bubble index (FE order - 1, or FE order if enriched)
+integer(i4), pointer, intent(out) :: inds(:,:) !< Index list [4,2*order**3 + 3*order**2 - ntrim]
+integer(i4), optional, intent(in) :: ntrim !< Number of entries to remove from the end of the list (default: 0)
+integer(i4) :: i,j,k,l,m,nfull
+integer(i4), allocatable :: tmp(:,:)
+nfull=2*order**3 + 3*order**2
+ALLOCATE(tmp(4,nfull))
+tmp=-1
 m=0
 DO k=1,order
   DO i=1,k
@@ -434,20 +456,24 @@ DO k=1,order
         IF(i<k.AND.j<k.AND.l<k)CYCLE
         IF(l==1)THEN
           m=m+1
-          inds(:,m)=(/0,i,j,2/)
+          tmp(:,m)=(/0,i,j,2/)
           m=m+1
-          inds(:,m)=(/i,0,j,3/)
+          tmp(:,m)=(/i,0,j,3/)
           m=m+1
-          inds(:,m)=(/i,j,0,4/)
+          tmp(:,m)=(/i,j,0,4/)
         END IF
         m=m+1
-        inds(:,m)=(/i,j,l,0/)
+        tmp(:,m)=(/i,j,l,0/)
         m=m+1
-        inds(:,m)=(/i,j,l,1/)
+        tmp(:,m)=(/i,j,l,1/)
       END DO
     END DO
   END DO
 END DO
+IF(PRESENT(ntrim))m=m-ntrim
+ALLOCATE(inds(4,m))
+inds=tmp(:,1:m)
+DEALLOCATE(tmp)
 end subroutine hcurl_3d_grid
 !------------------------------------------------------------------------------
 !> Evaluate H(Curl) interpolation function in the interior
