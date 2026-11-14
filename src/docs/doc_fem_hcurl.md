@@ -177,6 +177,14 @@ cannot be exchanged between the two; loading a restart file written with the oth
 reconstructs a saved field (eg. post-processing tools) must construct the space with the same option. Solver iteration counts also
 change, and multigrid smoother settings tuned for the standard space may need to be adjusted.
 
+**Use in xMHD (MUG).** The enriched basis is not recommended for MUG. MUG discretizes the velocity with Lagrange elements of the
+same order $ k $, which cannot couple to all of the additional magnetic field content. That content is then nearly static
+instead of taking part in the wave dynamics. In the hexahedral shear Alfven wave regression case (`test_alfven`, triply periodic,
+regular mesh, compared after half a wave period) enabling the option increases the magnetic field error by a factor of 1.5 to 14
+(for $ k=2 $: $ 1.8 	imes 10^{-2} $ to $ 1.5 	imes 10^{-1} $), while over a full period, where a static component
+cancels, it is lower than with the standard basis. The sound wave cases, which have no magnetic perturbation, are unaffected apart
+from cost (1.8 to 2.4 times the run time). Using the enriched basis in MUG would require a matching enrichment of the velocity space.
+
 \section doc_fem_hcurl_spaces Spanned polynomial spaces
 
 Here \f$ P_k \f$ denotes polynomials of total degree \f$ \le k \f$ and \f$ Q_k \f$ polynomials of degree \f$ \le k \f$ in
