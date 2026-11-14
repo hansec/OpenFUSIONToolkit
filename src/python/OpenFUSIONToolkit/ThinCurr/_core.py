@@ -41,7 +41,7 @@ class ThinCurr():
             'L_aca_rel_tol': '0.05',
             'B_svd_tol': '-1.E-5',
             'B_aca_rel_tol': '0.05',
-            'lowrank_single': 'F',
+            'lowrank_single': 'T',
             'dense_single': 'F',
             'pre_single': 'F',
             'pre_coarse': 'F',
@@ -395,9 +395,9 @@ class ThinCurr():
         @param B_svd_tol Tolerance for SVD compression of B-matrix blocks
         @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
         @param lowrank_single Store low-rank factors of compressed off-diagonal blocks in single precision? (block
-        products are summed in double precision)
+        products are summed in double precision; default: True)
         @param dense_single Store dense diagonal blocks in single precision? (block products are summed in double
-        precision)
+        precision; default: False)
         @param pre_single Compute, store, and apply HODLR block-Jacobi preconditioners in single precision?
         @param pre_coarse Add a global coarse correction to HODLR block-Jacobi preconditioners (two-level preconditioner)?
         @param pre_neigs Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires

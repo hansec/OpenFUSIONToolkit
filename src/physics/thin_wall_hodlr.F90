@@ -75,7 +75,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: B_svd_tol = -1.d0 !< SVD tolerance for B-field operators
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
   LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
-  LOGICAL :: lowrank_single = .FALSE. !< Store low-rank factors of compressed off-diagonal blocks in single precision?
+  LOGICAL :: lowrank_single = .TRUE. !< Store low-rank factors of compressed off-diagonal blocks in single precision?
   LOGICAL :: dense_single = .FALSE. !< Store dense diagonal blocks in single precision?
   LOGICAL :: pre_coarse = .FALSE. !< Add a global coarse correction to block-Jacobi preconditioners (two-level preconditioner)?
   INTEGER(4) :: pre_neigs = 0 !< Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires pre_coarse and ARPACK)
@@ -684,7 +684,7 @@ REAL(8) :: L_svd_tol = -1.d99
 REAL(8) :: L_aca_rel_tol = -1.d0
 REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
-LOGICAL :: lowrank_single = .FALSE.
+LOGICAL :: lowrank_single = .TRUE.
 LOGICAL :: dense_single = .FALSE.
 LOGICAL :: pre_single = .FALSE.
 LOGICAL :: pre_coarse = .FALSE.
@@ -2761,8 +2761,10 @@ END SUBROUTINE tw_block_save
 !------------------------------------------------------------------------------
 !> Add the storage precision of HODLR blocks to the settings hash of a HODLR cache file
 !!
-!! The hash is unchanged when all blocks are stored in double precision, so existing cache files remain valid.
-!! Cache files are only reused with the same `lowrank_single` and `dense_single` settings.
+!! Cache files are only reused with the same `lowrank_single` and `dense_single` settings. The hash is unchanged
+!! for the default settings (`lowrank_single=T`, `dense_single=F`), so cache files written before these options
+!! existed (all blocks in double precision) are reused by default runs, whose low-rank factors are rounded to
+!! single precision after loading.
 !------------------------------------------------------------------------------
 FUNCTION tw_prec_cache_hash(self,hash_in) RESULT(hash)
 CLASS(oft_tw_hodlr_op), INTENT(in) :: self !< HODLR operator
@@ -2770,7 +2772,7 @@ INTEGER(4), INTENT(in) :: hash_in !< Settings hash
 INTEGER(4) :: hash
 INTEGER(4), TARGET :: prec_flags
 prec_flags=0
-IF(self%lowrank_single)prec_flags=prec_flags+1
+IF(.NOT.self%lowrank_single)prec_flags=prec_flags+1
 IF(self%dense_single)prec_flags=prec_flags+2
 hash=hash_in
 IF(prec_flags==0)RETURN

@@ -322,17 +322,24 @@ to run consistency.
 magnitude larger than those for the \f$ \textrm{L} \f$ matrix.
 
 \subsection doc_tw_main_hodlr_single Single precision storage of HODLR blocks
-By default all blocks of the HODLR operators are stored in double precision. Setting `lowrank_single=T`
-(`lowrank_single=True` in \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") rounds
-the low-rank factors (\f$ \textrm{U} \f$ and \f$ \textrm{V} \f$) of the off-diagonal blocks to single precision once they
-are computed, and `dense_single=T` does the same for the dense diagonal blocks. Both apply to the \f$ \textrm{L} \f$ matrix and
+By default the low-rank factors (\f$ \textrm{U} \f$ and \f$ \textrm{V} \f$) of the off-diagonal blocks are rounded to single
+precision once they are computed (`lowrank_single=T`), while the dense diagonal blocks are stored in double precision
+(`dense_single=F`). Both can be changed with the corresponding options (`lowrank_single` and `dense_single` in
+\ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options"). Both apply to the \f$ \textrm{L} \f$ matrix and
 the magnetic field reconstruction operator. Products with single precision blocks are computed in single precision (`sgemv`)
-and summed into double precision vectors, so the additional error comes from single precision rounding within each block
-product (relative error \f$ \sim 10^{-7} \f$), which is well below typical SVD tolerances. This halves the memory needed for
-(and data moved when applying) the corresponding part of the operator. With `dense_single=T` the block-Jacobi preconditioner
-is built from the rounded diagonal blocks. The dense fallback for off-diagonal blocks that cannot be compressed and the hole
-and V-coil columns are always stored in double precision. Cache files store blocks in the precision they are kept in and
-are only reused by runs with the same `lowrank_single` and `dense_single` settings.
+and summed into double precision vectors. This halves the memory needed for (and data moved when applying) the
+corresponding part of the operator, which typically makes applying it faster as large models are limited by memory
+bandwidth. The additional error comes from single precision rounding within each block product. For the low-rank factors
+this is very small (relative error \f$ \sim 10^{-8} \f$), as their products have short inner dimensions or contribute
+little to the result. Products with the diagonal blocks sum many large near-field terms, giving a larger error
+(relative error \f$ \sim 10^{-7} \f$), which is why `dense_single` is off by default; this is still well below typical SVD
+tolerances. With `dense_single=T` the block-Jacobi preconditioner is built from the rounded diagonal blocks. The dense
+fallback for off-diagonal blocks that cannot be compressed and the hole and V-coil columns are always stored in double
+precision.
+
+Cache files store blocks in the precision they are kept in and are only reused by runs with the same `lowrank_single` and
+`dense_single` settings, except that cache files written before these options were added (all blocks in double
+precision) are reused with the default settings.
 
 \subsection doc_tw_main_hodlr_pre Block-Jacobi preconditioning
 When iterative solvers are used with a HODLR \f$ \textrm{L} \f$ matrix (time-dependent and frequency-response runs), a block-Jacobi

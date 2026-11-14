@@ -509,10 +509,11 @@ def run_hodlr_coarse(path, use_hodlr, single_opts, mp_q):
     mp_q.put(result)
 
 
-@pytest.mark.parametrize("single_opts", ({}, {'lowrank_single': True, 'dense_single': True}), ids=('double', 'single'))
+@pytest.mark.parametrize("single_opts", ({'lowrank_single': False}, {}, {'dense_single': True}), ids=('double', 'default', 'single'))
 def test_hodlr_coarse(single_opts):
     '''Time-dependent run on a junction mesh with a compressed inductance matrix and the two-level preconditioner
-    matches the dense direct solution, also with the HODLR blocks stored in single precision'''
+    matches the dense direct solution, with all HODLR blocks in double precision, the default precisions, and all
+    blocks in single precision'''
     r, lc, reg = ring()
     files, _ = write_pair(r, lc, reg, 'junction_ring_coarse')
     ref = mp_run(run_hodlr_coarse, (files[0], False, {}))
