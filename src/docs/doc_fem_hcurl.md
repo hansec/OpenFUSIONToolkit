@@ -258,8 +258,10 @@ resolved, so the measured curl rates there lie between \f$ k \f$ and \f$ k+1 \f$
 all cases (on distorted meshes by 1 to 2 orders of magnitude at equal mesh size).
 
 (a) The curl error for this case stagnates between the two finest meshes (\f$ 1.50 \times 10^{-4} \f$ and \f$ 1.39 \times 10^{-4} \f$)
-after converging at rate 2.00 between the previous pair. The L2 projection does not control the curl directly, so this may reflect a
-few badly shaped cells of the random distortion rather than the space; it is under investigation.
+after converging at rate 2.00 between the previous pair; tightening the solver tolerance does not change it. With a milder distortion
+(vertices moved by up to \f$ 0.15 h \f$) the same case converges at 2.86 / 1.94, so this appears to come from a few strongly
+distorted cells of the random perturbation on the finest mesh rather than from the space. The L2 projection does not control the
+curl directly, so it is sensitive to such cells.
 
 \subsection doc_fem_hcurl_limits_div Divergence of composite fields
 
