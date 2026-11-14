@@ -18,6 +18,8 @@ connectivity using internal faces.
 This document explains the basic methods to define and implement a finite element representation using a
 scalar Lagrange representation as an example. For information about a specific finite element representation
 please view its documentation. These documents may be accessed through the \ref fem "finite element" group.
+Further details for specific representations are given on the following pages:
+ - \subpage doc_fem_hcurl
 
 \section doc_oft_fem_def Basis Definition
 

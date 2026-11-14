@@ -85,9 +85,8 @@ end type oft_hcurl_grad_cinterp
 !------------------------------------------------------------------------------
 !> Interpolate \f$ \nabla \cdot \f$ of a H(Curl) + Grad(H^1) vector field
 !!
-!! @warning Only the divergence of the Grad(H^1) component is included. Higher order
-!! (\f$ k \ge 2 \f$) H(Curl) basis functions are not divergence free, so for those orders the
-!! result is not the full divergence of the field.
+!! @warning Only the divergence of the Grad(H^1) component is included, which is not the full
+!! divergence for order \f$ k \ge 2 \f$ (see \ref doc_fem_hcurl_limits_div)
 !------------------------------------------------------------------------------
 type, extends(oft_hcurl_grad_rinterp) :: oft_hcurl_grad_dinterp
 contains
@@ -433,7 +432,7 @@ end subroutine cinterp_apply
 !------------------------------------------------------------------------------
 !> Reconstruct \f$ \nabla \cdot \f$ of a H(Curl) + Grad(H^1) vector field
 !!
-!! @warning Only the Grad(H^1) component is included (see \ref oft_hcurl_grad_operators::oft_hcurl_grad_dinterp "oft_hcurl_grad_dinterp")
+!! @warning Only the Grad(H^1) component is included (see \ref doc_fem_hcurl_limits_div)
 !------------------------------------------------------------------------------
 subroutine dinterp_apply(self,cell,f,gop,val)
 class(oft_hcurl_grad_dinterp), intent(inout) :: self
@@ -961,8 +960,13 @@ end subroutine hcurl_grad_curltp
 !> Construct mass matrix for a H(Curl) + Grad(H^1) representation
 !!
 !! Supported boundary conditions
-!! - `'none'` Full matrix
-!! - `'zerob'` Dirichlet for all boundary DOF
+!! - `"none"` Eliminate redundant vertex DOFs of the Grad(H^1) component
+!! - `"zerob"` Eliminate redundant vertex DOFs and Dirichlet for all boundary DOF
+!!
+!! @note Eliminated rows are replaced by identity rows but their columns are retained, so the
+!! matrix is not symmetric. Right hand sides and initial guesses must have zero vertex entries,
+!! by applying \ref oft_hcurl_grad_gzerop, for symmetric solvers (eg. CG) to be valid.
+!! See \ref doc_fem_hcurl_comp_use for more information.
 !------------------------------------------------------------------------------
 subroutine hcurl_grad_getmop(hcurl_grad_rep,mat,bc)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_rep

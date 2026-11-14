@@ -69,6 +69,7 @@ For information on using OFT see
  - \ref doc_solvers
  - \ref doc_oft_fem
   - \ref doc_comp_fem
+  - \ref doc_fem_hcurl
  - \ref doc_tests
 
 \section doc_main_writing Writing Documentation

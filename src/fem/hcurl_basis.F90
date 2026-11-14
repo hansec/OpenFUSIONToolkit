@@ -15,58 +15,12 @@
 !!   - Interpolation
 !!   - Curl
 !!
-!! **Basis overview**
+!! The order \f$ k \f$ (\f$ 1 \le k \le 4 \f$) H(Curl) space contains the lowest order edge functions
+!! plus only the rotational (non-gradient) higher order functions, on tetrahedra and hexahedra.
+!! Gradients are added by pairing with \f$ H^1 \f$ of order \f$ k+1 \f$ in the composite
+!! H(Curl) + Grad(H^1) space (see \ref oft_hcurl_grad_setup).
 !!
-!! The order \f$ k \f$ (\f$ 1 \le k \le 4 \f$) H(Curl) space is a hierarchical set of tangentially
-!! continuous vector functions made up of the lowest order (Whitney) edge functions plus only the
-!! rotational (non-gradient) higher order face and cell functions. Higher order gradients are
-!! not included in this space; they are provided by \f$ \nabla H^1 \f$ of order \f$ k+1 \f$ in the
-!! composite H(Curl) + Grad(H^1) space (see \ref oft_hcurl_basis::oft_hcurl_grad_setup "oft_hcurl_grad_setup"). Within a cell the curl is
-!! only zero for the gradients of the lowest order (vertex) functions, which are spanned by the edge
-!! functions. In the composite space these vertex gradients are therefore represented twice, once
-!! by the edge functions and once by the vertex DOFs of the \f$ H^1 \f$ space. Remove them with
-!! \ref oft_hcurl_grad_operators::oft_hcurl_grad_gzerop "oft_hcurl_grad_gzerop".
-!!
-!! Higher order functions use the global (oriented) vertex ordering of their edge/face, so
-!! neighboring cells evaluate identical functions on shared entities. Order \f$ k \f$ functions are
-!! a subset of the order \f$ k+1 \f$ functions, so p-refinement interpolation is injection.
-!!
-!! **Tetrahedra** (\f$ \lambda_i \f$ are barycentric coordinates)
-!! - Edge (1 per edge): \f$ \lambda_a \nabla \lambda_b - \lambda_b \nabla \lambda_a \f$, where
-!!   \f$ a \rightarrow b \f$ is the oriented edge
-!! - Face (2, 5, 9 per face for \f$ k = \f$ 2, 3, 4): polynomials \f$ \sum_i p_i(\lambda_a,\lambda_b,\lambda_c)
-!!   \nabla \lambda_i \f$ over the oriented face vertices \f$ (a,b,c) \f$ that vanish tangentially on
-!!   all other faces, see \ref oft_hcurl_basis::oft_hcurl_evalf "oft_hcurl_evalf" (curls in \ref oft_hcurl_basis::oft_hcurl_cevalf "oft_hcurl_cevalf")
-!! - Cell (0, 3, 11 per cell for \f$ k = \f$ 2, 3, 4): interior bubbles, see \ref oft_hcurl_basis::oft_hcurl_evalc "oft_hcurl_evalc"
-!!   (curls in \ref oft_hcurl_basis::oft_hcurl_cevalc "oft_hcurl_cevalc")
-!! - The order \f$ k \f$ space plus \f$ \nabla P_{k+1} \f$ is exactly \f$ [P_k]^3 \f$ (second kind Nedelec
-!!   space). Adding \f$ \nabla P_k \f$ instead gives a space with the dimension of the first kind
-!!   Nedelec space, but for \f$ k \ge 2 \f$ it is not equal to it. The span of the face and cell
-!!   functions alone depends on vertex ordering; only the span modulo gradients is independent of it.
-!!
-!! **Hexahedra** (logical coordinates \f$ x_i \in [0,1] \f$)
-!! - Six face coordinates \f$ \mu = (1-x_3, 1-x_2, x_1, x_2, 1-x_1, x_3) \f$, where \f$ \mu_i \f$ is one on
-!!   face \f$ i \f$ and zero on the opposing face (pairs 1-6, 2-4, 3-5)
-!! - \f$ L_n(t) = t J^{(1,1)}_{n-1}(2t-1) \f$ (\ref oft_lag_poly::hpoly_bary "hpoly_bary") is used to
-!!   build 1D bubbles \f$ L_n(\mu_i) \mu_{i'} \f$, where \f$ \mu_{i'} = 1 - \mu_i \f$
-!! - Edge (1 per edge): \f$ \mu_a \mu_b \nabla \mu_t \f$, where \f$ \mu_a = \mu_b = 1 \f$ on the edge
-!!   (`hex_bary_efcoords`) and \f$ \mu_t \f$ increases along the oriented edge (`hex_bary_ecoords`)
-!! - Face (\f$ (k-1)^2 + 2(k-1) \f$ per face): with oriented face coordinates \f$ (c_1,c_2,c_3,c_4) \f$,
-!!   \f$ c_3 = 1-c_1 \f$, \f$ c_4 = 1-c_2 \f$ and \f$ c_1 = c_2 = 1 \f$ at the lowest global index vertex,
-!!   \f$ u_i = L_i(c_1) c_3 \f$, \f$ v_j = L_j(c_2) c_4 \f$, the face is spanned by `indsf` entries
-!!   \f$ (i,j,\mathrm{form}) \f$ (\f$ i,j \ge 1 \f$), each times \f$ \mu_f \f$ for face \f$ f \f$:
-!!   - form 0: \f$ v_j \nabla u_i - u_i \nabla v_j \f$
-!!   - form 1: \f$ v_j \nabla c_1 \f$
-!!   - form 2: \f$ u_i \nabla c_2 \f$
-!! - Cell (\f$ 2(k-1)^3 + 3(k-1)^2 \f$ per cell): with \f$ U_i = L_i(\mu_1) \mu_6 \f$,
-!!   \f$ V_j = L_j(\mu_2) \mu_4 \f$, \f$ W_l = L_l(\mu_3) \mu_5 \f$, the cell is spanned by `indsc` entries
-!!   \f$ (i,j,l,\mathrm{form}) \f$:
-!!   - form 0: \f$ \nabla U_i V_j W_l - U_i \nabla V_j W_l + U_i V_j \nabla W_l \f$
-!!   - form 1: \f$ \nabla U_i V_j W_l - U_i \nabla V_j W_l - U_i V_j \nabla W_l \f$
-!!   - form 2: \f$ V_j W_l \nabla \mu_1 \f$, form 3: \f$ U_i W_l \nabla \mu_2 \f$, form 4: \f$ U_i V_j \nabla \mu_3 \f$
-!! - The order \f$ k \f$ space plus \f$ \nabla Q_k \f$ is exactly the first kind Nedelec space
-!!   \f$ Q_{k-1,k,k} \times Q_{k,k-1,k} \times Q_{k,k,k-1} \f$. The composite space (\f$ + \nabla Q_{k+1} \f$)
-!!   contains \f$ [P_k]^3 \f$ but not \f$ [Q_k]^3 \f$.
+!! For basis definitions, spanned polynomial spaces, and known limitations see \ref doc_fem_hcurl.
 !!
 !! @authors Chris Hansen
 !! @date August 2011
@@ -254,9 +208,10 @@ end subroutine oft_hcurl_setup
 !> Construct a vector FE space for H(Curl) and its complement (\f$ \nabla H^1 \f$)
 !!
 !! The H(Curl) space of order \f$ k \f$ is paired with \f$ H^1 \f$ of order \f$ k+1 \f$, which supplies
-!! the gradient components omitted from the H(Curl) space. Vertex DOFs of the \f$ H^1 \f$ space are
-!! redundant with the lowest order H(Curl) edge functions and should be removed with
-!! \ref oft_hcurl_grad_operators::oft_hcurl_grad_gzerop "oft_hcurl_grad_gzerop".
+!! the gradient components omitted from the H(Curl) space.
+!!
+!! @note Vertex DOFs of the \f$ H^1 \f$ space are redundant and must be removed with
+!! \ref oft_hcurl_grad_operators::oft_hcurl_grad_gzerop "oft_hcurl_grad_gzerop" (see \ref doc_fem_hcurl_comp_use).
 !------------------------------------------------------------------------------
 subroutine oft_hcurl_grad_setup(ML_hcurl_obj,ML_h1_obj,ML_hcurl_grad_obj,ML_h1grad_obj,minlev)
 type(oft_ml_fem_type), target, intent(inout) :: ML_hcurl_obj
@@ -431,7 +386,7 @@ end subroutine oft_hcurl_setup_surf
 !!
 !! Each entry is `(i,j,form)`, where `i` and `j` are the indices of the 1D bubbles
 !! in the first and second face directions and `form` selects the type of function
-!! (see module documentation). Entries are ordered by increasing `max(i,j)`, so the
+!! (see \ref doc_fem_hcurl_hex). Entries are ordered by increasing `max(i,j)`, so the
 !! list for a given order is a prefix of the list for all higher orders.
 !---------------------------------------------------------------------------------
 subroutine hcurl_2d_grid(order,inds)
@@ -461,9 +416,9 @@ end subroutine hcurl_2d_grid
 !> Build index list for hexahedral cell functions
 !!
 !! Each entry is `(i,j,l,form)`, where `i`, `j` and `l` are the indices of the 1D bubbles
-!! in each direction (0 if unused) and `form` selects the type of function (see module
-!! documentation). Entries are ordered by increasing `max(i,j,l)`, so the list for a given
-!! order is a prefix of the list for all higher orders.
+!! in each direction (0 if unused) and `form` selects the type of function (see
+!! \ref doc_fem_hcurl_hex). Entries are ordered by increasing `max(i,j,l)`, so the list for a
+!! given order is a prefix of the list for all higher orders.
 !---------------------------------------------------------------------------------
 subroutine hcurl_3d_grid(order,inds)
 integer(i4), intent(in) :: order !< Maximum bubble index (FE order - 1)
