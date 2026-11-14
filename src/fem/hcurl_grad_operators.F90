@@ -83,9 +83,9 @@ contains
   procedure :: interp => cinterp_apply
 end type oft_hcurl_grad_cinterp
 !------------------------------------------------------------------------------
-!> Interpolate \f$ \nabla \cdot \f$ of a H(Curl) + Grad(H^1) vector field
+!> Interpolate \f$ \nabla \cdot \f$ of a H(Curl) + Grad(\f$ H^1 \f$) vector field
 !!
-!! @warning Only the divergence of the Grad(H^1) component is included, which is not the full
+!! @warning Only the divergence of the Grad(\f$ H^1 \f$) component is included, which is not the full
 !! divergence for order \f$ k \ge 2 \f$ (see \ref doc_fem_hcurl_limits_div)
 !------------------------------------------------------------------------------
 type, extends(oft_hcurl_grad_rinterp) :: oft_hcurl_grad_dinterp
@@ -432,7 +432,7 @@ end subroutine cinterp_apply
 !------------------------------------------------------------------------------
 !> Reconstruct \f$ \nabla \cdot \f$ of a H(Curl) + Grad(H^1) vector field
 !!
-!! @warning Only the Grad(H^1) component is included (see \ref doc_fem_hcurl_limits_div)
+!! @warning Only the Grad(\f$ H^1 \f$) component is included (see \ref doc_fem_hcurl_limits_div)
 !------------------------------------------------------------------------------
 subroutine dinterp_apply(self,cell,f,gop,val)
 class(oft_hcurl_grad_dinterp), intent(inout) :: self
@@ -960,7 +960,7 @@ end subroutine hcurl_grad_curltp
 !> Construct mass matrix for a H(Curl) + Grad(H^1) representation
 !!
 !! Supported boundary conditions
-!! - `"none"` Eliminate redundant vertex DOFs of the Grad(H^1) component
+!! - `"none"` Eliminate redundant vertex DOFs of the Grad(\f$ H^1 \f$) component
 !! - `"zerob"` Eliminate redundant vertex DOFs and Dirichlet for all boundary DOF
 !!
 !! @note Eliminated rows are replaced by identity rows but their columns are retained, so the
@@ -1063,9 +1063,9 @@ do i=1,hgrad_rep%mesh%nc
       END DO
       mop21(1:hgrad_rep%mesh%cell_np,:)=0.d0
       mop22(1:hgrad_rep%mesh%cell_np,:)=0.d0
-      DO jr=hgrad_rep%mesh%cell_np,hgrad_rep%nce
+      DO jr=hgrad_rep%mesh%cell_np+1,hgrad_rep%nce
         IF(hgrad_rep%global%gbe(j_grad(jr)))THEN
-          mop12(jr,:)=0.d0
+          mop21(jr,:)=0.d0
           mop22(jr,:)=0.d0
         END IF
       END DO
@@ -1099,6 +1099,7 @@ SELECT CASE(bc_flag)
     END DO
   CASE(2)
     mop11(1,1)=1.d0
+    !---Boundary H(Curl) DOFs
     DO i=1,hcurl_rep%nbe
       jr=hcurl_rep%lbe(i)
       IF(.NOT.hcurl_rep%global%gbe(jr))CYCLE
@@ -1106,17 +1107,26 @@ SELECT CASE(bc_flag)
       j_curl=jr
       call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
     END DO
+    !---All vertex DOFs of the gradient space
     DO i=1,hgrad_rep%mesh%np
-      IF(.NOT.hgrad_rep%linkage%be(i))CYCLE
+      IF(hgrad_rep%mesh%bp(i))CYCLE
       j_curl=i
-      call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
+      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
     END DO
+    DO i=1,hgrad_rep%mesh%nbp
+      jr=hgrad_rep%mesh%lbp(i)
+      IF(.NOT.hgrad_rep%mesh%pstitch%leo(i))CYCLE
+      j_curl=jr
+      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
+    END DO
+    !---Remaining boundary DOFs of the gradient space
     DO i=1,hgrad_rep%nbe
       jr=hgrad_rep%lbe(i)
+      IF(jr<=hgrad_rep%mesh%np)CYCLE ! Vertex DOFs set above
       IF(.NOT.hgrad_rep%global%gbe(jr))CYCLE
       IF(.NOT.hgrad_rep%linkage%leo(i))CYCLE
       j_curl=jr
-      call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
+      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
     END DO
 END SELECT
 DEALLOCATE(j_curl,mop11)

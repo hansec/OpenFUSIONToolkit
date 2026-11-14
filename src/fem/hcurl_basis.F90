@@ -18,7 +18,7 @@
 !! The order \f$ k \f$ (\f$ 1 \le k \le 4 \f$) H(Curl) space contains the lowest order edge functions
 !! plus only the rotational (non-gradient) higher order functions, on tetrahedra and hexahedra.
 !! Gradients are added by pairing with \f$ H^1 \f$ of order \f$ k+1 \f$ in the composite
-!! H(Curl) + Grad(H^1) space (see \ref oft_hcurl_grad_setup).
+!! H(Curl) + Grad(\f$ H^1 \f$) space (see \ref oft_hcurl_grad_setup).
 !!
 !! For basis definitions, spanned polynomial spaces, and known limitations see \ref doc_fem_hcurl.
 !!
@@ -257,7 +257,7 @@ do i=1,order
         CALL oft_abort("Error casting H1 object", "oft_hcurl_grad_setup", __FILE__)
     END SELECT
   ELSE
-    ! H(Curl) of order i is paired with H^1 of order i+1 (matches the linear levels above)
+    ! H(Curl) order i is paired with the next higher H1 order (matches the linear levels above)
     CALL oft_h1_setup_vol(ML_h1grad_obj%levels(ML_hcurl_obj%ml_mesh%mgdim+i-1)%fe,ML_hcurl_obj%ml_mesh%mesh,i+1)
   END IF
 end do

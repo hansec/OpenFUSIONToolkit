@@ -4,7 +4,7 @@ H(Curl) Finite Element Representations      {#doc_fem_hcurl}
 [TOC]
 
 This page describes the H(Curl) finite element space implemented in \ref oft_hcurl_basis and the composite
-H(Curl) + Grad(H^1) space built from it, including the exact basis definitions on tetrahedra and hexahedra, the
+H(Curl) + Grad(\f$ H^1 \f$) space built from it, including the exact basis definitions on tetrahedra and hexahedra, the
 polynomial spaces they span, and known limitations. For general information on how finite element representations
 are defined in OFT see \ref doc_oft_fem, and for composite representations see \ref doc_comp_fem.
 
@@ -130,8 +130,9 @@ The vertex DOFs of the \f$ H^1 \f$ component are redundant (see above) and must 
  - \ref oft_hcurl_grad_operators::hcurl_grad_getmop "hcurl_grad_getmop" with `bc="none"` eliminates these DOFs by replacing the
    vertex rows of the \f$ H^1 \f$ block with identity rows, but leaves the corresponding columns in place. The resulting matrix is
    therefore **not symmetric**, and solves with symmetric solvers (eg. CG) are only valid if the vertex entries of the right hand side
-   and initial guess are zero (ie. after applying `oft_hcurl_grad_gzerop`). Any `bc` value other than `"none"` or `"zerob"` returns the
-   unmodified, singular matrix.
+   and initial guess are zero (ie. after applying `oft_hcurl_grad_gzerop`). With `bc="zerob"` the boundary DOFs of both components are
+   also eliminated in the same way, matching \ref oft_hcurl_grad_operators::oft_hcurl_grad_zerob "oft_hcurl_grad_zerob". Any `bc` value
+   other than `"none"` or `"zerob"` returns the unmodified, singular matrix.
 
 \section doc_fem_hcurl_limits Limitations
 

@@ -34,20 +34,22 @@ oft_in_template = """
 &test_hcurl_grad_options
  order={2}
  mg_test={4}
+ bc_test={8}
 /
 """
 
 # Common setup function and process handling
-def hcurl_grad_setup(nbase, nlevels, order, grid_type, mg=False, df='', nu='', petsc=False):
+def hcurl_grad_setup(nbase, nlevels, order, grid_type, mg=False, df='', nu='', petsc=False, bc=False):
     petsc_flag=('T' if petsc else 'F')
     mg_flag=('T' if mg else 'F')
+    bc_flag=('T' if bc else 'F')
     nproc = 1
     if nbase != nlevels:
         nproc = 2
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg_flag, df, nu, petsc_flag))
+        fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg_flag, df, nu, petsc_flag, bc_flag))
     return run_OFT("./test_hcurl_grad", nproc, 120)
 
 def validate_result(iteration_count,converged_error):
@@ -87,6 +89,28 @@ def multi_level(nlevels,order,exp_its,exp_error,grid_type=1,petsc=False):
         nu_string='0, 0, 0, 40, 8, 4, 2'
     assert hcurl_grad_setup(2, nlevels+1, order, grid_type, mg=True, df=df_string, nu=nu_string, petsc=petsc)
     assert validate_result(exp_its, exp_error)
+
+# Mass matrix boundary condition test function
+def bc_check(order, grid_type=1, mpi=False):
+    if mpi:
+        nbase, nlev = 2, 3
+    else:
+        nbase, nlev = 2, 2
+    assert hcurl_grad_setup(nbase, nlev, order, grid_type, bc=True)
+    with open('hcurl_grad_bc.results', 'r') as fid:
+        for bc_name in ('none', 'zerob'):
+            err = float(fid.readline())
+            if err > 1.E-12:
+                print('FAILED: Mass matrix BC "{0}" incorrect, max deviation = {1}'.format(bc_name, err))
+                assert False
+
+#============================================================================
+# Mass matrix boundary conditions (eliminated rows must be identity rows)
+@pytest.mark.parametrize("grid_type", (1, 2))
+@pytest.mark.parametrize("order", (1, 2, 3, 4))
+@pytest.mark.parametrize("mpi", (False, True))
+def test_mop_bc(grid_type, order, mpi):
+    bc_check(order, grid_type=grid_type, mpi=mpi)
 
 #============================================================================
 # Test runners for NP=1
