@@ -66,7 +66,8 @@ REAL(r8) :: N0 = 1.d19
 REAL(r8) :: delta = 1.d-4
 LOGICAL :: linear = .FALSE.
 LOGICAL :: two_temp = .FALSE.
-NAMELIST/test_sound_options/order,minlev,delta,linear,two_temp
+LOGICAL :: hex_enrich = .FALSE.
+NAMELIST/test_sound_options/order,minlev,delta,linear,two_temp,hex_enrich
 !------------------------------------------------------------------------------
 ! Initialize enviroment
 !------------------------------------------------------------------------------
@@ -92,7 +93,7 @@ CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=minlev)
 CALL h1_setup_interp(xmhd_ML_H1)
 !--- H(Curl) subspace
 ALLOCATE(xmhd_ML_hcurl)
-CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=minlev)
+CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=minlev,hex_enrich=hex_enrich)
 CALL hcurl_setup_interp(xmhd_ML_hcurl)
 !--- Full H(Curl) space
 ALLOCATE(xmhd_ML_hcurl_grad,xmhd_ML_H1grad)

@@ -103,7 +103,7 @@ SOUND_TEMPLATE = """
  delta=1.e-3
  linear={linear}
  two_temp={two_temp}
-/
+{enrich}/
 
 &xmhd_options
  xmhd_jcb=F
@@ -168,7 +168,7 @@ ALFVEN_TEMPLATE = """
  minlev={minlev}
  delta=1.e-3
  linear={linear}
-/
+{enrich}/
 
 &xmhd_options
  xmhd_jcb=T
@@ -209,13 +209,20 @@ def namelist_flag(value):
     return 'T' if value else 'F'
 
 
+def enrich_option(enrich):
+    '''Namelist line selecting the enriched hexahedral H(curl) basis; omitted by default, as only the H(curl)
+    drivers read it'''
+    return ' hex_enrich=T\n' if enrich else ''
+
+
 def mpi_ranks(nbase, nlevels):
     '''Two ranks when the mesh has a distributed level: the level above nbase is the base mesh distributed over the
     processes (a transfer level, not a refinement), so MPI runs reproduce the serial errors'''
     return 2 if nbase != nlevels else 1
 
 
-def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,two_temp=False):
+def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,two_temp=False,
+                enrich=False):
     '''Write the input for a traveling sound wave and run test_sound (`representation` 'hcurl') or test_sound_lag
     ('lagrange')
 
@@ -235,7 +242,7 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
                                         linear=namelist_flag(linear), dt='1.e-6', nsteps='100', lin_tol=lin_tol,
                                         mfnk=namelist_flag(mfnk), petsc=namelist_flag(petsc),
                                         mesh_type=(2 if hex_mesh else 1), two_temp=namelist_flag(two_temp),
-                                        rep_options=rep_options))
+                                        rep_options=rep_options, enrich=enrich_option(enrich)))
     return run_OFT(exe, mpi_ranks(nbase, nlevels), timeout)
 
 
@@ -247,7 +254,8 @@ def validate_sound(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp
     return errors_ok and output_ok
 
 
-def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False):
+def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,
+                 enrich=False):
     '''Write the input for a traveling shear Alfven wave and run test_alfven (`representation` 'hcurl') or
     test_alfven_lag ('lagrange')
 
@@ -267,7 +275,8 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
         fid.write(ALFVEN_TEMPLATE.format(nbase=nbase, nlevels=nlevels, order=order, minlev=minlev, nu_mhd=nu_mhd,
                                          linear=namelist_flag(linear), dt='4.E-7', nsteps='250', lin_tol=lin_tol,
                                          mfnk=namelist_flag(mfnk), petsc=namelist_flag(petsc),
-                                         mesh_type=(2 if hex_mesh else 1), rep_options=rep_options))
+                                         mesh_type=(2 if hex_mesh else 1), rep_options=rep_options,
+                                         enrich=enrich_option(enrich)))
     return run_OFT(exe, mpi_ranks(nbase, nlevels), timeout)
 
 

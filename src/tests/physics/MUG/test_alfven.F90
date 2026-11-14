@@ -69,7 +69,8 @@ INTEGER(i4) :: minlev = 1
 REAL(r8) :: delta = 1.d-4
 REAL(r8) :: v_alf = 1.d4
 LOGICAL :: linear = .FALSE.
-NAMELIST/test_alfven_options/order,minlev,delta,linear
+LOGICAL :: hex_enrich = .FALSE.
+NAMELIST/test_alfven_options/order,minlev,delta,linear,hex_enrich
 !------------------------------------------------------------------------------
 ! Initialize enviroment
 !------------------------------------------------------------------------------
@@ -95,7 +96,7 @@ CALL oft_h1_setup(mg_mesh,order+1,xmhd_ML_H1,minlev=minlev)
 CALL h1_setup_interp(xmhd_ML_H1)
 !--- H(Curl) subspace
 ALLOCATE(xmhd_ML_hcurl)
-CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=minlev)
+CALL oft_hcurl_setup(mg_mesh,order,xmhd_ML_hcurl,minlev=minlev,hex_enrich=hex_enrich)
 CALL hcurl_setup_interp(xmhd_ML_hcurl)
 !--- Full H(Curl) space
 ALLOCATE(xmhd_ML_hcurl_grad,xmhd_ML_H1grad)
