@@ -27,7 +27,7 @@ oft_in_template = """
 /
 """
 
-def run_schwarz(nprocs, ref_per='F,F,F'):
+def run_schwarz(nprocs, ref_per='F,F,F', timeout=120):
     # Distributed runs decompose the base mesh and refine once more
     nlevels = 3
     if nprocs > 1:
@@ -35,7 +35,7 @@ def run_schwarz(nprocs, ref_per='F,F,F'):
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nlevels, ref_per))
-    if not run_OFT("./test_native_schwarz", nprocs, 120):
+    if not run_OFT("./test_native_schwarz", nprocs, timeout):
         return None
     with open('schwarz.results', 'r') as fid:
         nfail = int(fid.readline())
@@ -85,10 +85,22 @@ def test_schwarz_mpi4():
     check_overlap_iterations(its)
     assert its[1] < its[0]
 
-@pytest.mark.parametrize('nprocs', [pytest.param(1, id='serial'), pytest.param(2, id='mpi2', marks=pytest.mark.mpi)])
+# The 4 process periodic case needs about twice as many GMRES iterations as the non-periodic one,
+# which takes about three minutes with 2 threads per process on 4 cores
+@pytest.mark.parametrize('nprocs', [pytest.param(1, id='serial'), pytest.param(2, id='mpi2', marks=pytest.mark.mpi),
+                                    pytest.param(4, id='mpi4', marks=[pytest.mark.mpi, pytest.mark.slow])])
 def test_schwarz_periodic(nprocs):
-    '''Overlapping Schwarz with several blocks per process on a partially periodic cube (periodic images
-    on one process): overlap 0 reproduces block-Jacobi and overlap 1 reproduces block-Jacobi with
-    loverlap, bit for bit.'''
-    its = run_schwarz(nprocs, 'T,F,F')
+    '''Overlapping Schwarz on a partially periodic cube (periodic images on one process): block-Jacobi
+    equivalences hold bit for bit, subdomains grown across processes (one DOF per set of periodic images)
+    match the assembled global matrix, and iteration counts do not increase with overlap.'''
+    its = run_schwarz(nprocs, 'T,F,F', timeout=360)
+    assert its is not None
+    check_overlap_iterations(its)
+
+@pytest.mark.parametrize('nprocs', [pytest.param(1, id='serial'), pytest.param(2, id='mpi2', marks=pytest.mark.mpi),
+                                    pytest.param(4, id='mpi4', marks=pytest.mark.mpi)])
+def test_schwarz_fully_periodic(nprocs):
+    '''Overlapping subdomains on a fully periodic cube (images in all three directions, up to eight per
+    DOF) match the assembled global matrix. The periodic Laplacian is singular, so no solves are checked.'''
+    its = run_schwarz(nprocs, 'T,T,T')
     assert its is not None

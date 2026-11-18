@@ -12,12 +12,23 @@
 !! may include rows held only by other processes ("ghost" rows), together with scatter
 !! plans moving vector values between the distributed vector and the subdomain.
 !!
+!! Subdomain DOFs are keyed by global index (`offsetg` + `lge` of the row maps). On
+!! periodic meshes several local rows (periodic images, linked by the local links
+!! `kle(0)`/`lle` of the vector seam) share one global index; all images of a DOF
+!! are treated as one DOF, represented by its lowest local index (canonical image).
+!!
 !! Matrices are stored unassembled per process, so rows are first made complete:
-!! - The full local matrix (`Mfull`, see @ref oft_native_la::native_matrix_setup_full
-!!   "native_matrix_setup_full") holds the assembled value of every entry whose row
-!!   and column are both local, and these values are bitwise identical on every
-!!   process holding the entry. Rows of DOFs that are not shared (interior rows) are
-!!   therefore complete locally.
+!! - The stitched local matrix values (summed over all entries, local and remote,
+!!   with the same global row and column, with the matrix linkage built by
+!!   @ref oft_native_la::native_matrix_setup_full "native_matrix_setup_full") hold the
+!!   assembled value of every entry whose row and column are both local, bitwise
+!!   identical on every copy of the entry (including copies on periodic images). This
+!!   is `Mfull`, except that `Mfull` replaces the rows of non-canonical periodic
+!!   images by identity rows, so on periodic meshes the stitched values are kept
+!!   separately (`mper`).
+!! - The local row of a DOF is the union of the local rows of its images, keyed by the
+!!   global index of each column (entries common to two images agree). Rows of DOFs
+!!   that are not shared with other processes are therefore complete locally.
 !! - A row shared with other processes (interface row) is incomplete everywhere: each
 !!   process only has the columns it holds, and may lack entries that couple two of
 !!   its DOFs through an element it does not hold. The complete row is the union of
@@ -25,13 +36,14 @@
 !!   each DOF builds its complete row from the rows sent by the other holders.
 !! - Every owned row is then complete at its owner, and the rows of all other
 !!   subdomain DOFs (local copies owned elsewhere and ghosts) are requested from
-!!   their owners, keyed by global index (`lge` of the row maps).
+!!   their owners, keyed by global index.
 !!
-!! Invariants relied on: every DOF has exactly one owner (`leo`); global indices are
-!! unique per DOF (meshes with periodic images on one process are not supported);
-!! the matrix pattern is fixed after setup (values are refreshed by
-!! @ref native_overlap_update with fixed scatter plans); vectors are consistent across
-!! copies when gathered.
+!! Invariants relied on: every DOF has exactly one owner (`leo`), and the owner rank
+!! obtained by synchronizing from the owner is the same on all images; local links of
+!! the seam only join copies with the same global index; the matrix pattern is fixed
+!! after setup (values are refreshed by @ref native_overlap_update with fixed scatter
+!! plans); vectors are consistent across copies (including periodic images) when
+!! gathered.
 !!
 !! Setup exchanges index data with `MPI_ALLTOALL`/`MPI_ALLTOALLV` (collective);
 !! numeric updates and vector transfers use point-to-point scatter plans.
@@ -63,7 +75,7 @@ END TYPE ilist
 !> Overlapping subdomain of a distributed native matrix
 !!
 !! Subdomain DOFs are numbered with the DOFs held locally first (in increasing local
-!! index) followed by ghost DOFs (in increasing global index).
+!! index of their canonical image) followed by ghost DOFs (in increasing global index).
 !---------------------------------------------------------------------------------
 TYPE, PUBLIC :: oft_native_overlap
   INTEGER(i4) :: levels = 0 !< Number of overlap layers
@@ -73,15 +85,17 @@ TYPE, PUBLIC :: oft_native_overlap
   INTEGER(i4) :: nr = 0 !< Number of local rows of the parent matrix
   INTEGER(i4) :: ncr = 0 !< Number of entries of the complete owned rows (`cvals(1:ncr)`)
   INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: gsub !< Global index of each subdomain DOF [n]
-  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lsub !< Local index of each locally held subdomain DOF [nloc]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: lsub !< Local index (canonical image) of each locally held subdomain DOF [nloc]
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: osub !< Owner rank of each subdomain DOF [n]
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: cvals !< Complete owned rows, then rows received from owners
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: acc !< Accumulation storage for additive write-back [nr]
-  TYPE(oft_scatter_plan) :: plan_rows !< Local `Mfull` values to complete owned rows (`cvals(1:ncr)`)
+  LOGICAL :: periodic = .FALSE. !< Row maps have periodic images (values from `mper` instead of `Mfull`)
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: mper !< Stitched local matrix values, periodic meshes only [parent nnz]
+  TYPE(oft_scatter_plan) :: plan_rows !< Stitched local values (`Mfull`/`mper`) to complete owned rows (`cvals(1:ncr)`)
   TYPE(oft_scatter_plan) :: plan_ghost !< Complete owned rows to rows of non-owned subdomain DOFs
   TYPE(oft_scatter_plan) :: plan_vals !< Row values (`cvals`) to subdomain matrix values
   TYPE(oft_scatter_plan) :: plan_vec !< Distributed vector to subdomain vector (reverse: add back)
-  TYPE(oft_scatter_plan) :: plan_own !< Owned subdomain DOFs (restricted write-back)
+  TYPE(oft_scatter_plan) :: plan_own !< Owned subdomain DOFs to all their local images (restricted write-back)
   TYPE(oft_native_matrix), POINTER :: amat => NULL() !< Subdomain matrix [n,n]
   CLASS(oft_native_matrix), POINTER :: parent => NULL() !< Parent (distributed) matrix
   TYPE(oft_seam), POINTER :: seam => NULL() !< Seam of the parent row space
@@ -102,12 +116,13 @@ CLASS(oft_native_matrix), TARGET, INTENT(inout) :: mat !< Parent matrix (square)
 CLASS(oft_vector), INTENT(inout) :: u !< Vector of the parent row space
 INTEGER(i4), INTENT(in) :: levels !< Number of overlap layers
 CLASS(oft_native_vector), POINTER :: uv
-INTEGER(i4) :: i,j,k,m,q,r,np,me,nown_rows,ntmp,lev,nnz,jp,jn
+INTEGER(i4) :: i,j,k,m,q,r,iu,np,me,nown_rows,ntmp,lev,nnz,jp,jn,nu
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: owner,orow,olist,scnt,rcnt,ckr,co,gkr,go,ipos,itmp, &
   rrow,rown,krec,lrec,isort,dlist_own,dsrc,kr_sub,lpos,sub_of_d,newo
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: kimg,limg,urk,uo,us
 INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr,lc
-INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: gidx,gsorted,sbuf,rbuf,cg,gg,rg,tmp8,dlist,front,newg,dsorted
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: gperm,dperm
+INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: gidx,gsorted,sbuf,rbuf,cg,gg,rg,tmp8,dlist,front,newg,dsorted,ug
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: dperm
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: rown_r
 TYPE(ilist), ALLOCATABLE, DIMENSION(:) :: rows_send,rows_recv,ghost_send,ghost_recv
 TYPE(oft_native_pattern), POINTER :: pattern
@@ -125,61 +140,69 @@ me=oft_env%rank
 !---Global index of each local row
 ALLOCATE(gidx(mat%nr))
 DO i=1,mat%ni
-  IF(mat%i_map(i)%per)CALL oft_abort('Periodic row maps are not supported','native_overlap_setup',__FILE__)
+  self%periodic=(self%periodic.OR.mat%i_map(i)%per)
   DO j=1,mat%i_map(i)%n
     gidx(mat%i_map(i)%offset+j)=mat%i_map(i)%offsetg+mat%i_map(i)%lge(j)
   END DO
 END DO
-ALLOCATE(gsorted(mat%nr),gperm(mat%nr))
-gsorted=gidx
-gperm=[(i,i=1,mat%nr)]
-IF(mat%nr>0)CALL sort_array(gsorted,gperm,mat%nr)
+!---Unique DOFs (iu): sorted global indices, local images (increasing local index) of each
+CALL unique_dofs()
 !---Owner of each local row (owner rank synchronized from the owner)
 ALLOCATE(rown_r(mat%nr),owner(mat%nr))
 rown_r=REAL(me,r8)
 CALL oft_global_stitch(self%seam,rown_r,0)
 owner=NINT(rown_r)
 DEALLOCATE(rown_r)
+DO iu=1,nu
+  DO k=kimg(iu)+1,kimg(iu+1)-1
+    IF(owner(limg(k))/=owner(limg(kimg(iu))))CALL oft_abort('Periodic images with different owners', &
+      'native_overlap_setup',__FILE__)
+  END DO
+END DO
 !---Full local matrix
 CALL native_matrix_setup_full(mat,u)
 kr=>mat%kr
 lc=>mat%lc
+IF(self%periodic)ALLOCATE(self%mper(MAX(1,mat%nnz)))
+!---Local row of each unique DOF: union of the rows of its images, by global column
+CALL unique_rows()
 !---Owned rows
-ALLOCATE(orow(mat%nr))
+ALLOCATE(orow(nu))
 orow=0
 nown_rows=0
-DO i=1,mat%nr
-  IF(owner(i)==me)THEN
+DO iu=1,nu
+  IF(owner(limg(kimg(iu)))==me)THEN
     nown_rows=nown_rows+1
-    orow(i)=nown_rows
+    orow(iu)=nown_rows
   END IF
 END DO
 ALLOCATE(olist(nown_rows))
-DO i=1,mat%nr
-  IF(orow(i)>0)olist(orow(i))=i
+DO iu=1,nu
+  IF(orow(iu)>0)olist(orow(iu))=iu
 END DO
 !------------------------------------------------------------------------------
 ! Complete owned rows: other holders send their local rows to the owner
 !------------------------------------------------------------------------------
 ALLOCATE(scnt(0:np-1),rcnt(0:np-1),rows_send(0:np-1),rows_recv(0:np-1))
 scnt=0
-DO i=1,mat%nr
-  IF(owner(i)==me)CYCLE
-  scnt(owner(i))=scnt(owner(i))+2+2*(kr(i+1)-kr(i))
+DO iu=1,nu
+  q=owner(limg(kimg(iu)))
+  IF(q==me)CYCLE
+  scnt(q)=scnt(q)+2+2*(urk(iu+1)-urk(iu))
 END DO
 ALLOCATE(sbuf(MAX(1,SUM(scnt))),ipos(0:np-1))
 CALL csr_offsets(scnt,ipos)
-DO i=1,mat%nr
-  q=owner(i)
+DO iu=1,nu
+  q=owner(limg(kimg(iu)))
   IF(q==me)CYCLE
-  sbuf(ipos(q))=gidx(i)
-  sbuf(ipos(q)+1)=kr(i+1)-kr(i)
+  sbuf(ipos(q))=gsorted(iu)
+  sbuf(ipos(q)+1)=urk(iu+1)-urk(iu)
   ipos(q)=ipos(q)+2
-  DO j=kr(i),kr(i+1)-1
-    sbuf(ipos(q))=gidx(lc(j))
-    sbuf(ipos(q)+1)=owner(lc(j))
+  DO j=urk(iu),urk(iu+1)-1
+    sbuf(ipos(q))=ug(j)
+    sbuf(ipos(q)+1)=uo(j)
     ipos(q)=ipos(q)+2
-    CALL ilist_push(rows_send(q),j) ! Value source (Mfull location) for the plan
+    CALL ilist_push(rows_send(q),us(j)) ! Value source (stitched value location) for the plan
   END DO
 END DO
 CALL exchange_i8(scnt,sbuf,rcnt,rbuf)
@@ -226,16 +249,16 @@ END DO
 DEALLOCATE(itmp)
 ALLOCATE(ckr(nown_rows+1))
 ckr(1)=1
-ALLOCATE(cg(MAX(1,kr(mat%nr+1)-1+m)),co(MAX(1,kr(mat%nr+1)-1+m)))
+ALLOCATE(cg(MAX(1,urk(nu+1)-1+m)),co(MAX(1,urk(nu+1)-1+m)))
 DO r=1,nown_rows
-  i=olist(r)
-  ntmp=(kr(i+1)-kr(i))+(krec(r+1)-krec(r))
+  iu=olist(r)
+  ntmp=(urk(iu+1)-urk(iu))+(krec(r+1)-krec(r))
   ALLOCATE(tmp8(ntmp),isort(ntmp),itmp(ntmp))
   ntmp=0
-  DO j=kr(i),kr(i+1)-1
+  DO j=urk(iu),urk(iu+1)-1
     ntmp=ntmp+1
-    tmp8(ntmp)=gidx(lc(j))
-    itmp(ntmp)=owner(lc(j))
+    tmp8(ntmp)=ug(j)
+    itmp(ntmp)=uo(j)
   END DO
   DO k=krec(r),krec(r+1)-1
     ntmp=ntmp+1
@@ -257,7 +280,7 @@ DO r=1,nown_rows
   DEALLOCATE(tmp8,isort,itmp)
 END DO
 self%ncr=ckr(nown_rows+1)-1
-!---Plan from Mfull to complete owned rows: received entries (grouped by source
+!---Plan from the stitched local values to complete owned rows: received entries (grouped by source
 !---process in increasing rank order) and local entries
 m=0
 k=1
@@ -274,14 +297,14 @@ DO q=0,np-1
   END DO
 END DO
 DEALLOCATE(rbuf)
-ALLOCATE(lpos(MAX(1,kr(mat%nr+1)-1)),itmp(MAX(1,kr(mat%nr+1)-1)))
+ALLOCATE(lpos(MAX(1,urk(nu+1)-1)),itmp(MAX(1,urk(nu+1)-1)))
 ntmp=0
 DO r=1,nown_rows
-  i=olist(r)
-  DO j=kr(i),kr(i+1)-1
+  iu=olist(r)
+  DO j=urk(iu),urk(iu+1)-1
     ntmp=ntmp+1
-    itmp(ntmp)=j
-    lpos(ntmp)=complete_pos(r,gidx(lc(j)))
+    itmp(ntmp)=us(j)
+    lpos(ntmp)=complete_pos(r,ug(j))
   END DO
 END DO
 CALL build_plan(self%plan_rows,rows_send,rows_recv,ntmp,itmp,lpos)
@@ -293,7 +316,7 @@ ALLOCATE(ghost_send(0:np-1),ghost_recv(0:np-1))
 nd=nown_rows
 ALLOCATE(dlist(MAX(1,nd)),newo(MAX(1,nd)),dsrc(MAX(1,nd)))
 DO r=1,nown_rows
-  dlist(r)=gidx(olist(r))
+  dlist(r)=gsorted(olist(r))
   newo(r)=me
   dsrc(r)=r
 END DO
@@ -351,7 +374,7 @@ CALL build_plan(self%plan_ghost,ghost_send,ghost_recv,0,[0],[0])
 ALLOCATE(self%cvals(MAX(1,self%ncr+ngv)))
 self%cvals=0.d0
 !------------------------------------------------------------------------------
-! Subdomain numbering: local DOFs (increasing local index), then ghosts (by global index)
+! Subdomain numbering: local DOFs (increasing canonical local index), then ghosts (by global index)
 !------------------------------------------------------------------------------
 self%n=nd
 ALLOCATE(self%gsub(nd),self%osub(nd),sub_of_d(MAX(1,nd)),itmp(MAX(1,nd)))
@@ -361,13 +384,13 @@ DO k=1,nd
   IF(itmp(k)>0)self%nloc=self%nloc+1
 END DO
 ALLOCATE(self%lsub(self%nloc))
-!---Local DOFs by local index
+!---Local DOFs by local index of the canonical image
 ALLOCATE(isort(MAX(1,nd)),tmp8(MAX(1,nd)))
 m=0
 DO k=1,nd
   IF(itmp(k)==0)CYCLE
   m=m+1
-  tmp8(m)=INT(itmp(k),i8)
+  tmp8(m)=INT(limg(kimg(itmp(k))),i8)
   isort(m)=k
 END DO
 IF(m>0)CALL sort_array(tmp8,isort,m)
@@ -471,41 +494,132 @@ DO q=0,np-1
     k=k+1
     r=local_index(rbuf(k))
     IF(r==0)CALL oft_abort('Requested value not held locally','native_overlap_setup',__FILE__)
-    CALL ilist_push(ghost_send(q),r)
+    CALL ilist_push(ghost_send(q),limg(kimg(r)))
   END DO
 END DO
 DEALLOCATE(sbuf,rbuf)
 CALL build_plan(self%plan_vec,ghost_send,ghost_recv,self%nloc,self%lsub,[(k,k=1,self%nloc)])
-!---Owned subdomain DOFs (all held locally)
-ALLOCATE(isort(MAX(1,self%nown)),itmp(MAX(1,self%nown)))
+!---Owned subdomain DOFs (all held locally), written to all their local images
 m=0
 DO k=1,self%nloc
   IF(self%osub(k)/=me)CYCLE
-  m=m+1
-  isort(m)=self%lsub(k)
-  itmp(m)=k
+  iu=local_index(self%gsub(k))
+  m=m+kimg(iu+1)-kimg(iu)
+END DO
+ALLOCATE(isort(MAX(1,m)),itmp(MAX(1,m)))
+m=0
+DO k=1,self%nloc
+  IF(self%osub(k)/=me)CYCLE
+  iu=local_index(self%gsub(k))
+  DO j=kimg(iu),kimg(iu+1)-1
+    m=m+1
+    isort(m)=limg(j)
+    itmp(m)=k
+  END DO
 END DO
 CALL scatter_plan_setup_local(self%plan_own,m,isort,itmp)
 DEALLOCATE(isort,itmp)
 ALLOCATE(self%acc(self%nr))
 !---Cleanup
-DEALLOCATE(gidx,gsorted,gperm,owner,orow,olist,scnt,rcnt,ipos,ckr,cg,co,gkr,gg,go)
+DEALLOCATE(gidx,gsorted,kimg,limg,urk,ug,uo,us,owner,orow,olist,scnt,rcnt,ipos,ckr,cg,co,gkr,gg,go)
 DEALLOCATE(dlist,newo,dsrc,front,dsorted,dperm,sub_of_d)
 IF(ALLOCATED(rbuf))DEALLOCATE(rbuf)
 DEALLOCATE(rows_send,rows_recv,ghost_send,ghost_recv)
 CALL native_overlap_update(self)
 DEBUG_STACK_POP
 CONTAINS
-!> Local index of a global index (0 if not held locally)
+!> Unique DOF index of a global index (0 if not held locally)
 FUNCTION local_index(g) RESULT(il)
 INTEGER(i8), INTENT(in) :: g
 INTEGER(i4) :: il
-INTEGER(i8) :: ipos8
 il=0
-IF(mat%nr==0)RETURN
-ipos8=search_array(g,gsorted,INT(mat%nr,i8))
-IF(ipos8>0)il=gperm(ipos8)
+IF(nu==0)RETURN
+il=INT(search_array(g,gsorted(1:nu),INT(nu,i8)),4)
 END FUNCTION local_index
+!> Unique DOFs: sorted unique global indices (`gsorted(1:nu)`) and the local images of
+!> each (`limg(kimg(iu):kimg(iu+1)-1)`, in increasing local index, the first being canonical)
+SUBROUTINE unique_dofs()
+INTEGER(i4) :: kk,ii
+INTEGER(i4), ALLOCATABLE :: perm(:),uofl(:)
+INTEGER(i8), ALLOCATABLE :: srt(:)
+ALLOCATE(srt(MAX(1,mat%nr)),perm(MAX(1,mat%nr)),uofl(MAX(1,mat%nr)),gsorted(MAX(1,mat%nr)))
+nu=0
+IF(mat%nr>0)THEN
+  srt(1:mat%nr)=gidx
+  perm(1:mat%nr)=[(kk,kk=1,mat%nr)]
+  CALL sort_array(srt,perm,mat%nr)
+  DO kk=1,mat%nr
+    IF(kk>1)THEN
+      IF(srt(kk)/=srt(kk-1))nu=nu+1
+    ELSE
+      nu=1
+    END IF
+    gsorted(nu)=srt(kk)
+    uofl(perm(kk))=nu
+  END DO
+END IF
+ALLOCATE(kimg(nu+1),limg(MAX(1,mat%nr)))
+kimg=0
+DO ii=1,mat%nr
+  kimg(uofl(ii)+1)=kimg(uofl(ii)+1)+1
+END DO
+kimg(1)=1
+DO kk=1,nu
+  kimg(kk+1)=kimg(kk+1)+kimg(kk)
+END DO
+perm(1:MAX(1,nu))=kimg(1:MAX(1,nu))
+DO ii=1,mat%nr ! Increasing local index within each DOF
+  limg(perm(uofl(ii)))=ii
+  perm(uofl(ii))=perm(uofl(ii))+1
+END DO
+DEALLOCATE(srt,perm,uofl)
+END SUBROUTINE unique_dofs
+!> Local row of each unique DOF (`urk`, CSR): union of the rows of its images, sorted by
+!> global column, with the owner of each column (`uo`) and the location of its stitched
+!> value (`us`, from the first image holding the column)
+SUBROUTINE unique_rows()
+INTEGER(i4) :: ii,jj,kk,nn,ntot,nmax
+INTEGER(i4), ALLOCATABLE :: perm(:),own(:),src(:)
+INTEGER(i8), ALLOCATABLE :: srt(:)
+ntot=0
+nmax=0
+DO ii=1,nu
+  nn=0
+  DO kk=kimg(ii),kimg(ii+1)-1
+    nn=nn+kr(limg(kk)+1)-kr(limg(kk))
+  END DO
+  ntot=ntot+nn
+  nmax=MAX(nmax,nn)
+END DO
+ALLOCATE(urk(nu+1),ug(MAX(1,ntot)),uo(MAX(1,ntot)),us(MAX(1,ntot)))
+ALLOCATE(srt(MAX(1,nmax)),perm(MAX(1,nmax)),own(MAX(1,nmax)),src(MAX(1,nmax)))
+urk(1)=1
+DO ii=1,nu
+  nn=0
+  DO kk=kimg(ii),kimg(ii+1)-1
+    DO jj=kr(limg(kk)),kr(limg(kk)+1)-1
+      nn=nn+1
+      srt(nn)=gidx(lc(jj))
+      own(nn)=owner(lc(jj))
+      src(nn)=jj
+      perm(nn)=nn
+    END DO
+  END DO
+  IF(nn>1)CALL sort_array(srt,perm,nn)
+  kk=urk(ii)
+  DO jj=1,nn
+    IF(jj>1)THEN
+      IF(srt(jj)==srt(jj-1))CYCLE
+    END IF
+    ug(kk)=srt(jj)
+    uo(kk)=own(perm(jj))
+    us(kk)=src(perm(jj))
+    kk=kk+1
+  END DO
+  urk(ii+1)=kk
+END DO
+DEALLOCATE(srt,perm,own,src)
+END SUBROUTINE unique_rows
 !> Location in cvals of column `g` of complete owned row `r`
 FUNCTION complete_pos(r,g) RESULT(pos)
 INTEGER(i4), INTENT(in) :: r
@@ -744,15 +858,27 @@ END SUBROUTINE native_overlap_setup
 !---------------------------------------------------------------------------------
 !> Refresh the subdomain matrix values from the parent matrix (collective)
 !!
-!! Updates the parent's full local matrix, completes the owned rows, transfers the
-!! rows of non-owned subdomain DOFs from their owners and gathers the subdomain matrix
-!! values, all with the scatter plans built by @ref native_overlap_setup.
+!! Updates the parent's full local matrix (or, on periodic meshes, the stitched local
+!! values `mper`), completes the owned rows, transfers the rows of non-owned subdomain
+!! DOFs from their owners and gathers the subdomain matrix values, all with the scatter
+!! plans built by @ref native_overlap_setup.
 !---------------------------------------------------------------------------------
 SUBROUTINE native_overlap_update(self)
 TYPE(oft_native_overlap), INTENT(inout) :: self !< Overlap object
+INTEGER(i4) :: i
 DEBUG_STACK_PUSH
-CALL self%parent%update_slice
-CALL scatter_begin(self%plan_rows,self%parent%Mfull)
+IF(self%periodic)THEN
+  !---Stitched values without the identity rows that Mfull puts on non-canonical images
+  !$omp parallel do simd if(self%parent%nnz>OFT_OMP_VTHRESH)
+  DO i=1,self%parent%nnz
+    self%mper(i)=self%parent%M(i)
+  END DO
+  CALL oft_global_stitch(self%parent%linkage,self%mper,1)
+  CALL scatter_begin(self%plan_rows,self%mper)
+ELSE
+  CALL self%parent%update_slice
+  CALL scatter_begin(self%plan_rows,self%parent%Mfull)
+END IF
 CALL scatter_end(self%plan_rows,self%cvals,OFT_SCATTER_INSERT)
 CALL scatter_begin(self%plan_ghost,self%cvals)
 CALL scatter_end(self%plan_ghost,self%cvals,OFT_SCATTER_INSERT)
@@ -774,12 +900,13 @@ END SUBROUTINE native_overlap_gather
 !---------------------------------------------------------------------------------
 !> Write subdomain values back to local values of a distributed vector (collective)
 !!
-!! - `additive=.FALSE.` (restricted): owned entries are set from the subdomain; other
-!!   local entries are left unchanged and must be synchronized by the caller
-!!   (`stitch(0)`).
+!! - `additive=.FALSE.` (restricted): owned entries (all local images) are set from
+!!   the subdomain; other local entries are left unchanged and must be synchronized by
+!!   the caller (`stitch(0)`).
 !! - `additive=.TRUE.`: `x` is set to the sum over all subdomains containing each DOF
-!!   (contributions of ghosts are added on their owner, local contributions are
-!!   summed across copies with `stitch(1)`), consistent on all copies.
+!!   (contributions of ghosts are added on their owner, local contributions to the
+!!   canonical image only, then summed across copies and images with `stitch(1)`),
+!!   consistent on all copies.
 !---------------------------------------------------------------------------------
 SUBROUTINE native_overlap_scatter(self,xs,x,additive)
 TYPE(oft_native_overlap), INTENT(inout) :: self !< Overlap object
@@ -815,6 +942,7 @@ IF(ALLOCATED(self%lsub))DEALLOCATE(self%lsub)
 IF(ALLOCATED(self%osub))DEALLOCATE(self%osub)
 IF(ALLOCATED(self%cvals))DEALLOCATE(self%cvals)
 IF(ALLOCATED(self%acc))DEALLOCATE(self%acc)
+IF(ALLOCATED(self%mper))DEALLOCATE(self%mper)
 CALL scatter_plan_delete(self%plan_rows)
 CALL scatter_plan_delete(self%plan_ghost)
 CALL scatter_plan_delete(self%plan_vals)
@@ -829,6 +957,7 @@ self%n=0
 self%nloc=0
 self%nown=0
 self%ncr=0
+self%periodic=.FALSE.
 END SUBROUTINE native_overlap_delete
 !---------------------------------------------------------------------------------
 !> Starting offset of each process' part of a buffer grouped by process
