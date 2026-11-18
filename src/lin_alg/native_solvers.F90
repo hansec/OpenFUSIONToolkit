@@ -270,7 +270,7 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_bjprecond
   TYPE(oft_1d_int), pointer, dimension(:) :: parts => NULL() !< Local partition indices
   !> Gather/scatter plan of each block (rows `parts(i)%v`; with overlap, weights 1 on
   !! rows assigned to the block and 0 on overlap rows, which are read but not written back,
-  !! unless `additive`)
+  !! unless `additive`; partition of unity weights if `additive` and `weighted`)
   TYPE(oft_scatter_plan), pointer, dimension(:) :: bplans => NULL()
   !> Number of overlap layers added to each block within a process (-1: one layer if
   !! `loverlap`, none otherwise). Set by @ref oft_schwarz_precond.
@@ -279,6 +279,10 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_bjprecond
   !! restricting the write-back to the rows assigned to each block. Set by
   !! @ref oft_schwarz_precond.
   LOGICAL :: additive = .FALSE.
+  !> Weight the additive combination by a partition of unity: each block solution is
+  !! scaled on each row by one over the number of blocks containing the row. Only used
+  !! with `additive`. Set by @ref oft_schwarz_precond.
+  LOGICAL :: weighted = .FALSE.
   INTEGER(i4), POINTER, DIMENSION(:) :: lunion => NULL() !< Rows covered by any block (additive combination)
 CONTAINS
   !> Solve system
@@ -291,13 +295,15 @@ CONTAINS
   PROCEDURE :: delete => bjprecond_delete
 END TYPE oft_bjprecond
 !------------------------------------------------------------------------------
-!> Overlapping Schwarz preconditioner (restricted or additive)
+!> Overlapping Schwarz preconditioner (restricted, additive or weighted additive)
 !!
 !! Subdomain problems are solved with the sub-solver `pre` (as for
 !! @ref oft_bjprecond) on subdomains grown from a non-overlapping partition by
 !! `overlap` layers along the matrix graph, and combined either restricted (each row
-!! is taken from the subdomain it was assigned to; default) or additively (sum of
-!! the subdomain solutions, symmetric for symmetric sub-solves).
+!! is taken from the subdomain it was assigned to; default), additively (sum of
+!! the subdomain solutions, symmetric for symmetric sub-solves) or weighted additively
+!! (`additive` and `weighted`: sum of the subdomain solutions scaled on each row by
+!! one over the number of subdomains containing the row, a partition of unity).
 !! - `nlocal=1` (default): one subdomain per process made of its owned rows, grown
 !!   across processes (rows held only by other processes are transferred, see
 !!   @ref oft_native_overlap_mod::native_overlap_setup "native_overlap_setup").
@@ -2058,6 +2064,7 @@ INTEGER(i4), POINTER, DIMENSION(:) :: part,part_tmp,sflag
 TYPE(oft_native_vector) :: uloc
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: nblk
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: allowed
 INTEGER(i4) :: nlev
 TYPE(oft_index_set) :: bset
@@ -2272,6 +2279,25 @@ IF(.NOT.self%initialized)THEN
         CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v,wt=wt)
         DEALLOCATE(wt)
       END DO
+    ELSE IF(nlev>0.AND.self%nlocal>1.AND.self%weighted)THEN
+      !---Partition of unity: one over the number of blocks containing each row
+      ALLOCATE(nblk(A_native%nr))
+      nblk=0
+      DO i=1,self%nlocal
+        DO j=1,self%parts(i)%n
+          nblk(self%parts(i)%v(j))=nblk(self%parts(i)%v(j))+1
+        END DO
+      END DO
+      !$omp parallel do private(j,wt)
+      DO i=1,self%nlocal
+        ALLOCATE(wt(self%parts(i)%n))
+        DO j=1,self%parts(i)%n
+          wt(j)=1.d0/REAL(nblk(self%parts(i)%v(j)),r8)
+        END DO
+        CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v,wt=wt)
+        DEALLOCATE(wt)
+      END DO
+      DEALLOCATE(nblk)
     ELSE
       DO i=1,self%nlocal
         CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v)
@@ -2335,7 +2361,7 @@ IF(self%nlocal>1)THEN
     IF(.NOT.self%additive)CALL scatter_local(self%bplans(i),self%ulocs(i)%v,uvals,OFT_SCATTER_INSERT,reverse=.TRUE.)
   END DO
   !$omp end parallel
-  !---Additive combination: sum of the block solutions (blocks in order)
+  !---Additive combination: sum of the (weighted) block solutions (blocks in order)
   IF(self%additive)THEN
     DO j=1,SIZE(self%lunion)
       uvals(self%lunion(j))=0.d0
@@ -2604,7 +2630,7 @@ CALL native_overlap_gather(self%ovl,gvals,self%gsub%v)
 CALL native_overlap_gather(self%ovl,uvals,self%usub%v)
 self%solvers(1)%s%A=>self%ovl%amat
 CALL self%solvers(1)%s%apply(self%usub,self%gsub)
-CALL native_overlap_scatter(self%ovl,self%usub%v,uvals,self%additive)
+CALL native_overlap_scatter(self%ovl,self%usub%v,uvals,self%additive,weighted=self%weighted)
 !---Restricted: copies of owned rows are synchronized; additive: already consistent
 CALL u%release_local(uvals,OFT_ACCESS_READWRITE,sync=(.NOT.self%additive))
 CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
@@ -2615,7 +2641,7 @@ END SUBROUTINE schwarz_apply
 !!
 !! Reads the block-Jacobi options (`nlocal`, `groups`; see @ref bjprecond_setup_xml),
 !! `overlap` (number of overlap layers, default 1) and `type` (`restricted`, default,
-!! or `additive`).
+!! `additive`, or `weighted` for additive with partition of unity weights).
 !------------------------------------------------------------------------------
 subroutine schwarz_setup_xml(self,solver_node,level)
 CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
@@ -2656,8 +2682,13 @@ IF(ierr==0)THEN
   SELECT CASE(TRIM(stype))
   CASE("restricted")
     self%additive=.FALSE.
+    self%weighted=.FALSE.
   CASE("additive")
     self%additive=.TRUE.
+    self%weighted=.FALSE.
+  CASE("weighted")
+    self%additive=.TRUE.
+    self%weighted=.TRUE.
   CASE DEFAULT
     CALL oft_abort('Unknown Schwarz type "'//TRIM(stype)//'"','schwarz_setup_xml',__FILE__)
   END SELECT
@@ -2666,6 +2697,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(A)')'Schwarz solver setup:'
   WRITE(*,'(2X,A,I4)')  '- Overlap:   ',self%overlap
   WRITE(*,'(2X,A,3X,L1)')'- Additive:  ',self%additive
+  WRITE(*,'(2X,A,3X,L1)')'- Weighted:  ',self%weighted
 END IF
 DEBUG_STACK_POP
 end subroutine schwarz_setup_xml

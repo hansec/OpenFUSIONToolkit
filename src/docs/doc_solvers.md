@@ -76,7 +76,16 @@ non-overlapping partition by `overlap` layers along the matrix graph and solved 
 sub-solver given by the nested `pre` element. In the native backend, with `nlocal=1` each process
 has one subdomain made of its owned rows, grown across processes; with several local blocks
 (`nlocal>1`, or negative for field based blocks) the blocks are grown within the owned rows of
-each process. `overlap=0` is block-Jacobi.
+each process. `overlap=0` is block-Jacobi. Periodic meshes are supported: the periodic images of a
+DOF held by one process form a single subdomain DOF.
+
+Subdomain solutions are combined (`type`):
+- `restricted` (default): each row is taken from the subdomain it was assigned to;
+- `additive`: sum of the subdomain solutions (rows in several subdomains are counted once per
+  subdomain);
+- `weighted`: additive with partition of unity weights, where each subdomain's solution is scaled
+  on every row by one over the number of subdomains containing that row (native only). Unlike
+  `additive`, rows in the overlap are not over-weighted.
 
 **XML Spec:** `<pre type="add_schwarz">`
 
@@ -85,7 +94,7 @@ each process. `overlap=0` is block-Jacobi.
 | `nlocal`   | Number of local blocks (-1 for field based) | int | Yes |
 | `groups`   | Group index for each field in multi-field vector [n] (native only) | int | Yes |
 | `overlap`  | Overlap size (native default: 1) | int | Yes |
-| `type`     | Combination of subdomain solutions: `restricted` (default) or `additive` (native only) | str | No |
+| `type`     | Combination of subdomain solutions: `restricted` (default), `additive` or `weighted` (native only) | str | No |
 
 \section doc_solvers_krylov Krylov Solvers
 
