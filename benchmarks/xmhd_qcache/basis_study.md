@@ -447,7 +447,7 @@ marked (u) are unverified.
 
 | approach | spans P_p / NED1 / NED2; grad-rot split | orientation behavior | batched / GPU fit | conditioning p ≤ 4 | p-MG | OFT effort |
 |---|---|---|---|---|---|---|
-| **Schöberl–Zaglmayr / NGSolve** (COMPEL 24:374, 2005; Zaglmayr thesis 2006) | full NED1/NED2; explicit split (gradients of H^1 + `wuDv−wvDu`-type rotational families); `nograds` flag = OFT-like rotational space | sorted global vertices per entity (`GetEdgeSort` / `GetFaceSort`), no DOF transforms; the rotational face span is **not** S3-invariant at p ≥ 3 (agent check; same defect as OFT) | needs per-cell sorted tables, or a pre-sorted mesh | good (Legendre / Jacobi / Dubiner) | hierarchical | moderate; no gain over sym-proj for the cache |
+| **Schöberl–Zaglmayr / NGSolve** (COMPEL 24:374, 2005; Zaglmayr thesis 2006) | full NED1/NED2; explicit split (gradients of H^1 + `wuDv−wvDu`-type rotational families); `nograds` flag = OFT-like rotational space | sorted global vertices per entity (`GetEdgeSort` / `GetFaceSort`), no DOF transforms; the rotational face span is **not** S3-invariant at p ≥ 3 (agent check; same defect as OFT) | needs per-cell sorted tables, or a pre-sorted mesh | good (Legendre / Jacobi / Dubiner) | hierarchical | OFT's tet bases are already SZ type (see 5.1); no gain over sym-proj for the cache |
 | **Fuentes–Keith–Demkowicz–Nagaraj 2015** (CAMWA 70:353; ESEAS Fortran) | full exact sequence, all shapes; split implicit (u) | "orientation embedded": functions re-evaluated with permuted affine coordinates, i.e. 6/8 tables per face; no transform analysis (u) | same as OFT's current tables | good | hierarchical | moderate (code exists); does not address the problem |
 | **Ainsworth–Coyle 2001/2003; Webb 1999** | NED1/NED2 with an explicit split ("complete" vs "mixed" order) | global vertex ordering | as NGSolve | A–C reported worse; Webb (u) | hierarchical | moderate; no advantage |
 | **Graglia–Wilton–Peterson 1997** (IEEE TAP 45:329) | NED1 interpolatory; no split | node permutation + 2x2 per point pair (u) | OK | OK | non-hierarchical | poor fit: loses the split OFT needs |
@@ -463,6 +463,34 @@ marked (u) are unverified.
 - The production codes that batch on GPUs (MFEM/libCEED, Basix) accept per-face 2x2 integer/orthogonal blocks in
   the gather/scatter. That is exactly what sym-proj gives OFT, while keeping OFT's gradient/rotational split and
   hierarchy, which none of the standard N1curl elements provide.
+
+### 5.1 Context for future exploration: OFT's tet bases are Schöberl–Zaglmayr type
+
+> **Scope note.** This subsection is background for possible *future* work on conditioning. It is **not** a
+> recommendation for the current qcache / xMHD changes. It should not change their scope, priorities or
+> implementation. Nothing here has been verified against the paper text or measured.
+
+- **Provenance.** Per the OFT developers, the tet H(Curl)/H^1 bases come from Schöberl & Zaglmayr, "High order
+  Nédélec elements with local complete sequence properties", COMPEL 24(2):374–384, 2005. The structure matches:
+  - OFT's H(Curl) is SZ with the per-entity gradients moved into the separate grad H^1 space (NGSolve's
+    `nograds`).
+  - The coefficients are scaled Legendre/Jacobi polynomials. For example, p=4 face DOF 7 is `s²·P₂(t/s)` with
+    `t = f1+f2−f3` and `s = f1+f2+f3`.
+  - Face functions are built on the globally sorted vertex order, used asymmetrically. This is also the origin
+    of the S3 defect in section 2.3.
+- **Implications.**
+  - Adopting "the SZ / NGSolve basis" would not improve conditioning, because OFT already uses that family. This
+    fits the observation in 3.5 that OFT's functions are already well tuned.
+  - The symmetric families of 3.2 and 3.7 are a symmetric modification of an SZ basis. They keep SZ's local
+    complete-sequence property: face functions are corrected only by that face's gradients and lower face
+    functions, and the interior only by interior gradients.
+- **Possible future direction (conditioning only).** Later refinements of SZ were designed as improvements on
+  the 2005 set and could be compared in the Python harness against OFT and sym-proj:
+  - Zaglmayr's 2006 thesis (Jacobi-based face and cell families);
+  - the Beuchler–Pillwein–Schöberl–Zaglmayr sparsity-optimized tet H(Curl) bases.
+
+  Expected gains are constant factors, most likely at p=4 only. They are unverified; the references are from
+  memory and were not checked in the survey.
 
 ## 6. Ranked recommendations
 
