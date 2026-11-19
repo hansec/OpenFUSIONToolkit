@@ -22,7 +22,7 @@
 MODULE oft_mesh_global
 USE oft_base
 USE oft_sort, ONLY: sort_array
-USE oft_mesh_type, ONLY: oft_mesh, oft_amesh, oft_bmesh, oft_init_seam
+USE oft_mesh_type, ONLY: oft_mesh, oft_amesh, oft_bmesh, oft_init_seam, mesh_periodic_match_face
 USE oft_mesh_local, ONLY: mesh_local_init, mesh_local_init, oft_metis_partmesh, &
   bmesh_local_init
 USE oft_stitching, ONLY: oft_seam, oft_stitch_check
@@ -1212,6 +1212,9 @@ END SUBROUTINE mesh_global_elinkage
 !! - Create linkage of boundary faces to other processors.
 !! - Determine ownership for shared faces
 !! - Set global boundary face flag
+!! - Set local periodic face partners (`periodic%lfp`) and their periodic direction and
+!!   side (`periodic%lfdir`). Periodic partners on other domains are not distinguished from
+!!   other faces shared with those domains, and are not included.
 !---------------------------------------------------------------------------------
 SUBROUTINE mesh_global_flinkage(self)
 class(oft_mesh), intent(inout) :: self !< Mesh object
@@ -1480,6 +1483,24 @@ DO i=0,self%fstitch%nproc_con
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
+!------------------------------------------------------------------------------
+! Set local periodic face partners and their direction and side
+!------------------------------------------------------------------------------
+IF(self%periodic%nper>0)THEN
+  IF(ASSOCIATED(self%periodic%lfp))DEALLOCATE(self%periodic%lfp)
+  IF(ASSOCIATED(self%periodic%lfdir))DEALLOCATE(self%periodic%lfdir)
+  ALLOCATE(self%periodic%lfp(self%nf),self%periodic%lfdir(self%nf))
+  self%periodic%lfp=0
+  self%periodic%lfdir=0
+  DO i=self%fstitch%kle(0),self%fstitch%kle(1)-1
+    j=self%lbf(self%fstitch%lle(1,i))
+    m=self%lbf(self%fstitch%lle(2,i))
+    self%periodic%lfp(j)=m
+    self%periodic%lfdir(j)=mesh_periodic_match_face(self,j,m)
+    IF(self%periodic%lfdir(j)==0)CALL oft_abort('Periodic face pair does not match a periodic map', &
+      'mesh_global_flinkage',__FILE__)
+  END DO
+END IF
 !------------------------------------------------------------------------------
 ! Clean-up transfers
 !------------------------------------------------------------------------------

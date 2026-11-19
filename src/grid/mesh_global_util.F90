@@ -85,6 +85,9 @@ DEBUG_STACK_POP
 end subroutine mesh_global_boundary
 !---------------------------------------------------------------------------------
 !> Set global indexing from mesh periodicity
+!!
+!! Also computes the maps between periodic boundaries (see
+!! \ref oft_mesh_global_util::mesh_global_periodic_maps "mesh_global_periodic_maps")
 !---------------------------------------------------------------------------------
 subroutine mesh_global_periodic(mesh)
 class(oft_mesh), intent(inout) :: mesh
@@ -94,6 +97,8 @@ INTEGER(8), ALLOCATABLE :: gtmp(:)
 IF(mesh%periodic%nper==0)RETURN
 DEBUG_STACK_PUSH
 if(oft_debug_print(1))write(*,'(2A)')oft_indent,'Setting Up Periodic Mesh'
+!---Compute maps between periodic boundaries
+CALL mesh_global_periodic_maps(mesh)
 !---Faces can only have one periodic parent
 DO i=1,mesh%nbf
   j=mesh%lbf(i)
@@ -177,6 +182,160 @@ if(oft_debug_print(1))then
 end if
 DEBUG_STACK_POP
 end subroutine mesh_global_periodic
+!---------------------------------------------------------------------------------
+!> Compute the affine maps between periodic boundaries from the periodic face pairs
+!!
+!! Each pair of periodic faces (`periodic%lf`) is compared using the centers of the two faces.
+!! - Planar periodicity: the shift between the faces must be along one coordinate axis, and
+!!   all pairs along the same axis must give the same periodic planes. The map is a
+!!   translation by the period along that axis.
+!! - Revolved periodicity: the angle between the faces about the x-axis gives the full
+!!   wedge angle \f$ 2 \theta \f$, and the map is a rotation about the x-axis by this
+!!   angle. The rotation is checked against the vector mapping matrices `vmap_mats`.
+!!
+!! All maps take the lower periodic boundary onto the upper one. The mesh build is aborted
+!! if the face pairs are not consistent with one of these types of periodicity.
+!!
+!! @note Requires the parent faces `periodic%lf`, which are only available on the base level
+!---------------------------------------------------------------------------------
+subroutine mesh_global_periodic_maps(mesh)
+class(oft_mesh), intent(inout) :: mesh !< Mesh object
+integer(i4) :: i,j,k,p,face,partner,nfound
+logical :: axis_found(3),rev_set
+real(r8) :: cf(3),cp(3),d(3),dnorm,lo,hi,hlen,ax_range(2,3),rot(3,3),vrot(3,3)
+real(r8) :: phi_f,phi_p,dphi,phic,theta,phi_cell,thetas(2),phics(2),rel_f,rel_p
+real(r8), parameter :: rtol=1.d-6
+DEBUG_STACK_PUSH
+mesh%periodic%have_maps=.FALSE.
+mesh%periodic%paxis=0
+mesh%periodic%prange=0.d0
+mesh%periodic%pmap=0.d0
+axis_found=.FALSE.
+ax_range=0.d0
+rev_set=.FALSE.
+phic=0.d0
+theta=0.d0
+nfound=0
+DO i=1,mesh%nbf
+  face=mesh%lbf(i)
+  partner=mesh%periodic%lf(face)
+  IF(partner<=0)CYCLE
+  nfound=nfound+1
+  cf=face_center(face)
+  cp=face_center(partner)
+  hlen=magnitude(mesh%r(:,mesh%lf(2,face))-mesh%r(:,mesh%lf(1,face)))
+  IF(mesh%periodic%revolved)THEN
+    phi_f=ATAN2(cf(3),cf(2))
+    phi_p=ATAN2(cp(3),cp(2))
+    IF(.NOT.rev_set)THEN
+      !---Two candidate wedges share these boundaries, pick the one containing the
+      !---cell next to the face
+      dphi=wrap_angle(phi_p-phi_f)
+      IF(ABS(dphi)<rtol)CALL oft_abort('Zero angle between revolved periodic faces', &
+        'mesh_global_periodic_maps',__FILE__)
+      phics(1)=wrap_angle(phi_f+dphi/2.d0)
+      thetas(1)=ABS(dphi)/2.d0
+      phics(2)=wrap_angle(phics(1)+pi)
+      thetas(2)=pi-thetas(1)
+      cf=0.d0
+      DO k=1,mesh%cell_np
+        cf=cf+mesh%r(:,mesh%lc(k,mesh%lfc(1,face)))
+      END DO
+      phi_cell=ATAN2(cf(3),cf(2))
+      IF(ABS(wrap_angle(phi_cell-phics(1)))<thetas(1))THEN
+        phic=phics(1); theta=thetas(1)
+      ELSE
+        phic=phics(2); theta=thetas(2)
+      END IF
+      rev_set=.TRUE.
+    END IF
+    !---Faces must lie on opposite boundaries of the wedge
+    rel_f=wrap_angle(phi_f-phic)
+    rel_p=wrap_angle(phi_p-phic)
+    IF((ABS(ABS(rel_f)-theta)>rtol).OR.(ABS(rel_f+rel_p)>rtol))CALL oft_abort( &
+      'Inconsistent revolved periodic face pairs','mesh_global_periodic_maps',__FILE__)
+  ELSE
+    d=cp-cf
+    dnorm=magnitude(d)
+    IF(dnorm<1.d-3*hlen)CALL oft_abort('Zero shift between periodic faces', &
+      'mesh_global_periodic_maps',__FILE__)
+    k=MAXLOC(ABS(d),DIM=1)
+    IF(SQRT(MAX(0.d0,dnorm**2-d(k)**2))>rtol*dnorm)CALL oft_abort( &
+      'Planar periodic shift is not aligned with a coordinate axis','mesh_global_periodic_maps',__FILE__)
+    lo=MIN(cf(k),cp(k))
+    hi=MAX(cf(k),cp(k))
+    IF(axis_found(k))THEN
+      IF((ABS(lo-ax_range(1,k))>rtol*dnorm).OR.(ABS(hi-ax_range(2,k))>rtol*dnorm))CALL oft_abort( &
+        'Inconsistent planar periodic face pairs','mesh_global_periodic_maps',__FILE__)
+    ELSE
+      axis_found(k)=.TRUE.
+      ax_range(:,k)=[lo,hi]
+    END IF
+  END IF
+END DO
+IF(nfound==0)CALL oft_abort('No periodic face pairs found','mesh_global_periodic_maps',__FILE__)
+!---Set maps
+IF(mesh%periodic%revolved)THEN
+  IF(mesh%periodic%nper/=1)CALL oft_abort('Revolved periodicity requires one periodic direction', &
+    'mesh_global_periodic_maps',__FILE__)
+  rot=0.d0
+  rot(1,1)=1.d0
+  rot(2,2)=COS(2.d0*theta); rot(2,3)=-SIN(2.d0*theta)
+  rot(3,2)=SIN(2.d0*theta); rot(3,3)=COS(2.d0*theta)
+  mesh%periodic%pmap(:,1:3,1)=rot
+  mesh%periodic%prange(:,1)=[phic,theta]
+  !---Check against vector mapping matrices (which may map in either direction)
+  vrot=MATMUL(mesh%periodic%vmap_mats(:,:,2),TRANSPOSE(mesh%periodic%vmap_mats(:,:,1)))
+  IF((MAXVAL(ABS(vrot-rot))>1.d-6).AND.(MAXVAL(ABS(vrot-TRANSPOSE(rot)))>1.d-6))CALL oft_abort( &
+    'Revolved periodic map inconsistent with vector mapping matrices','mesh_global_periodic_maps',__FILE__)
+ELSE
+  IF(COUNT(axis_found)/=mesh%periodic%nper)CALL oft_abort( &
+    'Number of periodic directions found does not match mesh','mesh_global_periodic_maps',__FILE__)
+  p=0
+  DO k=1,3
+    IF(.NOT.axis_found(k))CYCLE
+    p=p+1
+    mesh%periodic%paxis(p)=k
+    mesh%periodic%prange(:,p)=ax_range(:,k)
+    DO j=1,3
+      mesh%periodic%pmap(j,j,p)=1.d0
+    END DO
+    mesh%periodic%pmap(k,4,p)=ax_range(2,k)-ax_range(1,k)
+  END DO
+END IF
+mesh%periodic%have_maps=.TRUE.
+if(oft_debug_print(1))then
+  CALL oft_increase_indent
+  IF(mesh%periodic%revolved)THEN
+    WRITE(*,'(2A,2ES14.6)')oft_indent,'Wedge bisector, half-angle =',mesh%periodic%prange(:,1)
+  ELSE
+    DO p=1,mesh%periodic%nper
+      WRITE(*,'(2A,I2,A,2ES14.6)')oft_indent,'Periodic axis ',mesh%periodic%paxis(p), &
+        ', range =',mesh%periodic%prange(:,p)
+    END DO
+  END IF
+  CALL oft_decrease_indent
+end if
+DEBUG_STACK_POP
+CONTAINS
+!> Center of a face (average of its corners)
+FUNCTION face_center(iface) RESULT(ctr)
+INTEGER(i4), INTENT(in) :: iface !< Face index
+REAL(r8) :: ctr(3) !< Face center
+INTEGER(i4) :: m
+ctr=0.d0
+DO m=1,mesh%face_np
+  ctr=ctr+mesh%r(:,mesh%lf(m,iface))
+END DO
+ctr=ctr/REAL(mesh%face_np,r8)
+END FUNCTION face_center
+!> Map an angle to \f$ [-\pi,\pi] \f$
+FUNCTION wrap_angle(ang) RESULT(wang)
+REAL(r8), INTENT(in) :: ang !< Angle
+REAL(r8) :: wang !< Equivalent angle in \f$ [-\pi,\pi] \f$
+wang=ang-2.d0*pi*ANINT(ang/(2.d0*pi))
+END FUNCTION wrap_angle
+end subroutine mesh_global_periodic_maps
 !---------------------------------------------------------------------------------
 !> Set global orientations for edges and faces
 !---------------------------------------------------------------------------------
@@ -746,6 +905,9 @@ DEBUG_STACK_POP
 end subroutine bmesh_global_boundary
 !---------------------------------------------------------------------------------
 !> Set global indexing from mesh periodicity
+!!
+!! Also computes the maps between periodic boundaries (see
+!! \ref oft_mesh_global_util::mesh_global_periodic_maps "mesh_global_periodic_maps")
 !---------------------------------------------------------------------------------
 subroutine bmesh_global_periodic(self)
 class(oft_bmesh), intent(inout) :: self !< Mesh object

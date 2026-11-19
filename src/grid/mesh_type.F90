@@ -36,22 +36,44 @@ IMPLICIT NONE
 PRIVATE
 PUBLIC cell_is_curved, oft_init_seam, mesh_findcell, mesh_findcell2, bmesh_findcell
 PUBLIC mesh_destroy, bmesh_destroy
+PUBLIC mesh_periodic_wrap, mesh_periodic_findcell, mesh_periodic_face_map, mesh_periodic_match_face
+PUBLIC periodic_map_identity, periodic_map_compose, periodic_map_inverse, periodic_map_is_identity
 !---------------------------------------------------------------------------------
-!> Global mesh information and indicies
+!> Periodic mesh information
 !!
-!! Contains global mexh context information.
-!! - Global counts
-!! - Global element indices
-!! - Global boundary flags
+!! Two types of periodicity are supported:
+!! - Planar: up to three Cartesian directions, where the periodic boundaries in each
+!!   direction are planes normal to a coordinate axis and the map between them is a
+!!   translation by the period.
+!! - Revolved (`revolved=.TRUE.`, one direction): a wedge about the x-axis, where the map
+!!   between the periodic boundaries is a rotation about the x-axis by the full wedge angle.
+!!
+!! For each periodic direction `p` the affine map \f$ x' = R_p x + t_p \f$, stored as
+!! `pmap(:,:,p)` = \f$ [R_p | t_p] \f$, takes the lower ("lo") periodic boundary onto the upper
+!! ("hi") one. The maps are computed on the base level (see \ref oft_mesh_global_util::mesh_global_periodic
+!! "mesh_global_periodic") and copied to all levels, while the face partner and side
+!! information (`lfp`, `lfdir`) is set on every level (see \ref oft_mesh_global::mesh_global_flinkage
+!! "mesh_global_flinkage").
+!!
+!! The parent maps (`lp`, `le`, `lf`) are only available on the base level.
 !---------------------------------------------------------------------------------
 TYPE, PUBLIC :: mesh_per
   LOGICAL :: revolved = .FALSE. !< Periodicity comes from revolution (always about the x-axis)?
+  LOGICAL :: have_maps = .FALSE. !< Have the periodic maps (`pmap`) been computed?
   INTEGER(i4) :: nper = 0 !< Number of periodic directions
+  INTEGER(i4) :: paxis(3) = 0 !< Coordinate axis normal to the periodic planes of each direction (0 if revolved)
+  REAL(r8) :: prange(2,3) = 0.d0 !< Planar: coordinates of the lower and upper periodic planes of each direction;
+  !! Revolved: angle of the wedge bisector about the x-axis, `ATAN2(z,y)`, and half-angle of the wedge
+  REAL(r8) :: pmap(3,4,3) = 0.d0 !< Affine map \f$ [R|t] \f$ from the lower to the upper periodic boundary of each direction
   REAL(r8) :: vmap_mats(3,3,2) = 0.d0 !< Periodic mapping matrices for vectors
   REAL(r8) :: vmap_matsT(3,3,2) = 0.d0 !< Periodic mapping matrices (transposed) for vectors
   INTEGER(i4), POINTER, DIMENSION(:) :: lp => NULL() !< Global index of points (np)
   INTEGER(i4), POINTER, DIMENSION(:) :: le => NULL() !< Global index of edges (ne)
   INTEGER(i4), POINTER, DIMENSION(:) :: lf => NULL() !< Global index of faces (nf)
+  INTEGER(i4), POINTER, DIMENSION(:) :: lfp => NULL() !< Periodic partner face on the local domain (nf),
+  !! 0 if the face is not periodic or its partner is on another domain
+  INTEGER(i4), POINTER, DIMENSION(:) :: lfdir => NULL() !< Periodic direction `p` and side of each face (nf):
+  !! `-p` on the lower boundary, `+p` on the upper boundary, 0 if not periodic or the partner is on another domain
 END TYPE mesh_per
 !---------------------------------------------------------------------------------
 !> MPI global index information (For I/O Only)
@@ -1096,6 +1118,227 @@ end if
 if(PRESENT(fout))fout=f
 DEBUG_STACK_POP
 end subroutine mesh_findcell2
+!---------------------------------------------------------------------------------
+!> Get the identity affine map \f$ [I|0] \f$
+!---------------------------------------------------------------------------------
+PURE FUNCTION periodic_map_identity() RESULT(amap)
+REAL(r8) :: amap(3,4) !< Identity map
+amap=0.d0
+amap(1,1)=1.d0
+amap(2,2)=1.d0
+amap(3,3)=1.d0
+END FUNCTION periodic_map_identity
+!---------------------------------------------------------------------------------
+!> Compose two affine maps \f$ [R|t] \f$, \f$ c(x) = a(b(x)) \f$
+!---------------------------------------------------------------------------------
+PURE FUNCTION periodic_map_compose(a,b) RESULT(c)
+REAL(r8), INTENT(in) :: a(3,4) !< Map applied second
+REAL(r8), INTENT(in) :: b(3,4) !< Map applied first
+REAL(r8) :: c(3,4) !< Combined map
+c(:,1:3)=MATMUL(a(:,1:3),b(:,1:3))
+c(:,4)=MATMUL(a(:,1:3),b(:,4))+a(:,4)
+END FUNCTION periodic_map_compose
+!---------------------------------------------------------------------------------
+!> Invert an affine map \f$ [R|t] \f$ with orthogonal \f$ R \f$
+!---------------------------------------------------------------------------------
+PURE FUNCTION periodic_map_inverse(a) RESULT(b)
+REAL(r8), INTENT(in) :: a(3,4) !< Map to invert
+REAL(r8) :: b(3,4) !< Inverse map \f$ [R^T|-R^T t] \f$
+b(:,1:3)=TRANSPOSE(a(:,1:3))
+b(:,4)=-MATMUL(b(:,1:3),a(:,4))
+END FUNCTION periodic_map_inverse
+!---------------------------------------------------------------------------------
+!> Test if an affine map is exactly the identity
+!---------------------------------------------------------------------------------
+PURE FUNCTION periodic_map_is_identity(a) RESULT(ident)
+REAL(r8), INTENT(in) :: a(3,4) !< Map to test
+LOGICAL :: ident !< Is `a` the identity?
+ident=ALL(a==periodic_map_identity())
+END FUNCTION periodic_map_is_identity
+!---------------------------------------------------------------------------------
+!> Get the affine map that takes points just past a periodic face to the matching
+!! points just inside its partner face
+!!
+!! @returns The map from the lower to the upper boundary for faces on the lower
+!! boundary, its inverse for faces on the upper boundary, and the identity otherwise
+!---------------------------------------------------------------------------------
+FUNCTION mesh_periodic_face_map(self,face) RESULT(amap)
+CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: face !< Face index
+REAL(r8) :: amap(3,4) !< Map across the face \f$ [R|t] \f$
+INTEGER(i4) :: idir
+amap=periodic_map_identity()
+IF(.NOT.ASSOCIATED(self%periodic%lfdir))RETURN
+idir=self%periodic%lfdir(face)
+IF(idir<0)THEN
+  amap=self%periodic%pmap(:,:,-idir)
+ELSE IF(idir>0)THEN
+  amap=periodic_map_inverse(self%periodic%pmap(:,:,idir))
+END IF
+END FUNCTION mesh_periodic_face_map
+!---------------------------------------------------------------------------------
+!> Find the periodic direction and side of a pair of periodic faces
+!!
+!! The centers of the two faces are compared using the periodic maps of each direction
+!! (`pmap`), which must already be set.
+!!
+!! @returns `-p` if `face` is on the lower boundary of direction `p` (the map from the lower
+!! to the upper boundary takes it to `partner`), `+p` if it is on the upper boundary, and
+!! 0 if no map matches the faces
+!---------------------------------------------------------------------------------
+FUNCTION mesh_periodic_match_face(self,face,partner) RESULT(idir)
+CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
+INTEGER(i4), INTENT(in) :: face !< Face index
+INTEGER(i4), INTENT(in) :: partner !< Index of the periodic partner of `face`
+INTEGER(i4) :: idir !< Periodic direction and side of `face`
+INTEGER(i4) :: i,p
+REAL(r8) :: cf(3),cp(3),err,err_min,hlen,amap(3,4)
+idir=0
+IF(.NOT.self%periodic%have_maps)RETURN
+cf=0.d0
+cp=0.d0
+DO i=1,self%face_np
+  cf=cf+self%r(:,self%lf(i,face))
+  cp=cp+self%r(:,self%lf(i,partner))
+END DO
+cf=cf/REAL(self%face_np,r8)
+cp=cp/REAL(self%face_np,r8)
+hlen=magnitude(self%r(:,self%lf(2,face))-self%r(:,self%lf(1,face)))
+err_min=HUGE(1.d0)
+DO p=1,self%periodic%nper
+  amap=self%periodic%pmap(:,:,p)
+  err=magnitude(MATMUL(amap(:,1:3),cf)+amap(:,4)-cp)
+  IF(err<err_min)THEN
+    err_min=err
+    idir=-p
+  END IF
+  amap=periodic_map_inverse(amap)
+  err=magnitude(MATMUL(amap(:,1:3),cf)+amap(:,4)-cp)
+  IF(err<err_min)THEN
+    err_min=err
+    idir=p
+  END IF
+END DO
+IF(err_min>1.d-3*hlen)idir=0
+END FUNCTION mesh_periodic_match_face
+!---------------------------------------------------------------------------------
+!> Map a point into the periodic domain
+!!
+!! For planar periodicity the coordinate along each periodic direction is shifted by a
+!! multiple of the period into the range between the lower and upper periodic planes.
+!! For revolved periodicity the point is rotated about the x-axis by a multiple of the
+!! wedge angle into the wedge. Points already in the domain are not changed.
+!!
+!! @returns Was the point changed?
+!---------------------------------------------------------------------------------
+FUNCTION mesh_periodic_wrap(self,pt,amap) RESULT(mapped)
+CLASS(oft_mesh), INTENT(in) :: self !< Mesh object
+REAL(r8), INTENT(inout) :: pt(3) !< Point to map [3]
+REAL(r8), INTENT(out) :: amap(3,4) !< Applied map \f$ [R|t] \f$ (identity if not changed)
+LOGICAL :: mapped !< Was the point changed?
+INTEGER(i4) :: p,k
+REAL(r8) :: d,theta,period,shift,nshift
+mapped=.FALSE.
+amap=periodic_map_identity()
+IF(.NOT.self%periodic%have_maps)RETURN
+IF(self%periodic%revolved)THEN
+  IF((pt(2)==0.d0).AND.(pt(3)==0.d0))RETURN ! On the axis
+  theta=self%periodic%prange(2,1)
+  d=ATAN2(pt(3),pt(2))-self%periodic%prange(1,1)
+  d=d-2.d0*pi*ANINT(d/(2.d0*pi))
+  nshift=REAL(FLOOR((d+theta)/(2.d0*theta)),r8)
+  IF(nshift/=0.d0)THEN
+    shift=-2.d0*theta*nshift
+    amap(2,2)=COS(shift); amap(2,3)=-SIN(shift)
+    amap(3,2)=SIN(shift); amap(3,3)=COS(shift)
+    pt=MATMUL(amap(:,1:3),pt)
+    mapped=.TRUE.
+  END IF
+ELSE
+  DO p=1,self%periodic%nper
+    k=self%periodic%paxis(p)
+    period=self%periodic%prange(2,p)-self%periodic%prange(1,p)
+    d=(pt(k)-self%periodic%prange(1,p))/period
+    IF(ABS(d)>1.d8)CYCLE ! Not a valid point
+    nshift=REAL(FLOOR(d),r8)
+    IF(nshift/=0.d0)THEN
+      shift=-nshift*period
+      pt(k)=pt(k)+shift
+      amap(k,4)=shift
+      mapped=.TRUE.
+    END IF
+  END DO
+END IF
+END FUNCTION mesh_periodic_wrap
+!---------------------------------------------------------------------------------
+!> Find physical point in mesh, continuing the search across periodic faces
+!!
+!! As \ref oft_mesh_type::mesh_findcell "mesh_findcell" with a guess cell, the search
+!! walks from cell to cell towards the point. When the walk would leave the mesh through a
+!! periodic face whose partner is on the local domain, the point is mapped across that face
+!! (see \ref oft_mesh_type::mesh_periodic_face_map "mesh_periodic_face_map") and the walk
+!! continues from the cell on the other side. Crossings of several periodic directions
+!! (edges and corners of the periodic domain) are handled by successive maps. If no guess is
+!! given, or the walk fails, the point is first mapped into the periodic domain with
+!! \ref oft_mesh_type::mesh_periodic_wrap "mesh_periodic_wrap" and located with
+!! \ref oft_mesh_type::mesh_findcell "mesh_findcell".
+!!
+!! On meshes without local periodic faces this is equivalent to
+!! \ref oft_mesh_type::mesh_findcell "mesh_findcell".
+!---------------------------------------------------------------------------------
+SUBROUTINE mesh_periodic_findcell(self,cell,pt,amap,mapped,fout)
+CLASS(oft_mesh), TARGET, INTENT(inout) :: self !< Mesh to search
+INTEGER(i4), INTENT(inout) :: cell !< Cell containing point on output, guess on input
+REAL(r8), INTENT(inout) :: pt(3) !< Coordinates to locate, mapped image of the point on output [3]
+REAL(r8), INTENT(out) :: amap(3,4) !< Map applied to the point \f$ [R|t] \f$ (identity if not mapped)
+LOGICAL, INTENT(out) :: mapped !< Was the point mapped?
+REAL(r8), OPTIONAL, INTENT(out) :: fout(4) !< Logical coordinates of point in cell (optional)
+INTEGER(i4) :: i,next,minf,face
+REAL(r8) :: f(4),fmap(3,4),wmap(3,4)
+REAL(r8), PARAMETER :: tol=1.d-10
+amap=periodic_map_identity()
+mapped=.FALSE.
+IF(.NOT.ASSOCIATED(self%periodic%lfp).OR.(SUM(pt**2)>1.d90))THEN
+  CALL mesh_findcell(self,cell,pt,fout)
+  RETURN
+END IF
+DEBUG_STACK_PUSH
+IF((cell<=0).OR.(cell>self%nc))THEN
+  mapped=mesh_periodic_wrap(self,pt,amap)
+  CALL mesh_findcell(self,cell,pt,fout)
+  DEBUG_STACK_POP
+  RETURN
+END IF
+next=cell
+DO i=1,self%nc
+  cell=next
+  CALL self%phys2log(cell,pt,f)
+  minf=self%in_cell(f,tol)
+  IF(minf==0)EXIT
+  next=self%lcc(minf,cell)
+  IF(next==0)THEN
+    face=ABS(self%lcf(minf,cell))
+    IF(self%periodic%lfp(face)<=0)EXIT ! Point off mesh (or on another domain) but closest to cell
+    !---Continue on the other side of the periodic face
+    fmap=mesh_periodic_face_map(self,face)
+    pt=MATMUL(fmap(:,1:3),pt)+fmap(:,4)
+    amap=periodic_map_compose(fmap,amap)
+    mapped=.TRUE.
+    next=self%lfc(1,self%periodic%lfp(face))
+  END IF
+END DO
+IF(i>self%nc)THEN ! Walk failed, search from the point mapped into the periodic domain
+  IF(mesh_periodic_wrap(self,pt,wmap))THEN
+    amap=periodic_map_compose(wmap,amap)
+    mapped=.TRUE.
+  END IF
+  cell=0
+  CALL mesh_findcell(self,cell,pt,f)
+END IF
+IF(mapped)mapped=.NOT.periodic_map_is_identity(amap)
+IF(PRESENT(fout))fout=f
+DEBUG_STACK_POP
+END SUBROUTINE mesh_periodic_findcell
 !------------------------------------------------------------------------------
 !> Estimate mesh area
 !------------------------------------------------------------------------------
@@ -1380,6 +1623,8 @@ IF(ASSOCIATED(self%base%lcpart))DEALLOCATE(self%base%lcpart)
 IF(ASSOCIATED(self%periodic%lp))DEALLOCATE(self%periodic%lp)
 IF(ASSOCIATED(self%periodic%le))DEALLOCATE(self%periodic%le)
 IF(ASSOCIATED(self%periodic%lf))DEALLOCATE(self%periodic%lf)
+IF(ASSOCIATED(self%periodic%lfp))DEALLOCATE(self%periodic%lfp)
+IF(ASSOCIATED(self%periodic%lfdir))DEALLOCATE(self%periodic%lfdir)
 !---
 IF(ASSOCIATED(self%ho_info%is_curved))DEALLOCATE(self%ho_info%is_curved)
 IF(ASSOCIATED(self%ho_info%lep))DEALLOCATE(self%ho_info%lep)
