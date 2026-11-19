@@ -149,6 +149,8 @@ contains
   procedure :: step => tracer_lsode_step
   !> Clean-up internal storage
   procedure :: delete => tracer_lsode_delete
+  !> Map the integrator state across a periodic boundary
+  procedure :: apply_map => tracer_lsode_apply_map
 end type oft_tracer_lsode
 !---------------------------------------------------------------------------------
 !> Tracer implementation using an embedded explicit Runge-Kutta method (Bogacki-Shampine 3(2))
@@ -1206,15 +1208,26 @@ CALL oft_abort("Recieve requested without MPI","tracer_euler_recv",__FILE__)
 end function tracer_euler_recv
 !------------------------------------------------------------------------------
 !> Advancing tracer by one step using EULER
+!!
+!! When the new point is past a periodic face it is mapped to the image point on the
+!! other side, and the derivatives are rotated accordingly (see
+!! \ref oft_mesh_type::mesh_periodic_findcell "mesh_periodic_findcell").
 !------------------------------------------------------------------------------
 subroutine tracer_euler_step(self)
 class(oft_tracer_euler), intent(inout) :: self !< Tracer object
 real(r8), ALLOCATABLE, DIMENSION(:) :: ydot
-real(r8) :: B(3),goptmp(3,4),v,fmin,fmax
+real(r8) :: B(3),goptmp(3,4),v,fmin,fmax,pt(3),amap(3,4)
+logical :: mapped
 DEBUG_STACK_PUSH
 ALLOCATE(ydot(self%neq))
+self%mapped=.FALSE.
 !---Prediction
-call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
+pt=self%y(1:3)
+call mesh_periodic_findcell(self%ml_mesh%mesh,self%cell,pt,amap,mapped,self%f)
+IF(mapped)THEN
+  CALL self%apply_map(amap)
+  CALL tracer_record_map(self,amap)
+END IF
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
 IF(self%cell==0)THEN
@@ -1232,8 +1245,14 @@ END IF
 IF(self%nsteps==0)self%dt=1.d-3/SQRT(SUM(self%dy**2))
 !---Step
 self%y=self%y+self%dt*self%dy
-!---Compute second derivative for error approximation
-call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
+!---Compute second derivative for error approximation, mapping the new point (and the
+!---derivatives) across a periodic boundary if one was crossed
+pt=self%y(1:3)
+call mesh_periodic_findcell(self%ml_mesh%mesh,self%cell,pt,amap,mapped,self%f)
+IF(mapped)THEN
+  CALL self%apply_map(amap)
+  CALL tracer_record_map(self,amap)
+END IF
 fmin=MINVAL(self%f); fmax=MAXVAL(self%f)
 IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
 IF(self%cell==0)THEN
@@ -1475,11 +1494,21 @@ CALL oft_abort("Receive requested without MPI","tracer_lsode_recv",__FILE__)
 end function tracer_lsode_recv
 !------------------------------------------------------------------------------
 !> Advancing tracer by one step using LSODE
+!!
+!! LSODE integrates the trajectory in continuous coordinates, so its evaluations may lie
+!! past a periodic boundary (see \ref tracing::tracer_lsode_eval_b "tracer_lsode_eval_B").
+!! When the end of a step is past a periodic face the integrator state, including the
+!! Nordsieck history, is mapped to the other side (see
+!! \ref tracing::tracer_lsode_apply_map "tracer_lsode_apply_map") and the integration
+!! continues without a restart.
 !------------------------------------------------------------------------------
 subroutine tracer_lsode_step(self)
 class(oft_tracer_lsode), intent(inout) :: self !< Tracer object
-real(r8) :: fmin,fmax
+real(r8) :: fmin,fmax,pt(3),amap(3,4),ident(3,4),rsav(218)
+integer(i4) :: isav(37)
+logical :: mapped
 DEBUG_STACK_PUSH
+self%mapped=.FALSE.
 self%dyp=self%dy
 call dlsode(tracer_lsode_eval_B,self%neq,self%y,self%t,self%tout,1,self%tol,self%tol,self%itask, &
   self%istate,0,self%rwork,self%lrw,self%iwork,self%liw,tracer_lsode_eval_B,self%mf)
@@ -1489,7 +1518,20 @@ IF(self%istate<0.OR.ANY(self%y(1:3)>1.d20))THEN
   self%estatus=TRACER_ERROR_FAIL
 END IF
 IF(self%cell/=0)THEN ! Check for exit mesh
-  call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
+  !---Map the state across a periodic boundary if the new point is past one
+  pt=self%y(1:3)
+  call mesh_periodic_findcell(self%ml_mesh%mesh,self%cell,pt,amap,mapped,self%f)
+  IF(mapped)THEN
+    CALL self%apply_map(amap)
+    CALL tracer_record_map(self,amap)
+    !---Force a Jacobian update (IPUP=MITER in /DLS001/) as the stored one is in the old frame
+    ident=periodic_map_identity()
+    IF((self%mf/=10).AND.ANY(amap(:,1:3)/=ident(:,1:3)))THEN
+      CALL dsrcom(rsav,isav,1)
+      isav(8)=isav(27)
+      CALL dsrcom(rsav,isav,2)
+    END IF
+  END IF
   fmin=minval(self%f)
   fmax=maxval(self%f)
   IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
@@ -1499,22 +1541,28 @@ end subroutine tracer_lsode_step
 !------------------------------------------------------------------------------
 !> Field evaluation callback used by `dlsode`
 !!
+!! Points past a periodic face are evaluated at their image on the other side, and the
+!! field is rotated back to the frame of the point.
+!!
 !! See \ref tracing::tracer_lsode_step "tracer_lsode_step"
 !------------------------------------------------------------------------------
 subroutine tracer_lsode_eval_B(neq,t,y,ydot)
 integer, intent(in) :: neq
 real(r8), intent(in) :: t,y(neq)
 real(r8), intent(out) :: ydot(neq)
-real(r8) :: goptmp(3,4),v,B(3)
+real(r8) :: goptmp(3,4),v,B(3),pt(3),amap(3,4)
+logical :: mapped
 DEBUG_STACK_PUSH
 ydot=active_tracer%dy
-call mesh_findcell(active_tracer%ml_mesh%mesh,active_tracer%cell,y(1:3),active_tracer%f)
+pt=y(1:3)
+call mesh_periodic_findcell(active_tracer%ml_mesh%mesh,active_tracer%cell,pt,amap,mapped,active_tracer%f)
 IF(active_tracer%cell==0)THEN
   DEBUG_STACK_POP
   RETURN
 END IF
 CALL active_tracer%ml_mesh%mesh%jacobian(active_tracer%cell,active_tracer%f,goptmp,v)
 CALL active_tracer%B%interp(active_tracer%cell,active_tracer%f,goptmp,B)
+IF(mapped)B=MATMUL(TRANSPOSE(amap(:,1:3)),B) ! Rotate field back to the frame of the point
 IF(ASSOCIATED(active_tracer%ydot))THEN
   CALL active_tracer%ydot(t,y,B,neq,ydot)
 ELSE
@@ -1540,6 +1588,44 @@ self%comm_load=.FALSE.
 NULLIFY(self%ydot)
 DEBUG_STACK_POP
 end subroutine tracer_lsode_delete
+!------------------------------------------------------------------------------
+!> Map the LSODE tracer state across a periodic boundary
+!!
+!! In addition to the position and derivatives (see \ref tracing::tracer_apply_map
+!! "tracer_apply_map"), the Nordsieck history array of LSODE is mapped: the first column
+!! (the solution) as a point, and the scaled derivatives in the other columns and the
+!! accumulated corrections as vectors. This keeps the order and step size of the
+!! integrator, which a restart would not. As `itask=2` the solution returned by LSODE is the
+!! first column of the history, so both stay consistent. The error weights are recomputed by
+!! LSODE at the start of every step. The work array layout follows the defaults for the
+!! method flags used here (`mf` = 10 or 22).
+!------------------------------------------------------------------------------
+subroutine tracer_lsode_apply_map(self,amap)
+class(oft_tracer_lsode), intent(inout) :: self !< Tracer object
+real(r8), intent(in) :: amap(3,4) !< Map \f$ [R|t] \f$
+integer(i4), parameter :: lyh=21
+integer(i4) :: j,i0,maxord,lenwm
+IF(.NOT.ASSOCIATED(self%y))RETURN
+CALL tracer_map_state(amap,self%y,.FALSE.)
+CALL tracer_map_state(amap,self%dy,.TRUE.)
+CALL tracer_map_state(amap,self%dyp,.TRUE.)
+IF(self%istate<=1)RETURN ! Integration not started yet, no history
+IF(self%mf==10)THEN
+  maxord=12
+  lenwm=0
+ELSE
+  maxord=5
+  lenwm=self%neq**2+2
+END IF
+!---Nordsieck history array YH(neq,maxord+1)
+DO j=1,maxord+1
+  i0=lyh+(j-1)*self%neq
+  CALL tracer_map_state(amap,self%rwork(i0:i0+self%neq-1),(j>1))
+END DO
+!---Accumulated corrections (ACOR), after the matrix (WM), error weight (EWT) and work (SAVF) arrays
+i0=lyh+(maxord+1)*self%neq+lenwm+2*self%neq
+CALL tracer_map_state(amap,self%rwork(i0:i0+self%neq-1),.TRUE.)
+end subroutine tracer_lsode_apply_map
 !---------------------------------------------------------------------------------
 !> Cast a tracer object to a oft_tracer_rk
 !!
