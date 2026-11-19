@@ -10,13 +10,24 @@
 !! The default tracing implementation uses LSODE as the ode solver for advancing
 !! field lines.
 !!
+!! On periodic meshes (planar or revolved periodicity, see \ref oft_mesh_type::mesh_per
+!! "mesh_per") field lines are continued across the periodic boundaries. When a tracer crosses
+!! a periodic boundary its state is mapped to the other side: the position by the periodic map
+!! \f$ x' = R x + t \f$ and derivatives by the rotation \f$ R \f$. Additional state
+!! components (`neq>3`) are assumed to be invariant under the map. The map applied during the
+!! last step is stored in the tracer (`mapped`, `pmap`) so that callers can map earlier points,
+!! and positions written by \ref tracing::tracing_line "tracing_line" are always in the
+!! periodic domain. Crossings to a periodic partner on the local domain do not count as domain
+!! transfers (`maxtrans`), while crossings to another domain do.
+!!
 !! @authors Chris Hansen
 !! @date Feburary 2012
 !! @ingroup doxy_oft_physics
 !---------------------------------------------------------------------------------
 module tracing
 use oft_base
-use oft_mesh_type, only: oft_mesh, mesh_findcell, cell_is_curved
+use oft_mesh_type, only: oft_mesh, mesh_findcell, cell_is_curved, mesh_periodic_findcell, &
+  mesh_periodic_wrap, periodic_map_identity, periodic_map_compose
 USE oft_hexmesh_type, ONLY: hex_face_dist
 use multigrid, only: multigrid_mesh
 USE tracing_2d, ONLY: bs32_c2, bs32_c3, bs32_b, bs32_e, rk_step_factor, rk_probe_step, rk_initial_step
@@ -51,6 +62,9 @@ type, abstract :: oft_tracer
   real(r8), pointer, dimension(:) :: dy !< Change from previous trace point
   real(r8), pointer, dimension(:) :: dyp !< Previous derivative
   real(r8) :: f(4) = 0.d0 !< Logical cell position of last/current trace point
+  logical :: mapped = .FALSE. !< Was the trace mapped across a periodic boundary during the last step?
+  real(r8) :: pmap(3,4) = 0.d0 !< Affine map \f$ [R|t] \f$ applied to the trace during the last step, if `mapped`
+  !! (\f$ x_{new} = R x_{old} + t \f$, positions before the step can be mapped to the frame of the new point)
   type(multigrid_mesh), pointer :: ml_mesh => NULL() !< Muli-grid mesh
   class(fem_interp), pointer :: B => NULL() !< Interpolation operator for trace field
   procedure(tracer_ydot), pointer, nopass :: ydot => NULL() !< General ODE function
@@ -69,6 +83,8 @@ contains
   procedure(tracer_step), deferred :: step
   !> Clean-up internal storage
   procedure(tracer_step), deferred :: delete
+  !> Map the integrator state across a periodic boundary
+  procedure :: apply_map => tracer_apply_map
 end type oft_tracer
 !---------------------------------------------------------------------------------
 !> Tracer pointer
@@ -346,6 +362,79 @@ SELECT CASE(status_flag)
 END SELECT
 end function termination_reason
 !------------------------------------------------------------------------------
+!> Apply a periodic map to the position part of a tracer state vector
+!!
+!! The position components of the state are gathered, mapped, and scattered back. Points
+!! are mapped by the full affine map \f$ x' = R x + t \f$ and vectors (eg. derivatives of the
+!! state) are only rotated. Other components of the state are assumed to be invariant under
+!! the map. This is the only place where the location of the position components in the
+!! state (currently the first three) is assumed.
+!------------------------------------------------------------------------------
+subroutine tracer_map_state(amap,v,vector,inverse)
+real(r8), intent(in) :: amap(3,4) !< Affine map \f$ [R|t] \f$
+real(r8), intent(inout) :: v(:) !< State vector or derivative [neq]
+logical, intent(in) :: vector !< Is `v` a vector (rotation only)?
+logical, optional, intent(in) :: inverse !< Apply the inverse map (optional, default: .FALSE.)
+real(r8) :: x(3)
+logical :: inv
+inv=.FALSE.
+IF(PRESENT(inverse))inv=inverse
+x=v(1:3) ! Gather position components
+IF(inv)THEN
+  IF(.NOT.vector)x=x-amap(:,4)
+  x=MATMUL(TRANSPOSE(amap(:,1:3)),x)
+ELSE
+  x=MATMUL(amap(:,1:3),x)
+  IF(.NOT.vector)x=x+amap(:,4)
+END IF
+v(1:3)=x ! Scatter position components
+end subroutine tracer_map_state
+!------------------------------------------------------------------------------
+!> Record a periodic map applied to the trace during the current step
+!!
+!! Maps applied during the same step are combined (see `oft_tracer%pmap`)
+!------------------------------------------------------------------------------
+subroutine tracer_record_map(self,amap)
+class(oft_tracer), intent(inout) :: self !< Tracer object
+real(r8), intent(in) :: amap(3,4) !< Applied map \f$ [R|t] \f$
+IF(self%mapped)THEN
+  self%pmap=periodic_map_compose(amap,self%pmap)
+ELSE
+  self%pmap=amap
+  self%mapped=.TRUE.
+END IF
+end subroutine tracer_record_map
+!------------------------------------------------------------------------------
+!> Map the tracer state across a periodic boundary
+!!
+!! The position (`y`) is mapped and the derivatives (`dy`, `dyp`) are rotated, see
+!! \ref tracing::tracer_map_state "tracer_map_state". Integrators with additional history
+!! override this method.
+!------------------------------------------------------------------------------
+subroutine tracer_apply_map(self,amap)
+class(oft_tracer), intent(inout) :: self !< Tracer object
+real(r8), intent(in) :: amap(3,4) !< Map \f$ [R|t] \f$
+IF(.NOT.ASSOCIATED(self%y))RETURN
+CALL tracer_map_state(amap,self%y,.FALSE.)
+CALL tracer_map_state(amap,self%dy,.TRUE.)
+CALL tracer_map_state(amap,self%dyp,.TRUE.)
+end subroutine tracer_apply_map
+!------------------------------------------------------------------------------
+!> Map the tracer position into the periodic domain (if any) before locating its domain
+!!
+!! The tracers map their state across periodic boundaries as they are crossed, so this is
+!! only a safety net for points that are slightly outside of the periodic domain. The
+!! mapping is deterministic, so it gives the same result on all processes holding a copy of
+!! the tracer.
+!------------------------------------------------------------------------------
+subroutine tracer_periodic_wrap(self)
+class(oft_tracer), intent(inout) :: self !< Tracer object
+real(r8) :: pt(3),amap(3,4)
+IF(self%ml_mesh%mesh%periodic%nper==0)RETURN
+pt=self%y(1:3)
+IF(mesh_periodic_wrap(self%ml_mesh%mesh,pt,amap))CALL self%apply_map(amap)
+end subroutine tracer_periodic_wrap
+!------------------------------------------------------------------------------
 !> Advance tracer from a single point and save field line to specified file
 !------------------------------------------------------------------------------
 subroutine tracing_line(tracer,pt,filename)
@@ -379,6 +468,7 @@ send_reqi=MPI_REQUEST_NULL
 !---
 do while(active_tracer%ntrans<active_tracer%maxtrans)
     cell=0
+    CALL tracer_periodic_wrap(active_tracer)
     IF(active_tracer%ml_mesh%nbase<active_tracer%ml_mesh%mgdim)THEN
       call mesh_findcell(active_tracer%ml_mesh%meshes(active_tracer%ml_mesh%nbase),cell,active_tracer%y(1:3),f)
     ELSE
@@ -658,6 +748,7 @@ DO
         CYCLE
       END IF
       !---Check if phony transfer
+      CALL tracer_periodic_wrap(loc_tracer)
       IF(loc_tracer%estatus==0)THEN
         cell=0
         IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
@@ -725,6 +816,7 @@ DO
         IF(loc_tracer%estatus/=0)loc_tracer%status=loc_tracer%estatus
         if(loc_tracer%status<0)cycle
         cell=0
+        CALL tracer_periodic_wrap(loc_tracer)
         IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
           call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
           tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
@@ -779,6 +871,7 @@ DO
         if(loc_tracer%status<0)CYCLE
         !---
         cell=0
+        CALL tracer_periodic_wrap(loc_tracer)
         IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
           call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
           tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
@@ -816,6 +909,7 @@ DO
       !write(*,*)'Initializing Point ',oft_env%rank,i
       !---
       cell=0
+      CALL tracer_periodic_wrap(loc_tracer)
       IF(mg_mesh%nbase<mg_mesh%mgdim)THEN
         call mesh_findcell(mg_mesh%meshes(mg_mesh%nbase),cell,loc_tracer%y,f)
         tol_ratio=mg_mesh%mesh%hrms/mg_mesh%meshes(mg_mesh%nbase)%hrms*.1d0
@@ -904,6 +998,12 @@ do
     yp_plane=loc_tracer%y(icoord)-xcross
     do while(loc_tracer%nsteps<loc_tracer%maxsteps.AND.loc_tracer%nsteps>=0)
       call loc_tracer%step
+      !---Map previous point to the frame of the new point if a periodic boundary was crossed,
+      !---so that the jump across the boundary is not counted as a crossing
+      IF(loc_tracer%mapped)THEN
+        CALL tracer_map_state(loc_tracer%pmap,yp,.FALSE.)
+        yp_plane=yp(icoord)-xcross
+      END IF
       y_plane=loc_tracer%y(icoord)-xcross
       if(yp_plane<=0.d0.AND.y_plane>0.d0)then
         !$omp critical
@@ -1532,11 +1632,13 @@ END SUBROUTINE tracer_rk_faces
 !! linearly, \f$ \lambda_i(t) = \lambda_i + t \nabla \lambda_i \cdot \dot{x} \f$, and the
 !! exit is where the first one reaches \f$ -\delta \f$, so that the point is just past the
 !! face. For faces shared with another domain (`proc_face`) \f$ \delta \f$ is replaced by
-!! `pmargin`. A point that is already past any other face with no neighboring cell (boundary of
-!! the mesh, or periodic face) is instead allowed to continue by \f$ 1.5 \f$ `offmesh_tol` per step,
-!! so that it is clearly off the mesh and the trace leaves the domain promptly.
+!! `pmargin`. Periodic faces whose partner is on the local domain (`per_face`) are treated as
+!! interior faces, as the trace continues on the other side. A point that is already past any
+!! other face with no neighboring cell (boundary of the mesh) is instead allowed to continue by
+!! \f$ 1.5 \f$ `offmesh_tol` per step, so that it is clearly off the mesh and the trace leaves
+!! the domain promptly.
 !------------------------------------------------------------------------------
-FUNCTION tracer_rk_texit(mesh,cell,f,gop,dx,margin,pmargin,proc_face) RESULT(texit)
+FUNCTION tracer_rk_texit(mesh,cell,f,gop,dx,margin,pmargin,proc_face,per_face) RESULT(texit)
 CLASS(oft_mesh), INTENT(in) :: mesh !< Mesh containing cell
 INTEGER(i4), INTENT(in) :: cell !< Current cell
 REAL(r8), INTENT(in) :: f(4) !< Logical position in cell
@@ -1545,6 +1647,7 @@ REAL(r8), INTENT(in) :: dx(3) !< Velocity in physical coordinates
 REAL(r8), INTENT(in) :: margin !< Distance past the face \f$ \delta \f$ in logical coordinates
 REAL(r8), INTENT(in) :: pmargin !< Distance past faces shared with other domains in logical coordinates
 LOGICAL, INTENT(in) :: proc_face(:) !< Is each face shared with another domain? [nf]
+LOGICAL, INTENT(in) :: per_face(:) !< Is each face a periodic face with a partner on the local domain? [nf]
 REAL(r8) :: texit !< Estimated exit time (`HUGE` if not leaving)
 INTEGER(i4) :: i,nf
 REAL(r8) :: rate,dist,fb(6),gb(3,6)
@@ -1557,7 +1660,7 @@ DO i=1,nf
   dist=fb(i)
   IF(proc_face(i))THEN
     dist=dist+pmargin-margin
-  ELSE IF(mesh%lcc(i,cell)==0)THEN ! Mesh boundary or periodic face
+  ELSE IF((mesh%lcc(i,cell)==0).AND.(.NOT.per_face(i)))THEN ! Mesh boundary
     IF(dist<=0.d0)dist=1.5d0*offmesh_tol
   END IF
   texit=MIN(texit,(MAX(dist,0.d0)+margin)/(-rate))
@@ -1771,21 +1874,33 @@ END FUNCTION tracer_rk_recv
 !! logical coordinates of the base mesh, which is used to find the domain containing the new
 !! point. The tracer then stops (`cell=0`) so that it is transferred to that domain.
 !!
+!! Periodic faces whose partner is on the local domain are crossed like interior faces: the end
+!! point of the step is mapped to its image on the other side of the face (see
+!! \ref oft_mesh_type::mesh_periodic_findcell "mesh_periodic_findcell"), where the field is
+!! evaluated, and the jump in the right-hand side is estimated after rotating it back to the
+!! frame of the starting point. On acceptance the state continues in the new frame (position
+!! mapped, derivatives rotated) and the map is stored in the tracer (`mapped`, `pmap`) so that
+!! callers can map earlier points. Periodic faces whose partner is on another domain are
+!! crossed as other faces shared with that domain, and the new point is mapped into the
+!! periodic domain (see \ref oft_mesh_type::mesh_periodic_wrap "mesh_periodic_wrap") before
+!! the transfer, so that the domain containing it is found.
+!!
 !! A step that is rejected by the error test is retried with a smaller step size. If no
 !! acceptable step can be found the tracer is stopped with an error.
 !------------------------------------------------------------------------------
 SUBROUTINE tracer_rk_step(self)
 CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
-INTEGER(i4) :: i,nf,cell0,cellnew,nfail
+INTEGER(i4) :: i,nf,cell0,cellnew,nfail,face
 REAL(r8) :: h,err,errover,facmax,texit,margin,pmargin,fmargin,fover,fproc,tover,tcross,fmin,fmax
-REAL(r8) :: f0(4),gop0(3,4),fnew(4),fb0(6),fb1(6),gb(3,6)
-REAL(r8) :: y0(self%neq),dy0(self%neq),dynew(self%neq),ynew(self%neq),ytmp(self%neq),sc(self%neq)
-LOGICAL :: clipped,leaving
-LOGICAL :: proc_face(6)
+REAL(r8) :: f0(4),gop0(3,4),fnew(4),fb0(6),fb1(6),gb(3,6),pt(3),amap(3,4)
+REAL(r8) :: y0(self%neq),dy0(self%neq),dynew(self%neq),ynew(self%neq),ymap(self%neq),ytmp(self%neq),sc(self%neq)
+LOGICAL :: clipped,leaving,mapped,have_dynew
+LOGICAL :: proc_face(6),per_face(6)
 CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 mesh=>self%ml_mesh%mesh
 self%nsteps=self%nsteps+1
+self%mapped=.FALSE.
 IF(self%cell==0)THEN
   self%estatus=TRACER_ERROR_FAIL
   DEBUG_STACK_POP
@@ -1809,17 +1924,20 @@ pmargin=margin
 IF(self%ml_mesh%nbase<self%ml_mesh%mgdim)pmargin=MAX(margin,rk_margin_proc)* &
   MAX(1.d0,self%ml_mesh%meshes(self%ml_mesh%nbase)%hrms/mesh%hrms)
 CALL tracer_rk_faces(mesh,f0,gop0,nf,fb0,gb)
-!---Faces shared with another domain. Periodic faces are also not on the global boundary, and are
-!---not distinguished from shared faces here, so on periodic meshes all faces without a neighbor
-!---are treated as the mesh boundary (the trace stops at periodic faces and shared faces are
-!---crossed as when leaving the mesh).
+!---Faces without a neighboring cell that are not on the global boundary are either periodic faces
+!---whose partner is on the local domain, which are crossed like interior faces by continuing on the
+!---other side, or faces shared with another domain (including periodic faces whose partner is on
+!---another domain, which are not distinguished from other shared faces)
 proc_face=.FALSE.
-IF(mesh%periodic%nper==0)THEN
-  DO i=1,nf
-    IF(mesh%lcc(i,cell0)==0)proc_face(i)=(.NOT.mesh%global%gbf(ABS(mesh%lcf(i,cell0))))
-  END DO
-END IF
-texit=tracer_rk_texit(mesh,cell0,f0,gop0,dy0(1:3),margin,pmargin,proc_face(1:nf))
+per_face=.FALSE.
+DO i=1,nf
+  IF(mesh%lcc(i,cell0)/=0)CYCLE
+  face=ABS(mesh%lcf(i,cell0))
+  IF(mesh%global%gbf(face))CYCLE
+  IF(ASSOCIATED(mesh%periodic%lfp))per_face(i)=(mesh%periodic%lfp(face)>0)
+  proc_face(i)=(.NOT.per_face(i))
+END DO
+texit=tracer_rk_texit(mesh,cell0,f0,gop0,dy0(1:3),margin,pmargin,proc_face(1:nf),per_face(1:nf))
 DO
   !---End the step just past the exit of the current cell
   h=MIN(self%h,texit)
@@ -1842,6 +1960,8 @@ DO
     fover=0.d0
     fproc=0.d0
     cellnew=cell0
+    mapped=.FALSE.
+    have_dynew=.FALSE.
     DO i=1,nf
       IF((fb1(i)>=0.d0).OR.(fb0(i)<=fb1(i)))CYCLE
       IF((-fb1(i)>fover).AND.(mesh%lcc(i,cell0)/=0))cellnew=mesh%lcc(i,cell0)
@@ -1860,15 +1980,23 @@ DO
     IF(leaving)THEN
       IF((fproc<=2.d0).OR.(tcross>=h))EXIT
     ELSE
-      !---Locate the new point (starting from the neighbor across the face crossed furthest)
-      CALL mesh_findcell(mesh,cellnew,ynew(1:3),fnew)
-      IF((cellnew==cell0).OR.(cellnew==0))EXIT
+      !---Locate the new point (starting from the neighbor across the face crossed furthest). Past a
+      !---periodic face the point is mapped to its image on the other side (ymap)
+      ymap=ynew
+      pt=ynew(1:3)
+      CALL mesh_periodic_findcell(mesh,cellnew,pt,amap,mapped,fnew)
+      IF(mapped)CALL tracer_map_state(amap,ymap,.FALSE.)
+      IF(((cellnew==cell0).AND.(.NOT.mapped)).OR.(cellnew==0))EXIT
       IF(mesh%in_cell(fnew,margin)/=0)EXIT ! Off mesh
       !---Error from integrating the part of the step past the faces of the starting cell
-      !---with its field, estimated from the jump in the field at the new point
+      !---with its field, estimated from the jump in the field at the new point (compared in
+      !---the frame of the starting point)
       self%cell=cellnew; self%f=fnew
-      CALL tracer_rk_rhs(self,self%t+h,ynew,dynew)
-      errover=tover*SQRT(SUM(((dynew-self%k(:,4))/sc)**2)/REAL(self%neq,r8))
+      CALL tracer_rk_rhs(self,self%t+h,ymap,dynew)
+      have_dynew=.TRUE.
+      ytmp=dynew
+      IF(mapped)CALL tracer_map_state(amap,ytmp,.TRUE.,inverse=.TRUE.)
+      errover=tover*SQRT(SUM(((ytmp-self%k(:,4))/sc)**2)/REAL(self%neq,r8))
       IF((errover<=1.d0).OR.(fover<=2.d0*margin).OR.(tcross>=h))EXIT
     END IF
     !---Retry with exit time estimated from the start and end of the step
@@ -1894,10 +2022,30 @@ self%t=self%t+h
 IF(leaving)THEN ! Stop to transfer the tracer to the domain containing the new point
   self%dy=self%k(:,4)
   self%cell=0
-ELSE IF(cellnew==cell0)THEN ! Cell, logical position and gradients are already at the new point
-  self%dy=self%k(:,4)
+  !---Map the point into the periodic domain, as the face may be a periodic face whose partner
+  !---is on another domain, so that the domain containing the new point is found
+  IF(mesh%periodic%nper>0)THEN
+    pt=self%y(1:3)
+    IF(mesh_periodic_wrap(mesh,pt,amap))THEN
+      CALL self%apply_map(amap)
+      CALL tracer_record_map(self,amap)
+    END IF
+  END IF
 ELSE IF(cellnew==0)THEN
   self%cell=0
+ELSE IF(mapped)THEN ! Continue on the other side of a periodic face, in the frame of the new point
+  self%y=ymap
+  IF(have_dynew)THEN ! Already evaluated in the new cell
+    self%dy=dynew
+  ELSE ! New point is off the mesh, use field from the closest cell
+    self%cell=cellnew
+    self%f=fnew
+    CALL tracer_rk_rhs(self,self%t,self%y,self%dy)
+  END IF
+  CALL tracer_map_state(amap,self%dyp,.TRUE.)
+  CALL tracer_record_map(self,amap)
+ELSE IF(cellnew==cell0)THEN ! Cell, logical position and gradients are already at the new point
+  self%dy=self%k(:,4)
 ELSE IF(self%cell==cellnew)THEN ! Already evaluated in the new cell
   self%dy=dynew
 ELSE ! New point is off the mesh, use field from the closest cell
