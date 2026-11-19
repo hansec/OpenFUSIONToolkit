@@ -1,0 +1,20 @@
+## Nonzero regressor pattern of current transforms (face 4 = (1,2,3), all states)
+H1 k=4 face: ['f4(3)', 'int(1)']
+H1 k=5 face: ['f4(6)', 'int(4)']
+HCurl p=2 face (regressors HC + grad H1_3): ['f4(2)', 'gf4(1)'], resid 2.0e-15
+HCurl p=3 face (regressors HC + grad H1_4): ['f4(5)', 'gf4(3)', 'gint(1)', 'int(3)'], resid 1.7e-15
+HCurl p=4 face (regressors HC + grad H1_5): ['f4(9)', 'gf4(6)', 'gint(4)', 'int(11)'], resid 6.5e-15
+
+## Sort-by-global-index + parity fix: distinct (edge state, face state) patterns
+  edge states (1, 1, 1, 1, 2, 1) face states (1, 5, 1, 1) : 12 of 24 global orderings
+  edge states (1, 1, 2, 1, 2, 1) face states (6, 2, 1, 1) : 12 of 24 global orderings
+
+## S4 invariance of the interior blocks (needed by a per-cell "virtual sort")
+  h1 order 4 interior (1 DOFs): max residual over 24 relabelings: own block 5.8e-16, whole cell 3.9e-15
+  h1 order 5 interior (4 DOFs): max residual over 24 relabelings: own block 6.3e-16, whole cell 2.7e-15
+  hc order 3 interior (3 DOFs): max residual over 24 relabelings: own block 7.7e-02, whole cell 7.7e-02
+  hc order 4 interior (11 DOFs): max residual over 24 relabelings: own block 7.7e-02, whole cell 8.3e-02
+
+## H(Curl) interior relabelings fitted with H(Curl) + grad H^1_{p+1} (composite space)
+  HCurl p=3 interior: max residual over 24 relabelings 4.1e-15
+  HCurl p=4 interior: max residual over 24 relabelings 1.4e-14
