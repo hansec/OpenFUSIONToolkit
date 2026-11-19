@@ -492,6 +492,71 @@ marked (u) are unverified.
   Expected gains are constant factors, most likely at p=4 only. They are unverified; the references are from
   memory and were not checked in the survey.
 
+### 5.2 Context for future exploration: hex conditioning
+
+> **Scope note.** Background only, like 5.1. It is **not** a recommendation for the current qcache / xMHD
+> changes. The numbers are local (single-element) measurements, not solver runs.
+
+`basis_study/hex_conditioning.py` transcribes OFT's hex H^1 and H(Curl) evaluators in their canonical
+orientation (`oft_h1_eval` / `oft_hcurl_eval` hex branches, `lagrange_poly.F90`, `hexmesh_type.F90`). Output is
+in `results_hex.txt`.
+- Measure: the Jacobi-scaled eigenvalue ratio on the unit cube, zero modes removed.
+- "Top level" means the block of the newest hierarchical level. That is what a Jacobi smoother sees in OFT's
+  identity-injection p-multigrid; the vertex/bubble coupling is handled by the coarse levels.
+- Sanity check: on hexes, H(Curl) + grad H^1 is also a direct sum, rank 31/91/205/391 = count for p=1-4.
+
+**H^1, mass / stiffness** (top level in parentheses):
+
+| order | OFT `J^(1,1)` (current) | old `J^(0,0)` (commented out in `lagrange_poly.F90`) | nodal GLL Q_k (non-hierarchical) |
+|---|---|---|---|
+| 3 | 1.2e4 / 529 (754 / 160) | same | 12.7 / 12.3 |
+| 4 | 3.2e5 / 4.7e3 (5.6e3 / 903) | 1.6e6 / 2.2e4 (2.7e4 / 1.7e3) | 11.4 / 29.1 |
+| 5 | 3.2e5 / 4.8e3 (4.7e3 / 1.0e3) | 1.6e6 / 2.2e4 (1.4e4 / 1.5e3) | 10.7 / 54.2 |
+
+- OFT's current hex H^1 basis is exactly the integrated-Legendre (Lobatto) tensor basis:
+  `x(1−x)J^(1,1)_(k−1)(2x−1)`. That is the standard hierarchical choice. The earlier switch from `J^(0,0)` made
+  it about 5x better at orders 4-5.
+- Orthogonalizing levels within each entity gains only 1.1-1.4x. Tensor-product hierarchical bases are limited by
+  the 1-D vertex/bubble mass coupling, which is cubed in 3-D.
+- A nodal Gauss-Lobatto basis is 10^2-10^4x better locally. But it is not hierarchical (p-prolongation would
+  need interpolation, as Lagrange does), and its vertex functions are not trilinear. The composite relies on
+  grad(vertex H^1) ⊂ Whitney (`hcurl_grad_getmop`, `hcurl_grad_grad`, xMHD `b2_bc`), so adopting it would need a
+  hybrid basis: trilinear vertices plus nodal-type higher modes. Its conditioning was not measured.
+
+**H(Curl) with grad H^1** (HC mass / curl-curl / combined HC+gradH1 mass; top-level HC mass / curl-curl):
+
+| p | OFT | level-orth | level + same-entity grad orth |
+|---|---|---|---|
+| 2 | 527 / 62 / 1.2e3; top 54 / 43 | same | 527 / 62 / 1.0e3; top 76 / 43 |
+| 3 | 527 / 81 / 7.0e3; top 47 / 56 | same | 527 / 81 / 6.2e3; top 107 / 56 |
+| 4 | 4.7e3 / 255 / 2.0e4; top 165 / 142 | 3.7e3 / 232 / 1.8e4; top 171 / 145 | 3.7e3 / 233 / 7.4e3; top 363 / 153 |
+
+- The orthogonalized variants span the same spaces and keep the hierarchy, the signed-permutation structure and
+  the gradient-free direct sum.
+- They improve OFT's hex H(Curl) by at most ~1.25x, or 2.7x for the combined mass at p=4, and they make the
+  top-level mass block worse. So there is little headroom within OFT's spaces. OFT's hex H(Curl) already looks
+  well chosen; its structure resembles SZ hex functions, though this was not checked against a paper.
+- Larger gains would need a non-hierarchical nodal Nédélec basis, as in MFEM. That loses the gradient split
+  (curl-curl would need Hiptmair/AMS-type smoothers) and is not recommended.
+- Overall: no conditioning-driven basis change is suggested for hexes.
+
+### 5.3 Context for future exploration: sum factorization on hexes
+
+> **Scope note.** Context only. **Do not implement this without first asking the user.** It is not part of the
+> current qcache / xMHD changes.
+
+- Phase 0 found basis evaluation is about 63% of the hex residual time. Phase 2's tables already speed hexes up a
+  lot, but REFERENCE tables are 22 MB at p=3 (512 qp per cell), and FULL mode is 4.7 MB per cell.
+- OFT's hex bases are tensor products, or short sums of them: the H(Curl) "form 0" functions are two-term sums.
+  Orientation is signed permutations (verified here through p=4).
+- So they could use sum factorization (the libCEED / MFEM partial-assembly / deal.II matrix-free approach):
+  - apply 1-D basis tables dimension by dimension;
+  - store only 1-D tables, O(p·q) instead of O(p³q³);
+  - evaluation cost O(p⁴) instead of O(p⁶) per cell;
+  - well suited to GPUs.
+- It is a kernel change, not a basis change. It would be a new cell-batched hex path next to the qcache tables.
+  Effort and benefit have not been estimated.
+
 ## 6. Ranked recommendations
 
 **1. Opt-in symmetric hierarchical face families** (sym-proj for H(Curl) p ≥ 2 and H^1 order ≥ 4).
@@ -555,6 +620,7 @@ python rep_analysis.py      # S3 characters of current face blocks -> results_re
 python structure_checks.py  # regressor patterns, sort+parity classes, interior S4 checks -> results_structure.txt
 python sym_orth.py          # prints the exact sym-proj face formulas
 python interior_sym.py      # symmetric H(Curl) interior feasibility -> results_interior.txt
+python hex_conditioning.py  # hex conditioning context -> results_hex.txt
 ```
 
 | file | content |
@@ -564,6 +630,7 @@ python interior_sym.py      # symmetric H(Curl) interior feasibility -> results_
 | `sym_basis.py`, `sym_orth.py` | prototype symmetric face families (sym, sym-int / orth, H1perm, sym-proj) |
 | `verify_sym.py`, `rep_analysis.py`, `structure_checks.py` | the checks quoted above |
 | `interior_sym.py` | symmetric H(Curl) interior feasibility (3.7) -> `results_interior.txt` (~30 s) |
+| `hex_conditioning.py` | hex H^1 / H(Curl) conditioning context (5.2) -> `results_hex.txt` (~40 s) |
 
 The Fortran classifier was re-run with `builds/build_release/tests/fem/test_fem_qcache` on a 2x2x2 cube. Tets
 p = 1-4 match the Python port; hex p=4 is new (all signed permutations). Configuration: Ubuntu 24.04 system

@@ -1,0 +1,16 @@
+## Hex H^1 (orders 2-5): Jacobi-scaled eigenvalue ratio of mass / stiffness (1 zero mode removed)
+  k=2 (n=27): OFT J(1,1) M 1.210e+04 K 4.908e+02 (top level M 2.008e+03 K 4.908e+02) | old J(0,0) M 1.210e+04 K 4.908e+02 (top level M 2.008e+03 K 4.908e+02) | GLL nodal M 1.563e+01 K 2.745e+00 | OFT level-orth M 1.210e+04 K 4.908e+02
+  k=3 (n=64): OFT J(1,1) M 1.210e+04 K 5.288e+02 (top level M 7.539e+02 K 1.603e+02) | old J(0,0) M 1.210e+04 K 5.288e+02 (top level M 7.539e+02 K 1.603e+02) | GLL nodal M 1.270e+01 K 1.233e+01 | OFT level-orth M 1.210e+04 K 5.288e+02
+  k=4 (n=125): OFT J(1,1) M 3.209e+05 K 4.691e+03 (top level M 5.616e+03 K 9.032e+02) | old J(0,0) M 1.586e+06 K 2.157e+04 (top level M 2.743e+04 K 1.670e+03) | GLL nodal M 1.139e+01 K 2.913e+01 | OFT level-orth M 2.352e+05 K 4.194e+03
+  k=5 (n=216): OFT J(1,1) M 3.209e+05 K 4.771e+03 (top level M 4.687e+03 K 1.005e+03) | old J(0,0) M 1.586e+06 K 2.241e+04 (top level M 1.361e+04 K 1.532e+03) | GLL nodal M 1.065e+01 K 5.422e+01 | OFT level-orth M 2.352e+05 K 4.544e+03
+
+## Hex H(Curl) (p=1-4) with grad H^1 (order p+1): Jacobi-scaled eigenvalue ratios
+   (HC mass / HC curl-curl (Whitney-gradient zero modes removed) / combined HC + grad H^1 non-vertex mass)
+  p=1 (nHC=12, nH1 non-vertex=19): OFT 9.000e+00 / 2.000e+00 / 4.908e+02 | level-orth 9.000e+00 / 2.000e+00 / 4.908e+02 | level+grad-orth 9.000e+00 / 2.000e+00 / 4.908e+02 | combined rank 31/31/31 of 31
+        top-level block (HC mass / curl-curl): OFT nan / nan | level-orth nan / nan | level+grad-orth nan / nan
+  p=2 (nHC=35, nH1 non-vertex=56): OFT 5.270e+02 / 6.238e+01 / 1.232e+03 | level-orth 5.270e+02 / 6.238e+01 / 1.232e+03 | level+grad-orth 5.270e+02 / 6.238e+01 / 1.008e+03 | combined rank 91/91/91 of 91
+        top-level block (HC mass / curl-curl): OFT 5.423e+01 / 4.299e+01 | level-orth 5.423e+01 / 4.299e+01 | level+grad-orth 7.590e+01 / 4.299e+01
+  p=3 (nHC=88, nH1 non-vertex=117): OFT 5.270e+02 / 8.148e+01 / 6.955e+03 | level-orth 5.270e+02 / 8.148e+01 / 6.955e+03 | level+grad-orth 5.270e+02 / 8.148e+01 / 6.204e+03 | combined rank 205/205/205 of 205
+        top-level block (HC mass / curl-curl): OFT 4.708e+01 / 5.553e+01 | level-orth 4.708e+01 / 5.553e+01 | level+grad-orth 1.071e+02 / 5.553e+01
+  p=4 (nHC=183, nH1 non-vertex=208): OFT 4.687e+03 / 2.548e+02 / 1.996e+04 | level-orth 3.731e+03 / 2.324e+02 / 1.831e+04 | level+grad-orth 3.748e+03 / 2.328e+02 / 7.445e+03 | combined rank 391/391/391 of 391
+        top-level block (HC mass / curl-curl): OFT 1.649e+02 / 1.421e+02 | level-orth 1.710e+02 / 1.451e+02 | level+grad-orth 3.628e+02 / 1.526e+02
