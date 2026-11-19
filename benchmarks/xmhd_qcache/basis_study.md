@@ -45,8 +45,8 @@ documentation, and an internal design study of un-adopted bases does not belong 
    - **Gradient-free and hierarchical:** the new H(Curl) is still gradient-free (direct sum with grad H^1 apart
      from the existing Whitney/vertex overlap), and both spaces stay hierarchical (identity p-injection).
    - **Transforms:** all are own-entity. Kind 3 is eliminated, and so are the 16-25-regressor H^1 blocks.
-   - **Conditioning** (local matrices, Jacobi-scaled): equal or better than OFT at p <= 3 / k <= 4. At p=4 it is
-     within 1.1-2.2x.
+   - **Conditioning** (local matrices, Jacobi-scaled): within 10% of OFT or better at p <= 3 / k <= 4. At p=4 it is
+     within 1.2-2.2x.
 4. **What changes:** only the **H(Curl)-only span**, which moves by gradients.
    - Unaffected: nonzero Taylor eigenvalues and `hcurl_divout`, since the gradient-free property holds.
    - Changed: the discrete J2 (hyper-resistivity) field, Taylor vector potentials (gauge), basis-dependent test
@@ -54,7 +54,9 @@ documentation, and an internal design study of un-adopted bases does not belong 
 5. **New observation.** OFT's H(Curl) **cell-interior** block is not invariant under relabeling a cell's
    vertices. The standalone H(Curl) space therefore already depends on each cell's local vertex order
    (`hcurl_basis.F90:642-715`); the composite does not. This rules out cheap "virtual sort" schemes for H(Curl)
-   and is a correctness caveat for any mesh-reordering option.
+   and is a correctness caveat for any mesh-reordering option. **It is fixable without mesh changes**
+   (section 3.7): projecting the interior levels off the H^1 interior gradients makes the interior span exactly
+   relabeling-invariant, keeps the gradient-free direct sum and the hierarchy, and needs no cache transforms.
 6. **Mesh-side alternative.** Sorting tet vertices by global index, then swapping local 3/4 when the cell is
    inverted (instead of allowing det<0), leaves exactly **2 orientation classes** of 12/24 orderings each. Each
    class has a fixed pattern of states. No transforms remain for any basis: two canonical tables, with det>0
@@ -337,13 +339,19 @@ The regular tet is shown; the unit tet gives the same ranking.
 | H^1 k=4 mass / stiffness | 4.21e3 / 270 | 3.64e3 / 228 | 3.64e3 / 224 | **3.64e3 / 228** | 4.37e3 / 241 |
 | H^1 k=5 mass / stiffness | 1.76e4 / 819 | 4.55e4 / 2667 | 4.55e4 / 2639 | **1.81e4 / 1436** | 2.95e4 / 1672 |
 | H(Curl) p=2 mass / curl-curl | 38.9 / 10.6 | 54.1 / 24.3 | 33.0 / 10.6 | **33.0 / 10.6** | – |
-| H(Curl) p=3 mass / curl-curl | 192 / 56.8 | 1104 / 372 | 647 / 239 | **208 / 56.6** | – |
-| H(Curl) p=4 mass / curl-curl | 616 / 220 | 3002 / 1742 | 2149 / 1327 | **1077 / 486** | – |
-| HC+gradH1 mass p=2 / 3 / 4 | 145 / 772 / 4393 | 153 / 2894 / 18910 | 138 / 1919 / 15130 | **138 / 643 / 5067** | – |
+| H(Curl) p=3 mass / curl-curl | 192 / 56.8 | 1104 / 372 | 647 / 239 | **209 / 56.7** | – |
+| H(Curl) p=4 mass / curl-curl | 616 / 220 | 3002 / 1742 | 2149 / 1327 | **1070 / 487** | – |
+| HC+gradH1 mass p=2 / 3 / 4 | 145 / 772 / 4393 | 153 / 2894 / 18910 | 138 / 1919 / 15130 | **138 / 644 / 5290** | – |
 
 The naive symmetric generators are 3-9x worse at p ≥ 3. The S3-equivariant projection recovers OFT's
-conditioning (p ≤ 3 equal or better; p=4 up to 1.75x on the regular tet and 2.2x on the unit tet). The p=4
-generators could likely be tuned further: any S3-equivariant change of the generators is allowed.
+conditioning (p ≤ 3 within 10% or better; p=4 is 1.2-2.2x, worst for the regular-tet curl-curl matrix). The p=4
+generators could likely be tuned further: any S3-equivariant change of the generators is allowed. Adding the
+symmetric interior block of section 3.7 also recovers most of the p=4 loss.
+
+*Correction (follow-up):* the first version of `sym_orth.py` used a 3x3 face metric with 4 on the diagonal
+instead of the regular-tet value 3 (`∇λ_i·∇λ_j ∝ 4δ_ij − 1`). That matrix is still S3-invariant and positive
+definite, so every structural result was unaffected. The sym-proj numbers above are from the corrected metric
+and differ from the first version by at most 5% (p=4 combined mass).
 
 ### 3.6 Fallback without changing any basis: cross-space transforms for composite fields
 
@@ -356,6 +364,65 @@ This needs no basis change. It does need the two caches to be coupled, and dense
 DOFs (up to 9x30 at p=4). Standalone H(Curl) fields (J2) and H(Curl)-only test functions still need kind 3, or a
 grad-H^1 contraction of the same flux. It is a reasonable fallback if the basis variant is rejected. It is not
 better for GPUs.
+
+
+### 3.7 Symmetric H(Curl) cell interior (follow-up feasibility check)
+
+**Problem.** OFT's H(Curl) interior functions (`hcurl_basis.F90:642-715`, and the inline cell parts of
+`eval_all3/4` / `ceval_all3/4`) are evaluated on the cell's raw local barycentrics. Their span is not invariant
+under the 24 relabelings of a cell's vertices (section 2.3). So the standalone H(Curl) space, which is what J2
+and the Taylor vector potential see, depends on the local vertex order of every cell. The composite and the H^1
+interiors are invariant.
+
+**Construction** (`interior_sym.py`, exact sympy arithmetic). This is the face construction applied to the
+interior, with S4 instead of S3:
+- Take OFT's interior functions level by level: degree 3 (DOFs 1-3) and degree 4 (DOFs 4-11).
+- Project each level, in L2 on a regular tet, off the gradients of the H^1 interior bubbles up to order p+1 and
+  off the previous projected level.
+- S4 acts on the regular tet by isometries and both subtracted spaces are S4-invariant, so the projection
+  commutes with relabeling.
+- The new functions differ from OFT's only by interior gradients and lower interior functions. They stay
+  interior bubbles, so faces, edges and conformity are untouched.
+
+**Result** (`results_interior.txt`):
+
+| check | p=3 | p=4 |
+|---|---|---|
+| H(Curl)+grad H^1 rank, old / new / union (NED2_p) | 60 / 60 / 60 (60) | 105 / 105 / 105 (105) |
+| direct sum with grad H^1 (gradient-free) | yes (60 = 29 + 35 − 4) | yes (105 = 53 + 56 − 4) |
+| rank(HC_old ∪ HC_new), OFT faces | 30: one interior function changes by a gradient | 57 |
+| hierarchy: degree-3 functions identical in p=3 and p=4 | yes | yes |
+| relabeling residual of the interior block, old → new | 7.7e-2 → **1.1e-15** | 7.7e-2 → **2.1e-15** |
+
+At degree 3 the change is small. DOFs 2 and 3 are unchanged, and DOF 1 becomes
+`−l2l3l4 ∇l1 − l1l3l4 ∇l2 + 3 l1l2l4 ∇l3 − l1l2l3 ∇l4`, which is OFT DOF 1 corrected by an interior gradient.
+
+Conditioning (Jacobi-scaled eigenvalue ratio, H(Curl) mass / curl-curl / combined HC+gradH1 mass):
+
+| tet | p | old | OFT faces + sym interior | sym-proj faces | sym-proj faces + sym interior |
+|---|---|---|---|---|---|
+| regular | 3 | 192 / 56.8 / 772 | 194 / 56.8 / 765 | 209 / 56.7 / 644 | 276 / 56.7 / 615 |
+| regular | 4 | 616 / 220 / 4393 | **484 / 122 / 2797** | 1070 / 487 / 5290 | 819 / 213 / 2535 |
+| unit | 3 | 385 / 97.2 / 1897 | 348 / 97.2 / 1884 | 386 / 106 / 1520 | 449 / 106 / 1403 |
+| unit | 4 | 1211 / 376 / 10920 | **878 / 232 / 7340** | 2132 / 681 / 12850 | 1457 / 303 / 6119 |
+
+- With OFT's faces, the symmetric interior is as good as or better than the current one everywhere. At p=4 it
+  is better by 1.3-1.8x.
+- Combined with the sym-proj faces, the p=4 loss of section 3.5 mostly disappears. The curl-curl and combined
+  mass are within 10% of OFT's or better (better at p=4). The H(Curl) mass is 1.2-1.4x higher at p=3,4.
+
+**Consequences:**
+- Interiors are never oriented, so `fem_quad_cache` is unaffected: one interior table, no transforms.
+  Invariance only makes the space well defined.
+- The S4 action on the interior block is a dense own-block representation, not a signed permutation. That does
+  not matter here. It would matter only for a "virtual sort" scheme, which with this change would become exact
+  for H(Curl) interiors, using 24 small own-block matrices.
+- Preserved and changed spaces are the same as for the faces (3.3): the composite, the gradient-free property
+  and the hierarchy are preserved. The H(Curl)-only span changes by interior gradients, which affects J2, the
+  Taylor A gauge, test references and restart files.
+- It touches the same evaluators as the face change, so it is cheapest to do both together as one opt-in
+  variant.
+- Not done: tuning of the generators, and any Fortran implementation (left for a separate session).
 
 ## 4. Mesh-side alternatives
 
@@ -409,6 +476,8 @@ marked (u) are unverified.
   - No change in `fem_quad_cache`: its classifier will report own-block kind 1/2 only, so `canonical_ok` holds
     everywhere.
   - Optional follow-up: specialize kind 2 for 2x2 blocks and drop the state-block tables.
+  - Optional, same evaluators: replace the H(Curl) interior with the relabeling-invariant block of 3.7. This
+    makes the standalone H(Curl) space independent of each cell's local vertex order, at no cache cost.
 - *Benefit:*
   - kind 3 goes away (≈half of the tet H(Curl) contraction work currently takes the slow correction path);
   - the H^1 k ≥ 4 transforms shrink from 16-25-regressor blocks to own-entity blocks with one 2x2;
@@ -419,7 +488,8 @@ marked (u) are unverified.
   - Solver accuracy for B: none (composite space unchanged).
   - Changes the discretization of standalone H(Curl) fields (J2, Taylor A) at the truncation-error level.
   - Test reference values, MG damping defaults and old restart files must be updated or versioned.
-  - p=4 local conditioning is 1.1-2.2x higher (generator tuning can likely recover it).
+  - p=4 local conditioning is 1.2-2.2x higher with the face change alone; adding the symmetric interior (3.7)
+    brings curl-curl and combined mass back to OFT's level or better.
 - *Effort:* about 1 week, including evaluator variants, unit tests (span / curl / gradient-free checks like
   `verify_sym.py`, run in Fortran through the existing qcache classifier), and re-baselining `test_hcurl*` /
   MUG / Marklin.
@@ -456,6 +526,7 @@ python verify_sym.py        # spaces, transforms, conditioning -> results_sym.tx
 python rep_analysis.py      # S3 characters of current face blocks -> results_rep.txt
 python structure_checks.py  # regressor patterns, sort+parity classes, interior S4 checks -> results_structure.txt
 python sym_orth.py          # prints the exact sym-proj face formulas
+python interior_sym.py      # symmetric H(Curl) interior feasibility -> results_interior.txt
 ```
 
 | file | content |
@@ -464,6 +535,7 @@ python sym_orth.py          # prints the exact sym-proj face formulas
 | `xform_classify.py` | port of `qcache_build_xform`, plus S3 character tools; reproduces the Fortran identity/perm/dense/none counts and regressor counts exactly |
 | `sym_basis.py`, `sym_orth.py` | prototype symmetric face families (sym, sym-int / orth, H1perm, sym-proj) |
 | `verify_sym.py`, `rep_analysis.py`, `structure_checks.py` | the checks quoted above |
+| `interior_sym.py` | symmetric H(Curl) interior feasibility (3.7) -> `results_interior.txt` (~30 s) |
 
 The Fortran classifier was re-run with `builds/build_release/tests/fem/test_fem_qcache` on a 2x2x2 cube. Tets
 p = 1-4 match the Python port; hex p=4 is new (all signed permutations). Configuration: Ubuntu 24.04 system

@@ -26,7 +26,7 @@ from sym_basis import hc_face_sym, h1_face_sym
 X = sp.symbols('x1:4')  # face barycentrics (formula variables)
 # Regular tet: grad lam_i . grad lam_j proportional to 4*delta_ij - 1 (i,j over all 4 vertices);
 # formulas only use grad lam_1..3 of the face
-GMET = sp.Matrix(3, 3, lambda i, j: 4 if i == j else -1)
+GMET = sp.Matrix(3, 3, lambda i, j: 3 if i == j else -1)
 
 
 def _int_mono(a, b, c):

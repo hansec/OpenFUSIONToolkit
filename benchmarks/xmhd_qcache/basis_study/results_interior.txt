@@ -1,0 +1,25 @@
+## Projected interior formulas (degree-3 level, exact)
+  interior 1: [-l2*l3*l4, -l1*l3*l4, 3*l1*l2*l4, -l1*l2*l3]
+  interior 2: [-2*l2*l3*l4, -2*l1*l3*l4, 2*l1*l2*l4, 2*l1*l2*l3]
+  interior 3: [l2*l3*l4, -l1*l3*l4, 0, 0]
+
+## 1. Spaces
+HCisym(oft faces)_3      p=3: rank HC old/new 29/29, rank(old|new) 30; rank(HC+gradH1) old 60 new 60 union 60; NED2 60; direct-sum count 60
+HCisym(proj faces)_3     p=3: rank HC old/new 29/29, rank(old|new) 42; rank(HC+gradH1) old 60 new 60 union 60; NED2 60; direct-sum count 60
+HCisym(oft faces)_4      p=4: rank HC old/new 53/53, rank(old|new) 57; rank(HC+gradH1) old 105 new 105 union 105; NED2 105; direct-sum count 105
+HCisym(proj faces)_4     p=4: rank HC old/new 53/53, rank(old|new) 81; rank(HC+gradH1) old 105 new 105 union 105; NED2 105; direct-sum count 105
+hierarchy: p=3 interior functions identical to the first 3 of p=4: True
+
+## 2. S4 invariance of the interior block (24 vertex relabelings; max relative fit residual)
+HCurl_3                  p=3: own interior block 7.7e-02, HC + grad H1 4.1e-15
+HCisym(oft faces)_3      p=3: own interior block 1.1e-15, HC + grad H1 4.1e-15
+HCurl_4                  p=4: own interior block 7.7e-02, HC + grad H1 1.4e-14
+HCisym(oft faces)_4      p=4: own interior block 2.1e-15, HC + grad H1 1.3e-14
+
+## 3. Conditioning (Jacobi-scaled eigenvalue ratio; zero modes removed)
+Geometry: unit tet
+  p=3  old: M 3.850e+02 cc 9.722e+01 comb 1.897e+03 | old faces + sym int: M 3.479e+02 cc 9.722e+01 comb 1.884e+03 | sym-proj faces: M 3.856e+02 cc 1.057e+02 comb 1.520e+03 | sym-proj faces + sym int: M 4.492e+02 cc 1.057e+02 comb 1.403e+03
+  p=4  old: M 1.211e+03 cc 3.762e+02 comb 1.092e+04 | old faces + sym int: M 8.783e+02 cc 2.324e+02 comb 7.340e+03 | sym-proj faces: M 2.132e+03 cc 6.806e+02 comb 1.285e+04 | sym-proj faces + sym int: M 1.457e+03 cc 3.027e+02 comb 6.119e+03
+Geometry: regular tet
+  p=3  old: M 1.916e+02 cc 5.684e+01 comb 7.719e+02 | old faces + sym int: M 1.943e+02 cc 5.684e+01 comb 7.653e+02 | sym-proj faces: M 2.091e+02 cc 5.670e+01 comb 6.440e+02 | sym-proj faces + sym int: M 2.764e+02 cc 5.670e+01 comb 6.151e+02
+  p=4  old: M 6.158e+02 cc 2.197e+02 comb 4.393e+03 | old faces + sym int: M 4.840e+02 cc 1.220e+02 comb 2.797e+03 | sym-proj faces: M 1.070e+03 cc 4.866e+02 comb 5.290e+03 | sym-proj faces + sym int: M 8.191e+02 cc 2.134e+02 comb 2.535e+03

@@ -79,10 +79,10 @@ Geometry: unit tet
   HCurl+gradH1 p=1 mass: old 3.847e+01 | sym-int 3.847e+01 | sym-orth 3.847e+01 | sym-proj 3.847e+01
   HCurl p=2: old M 7.219e+01 curlcurl 3.606e+01 | sym-int M 1.023e+02 curlcurl 6.947e+01 | sym-orth M 7.017e+01 curlcurl 3.606e+01 | sym-proj M 7.017e+01 curlcurl 3.606e+01
   HCurl+gradH1 p=2 mass: old 3.877e+02 | sym-int 3.652e+02 | sym-orth 3.655e+02 | sym-proj 3.655e+02
-  HCurl p=3: old M 3.850e+02 curlcurl 9.722e+01 | sym-int M 1.698e+03 curlcurl 8.756e+02 | sym-orth M 1.200e+03 curlcurl 5.767e+02 | sym-proj M 3.856e+02 curlcurl 1.054e+02
-  HCurl+gradH1 p=3 mass: old 1.897e+03 | sym-int 7.119e+03 | sym-orth 4.286e+03 | sym-proj 1.518e+03
-  HCurl p=4: old M 1.211e+03 curlcurl 3.762e+02 | sym-int M 5.791e+03 curlcurl 3.603e+03 | sym-orth M 4.557e+03 curlcurl 2.797e+03 | sym-proj M 2.178e+03 curlcurl 6.791e+02
-  HCurl+gradH1 p=4 mass: old 1.092e+04 | sym-int 4.164e+04 | sym-orth 3.197e+04 | sym-proj 1.236e+04
+  HCurl p=3: old M 3.850e+02 curlcurl 9.722e+01 | sym-int M 1.698e+03 curlcurl 8.756e+02 | sym-orth M 1.200e+03 curlcurl 5.767e+02 | sym-proj M 3.856e+02 curlcurl 1.057e+02
+  HCurl+gradH1 p=3 mass: old 1.897e+03 | sym-int 7.119e+03 | sym-orth 4.286e+03 | sym-proj 1.520e+03
+  HCurl p=4: old M 1.211e+03 curlcurl 3.762e+02 | sym-int M 5.791e+03 curlcurl 3.603e+03 | sym-orth M 4.557e+03 curlcurl 2.797e+03 | sym-proj M 2.132e+03 curlcurl 6.806e+02
+  HCurl+gradH1 p=4 mass: old 1.092e+04 | sym-int 4.164e+04 | sym-orth 3.197e+04 | sym-proj 1.285e+04
 Geometry: regular tet
   H1 k=2: old M 1.302e+02 K 1.261e+01 | sym-int M 1.302e+02 K 1.261e+01 | sym-orth M 1.302e+02 K 1.261e+01 | sym-proj M 1.302e+02 K 1.261e+01
   H1 k=3: old M 8.764e+02 K 8.969e+01 | sym-int M 8.764e+02 K 8.969e+01 | sym-orth M 8.764e+02 K 8.969e+01 | sym-proj M 8.764e+02 K 8.969e+01 | perm M 8.764e+02 K 8.969e+01
@@ -92,8 +92,8 @@ Geometry: regular tet
   HCurl+gradH1 p=1 mass: old 1.305e+01 | sym-int 1.305e+01 | sym-orth 1.305e+01 | sym-proj 1.305e+01
   HCurl p=2: old M 3.889e+01 curlcurl 1.064e+01 | sym-int M 5.412e+01 curlcurl 2.429e+01 | sym-orth M 3.300e+01 curlcurl 1.064e+01 | sym-proj M 3.300e+01 curlcurl 1.064e+01
   HCurl+gradH1 p=2 mass: old 1.448e+02 | sym-int 1.534e+02 | sym-orth 1.377e+02 | sym-proj 1.377e+02
-  HCurl p=3: old M 1.916e+02 curlcurl 5.684e+01 | sym-int M 1.104e+03 curlcurl 3.724e+02 | sym-orth M 6.468e+02 curlcurl 2.393e+02 | sym-proj M 2.084e+02 curlcurl 5.656e+01
-  HCurl+gradH1 p=3 mass: old 7.719e+02 | sym-int 2.894e+03 | sym-orth 1.919e+03 | sym-proj 6.430e+02
-  HCurl p=4: old M 6.158e+02 curlcurl 2.197e+02 | sym-int M 3.002e+03 curlcurl 1.742e+03 | sym-orth M 2.149e+03 curlcurl 1.327e+03 | sym-proj M 1.077e+03 curlcurl 4.858e+02
-  HCurl+gradH1 p=4 mass: old 4.393e+03 | sym-int 1.891e+04 | sym-orth 1.513e+04 | sym-proj 5.067e+03
+  HCurl p=3: old M 1.916e+02 curlcurl 5.684e+01 | sym-int M 1.104e+03 curlcurl 3.724e+02 | sym-orth M 6.468e+02 curlcurl 2.393e+02 | sym-proj M 2.091e+02 curlcurl 5.670e+01
+  HCurl+gradH1 p=3 mass: old 7.719e+02 | sym-int 2.894e+03 | sym-orth 1.919e+03 | sym-proj 6.440e+02
+  HCurl p=4: old M 6.158e+02 curlcurl 2.197e+02 | sym-int M 3.002e+03 curlcurl 1.742e+03 | sym-orth M 2.149e+03 curlcurl 1.327e+03 | sym-proj M 1.070e+03 curlcurl 4.866e+02
+  HCurl+gradH1 p=4 mass: old 4.393e+03 | sym-int 1.891e+04 | sym-orth 1.513e+04 | sym-proj 5.290e+03
 
