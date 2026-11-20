@@ -11,13 +11,16 @@
 !! - 1: Local matrices built directly: ILU(0) of banded matrices with a full band
 !!   (no fill outside the pattern) is an exact LU factorization, refactoring after
 !!   value changes and after switching to matrices with a different pattern or
-!!   size (with and without `update(new_pattern=.TRUE.)`), small-pivot replacement
-!!   (sign preserving), diagonal shift, and deep copies of a factored solver.
+!!   size (with and without `update(new_pattern=.TRUE.)`), matrices without a
+!!   pattern, small-pivot replacement (sign preserving), diagonal shift, deep copies
+!!   of a factored solver, and the real and complex ILU(0) kernels called directly.
 !! - 2: Poisson equation on a unit cube with GMRES: ILU(0) applied directly to the
 !!   operator (single process only) and inside block-Jacobi with `boundary_overlap`
 !!   (full local matrix of the distributed operator).
 !! - 3: ILU(0) applied directly to a distributed operator (aborts on more than one
 !!   process, solves on one).
+!! - 4: Timing of the ILU(0) factorization and solve for the Lagrange Laplacian of
+!!   order `order` on a single process (written to `ilu_timing.results`).
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -29,22 +32,24 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_stitching, ONLY: oft_seam
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector, oft_native_pattern, &
-  native_pattern_create, native_matrix_set_pattern
+  native_pattern_create, native_matrix_set_pattern, native_matrix_cast
 USE oft_native_solvers, ONLY: oft_bjprecond, oft_native_gmres_solver
 USE oft_solver_base, ONLY: oft_solver
 USE oft_lu, ONLY: oft_ilusolver
+USE oft_native_kernels, ONLY: nk_ilu0_factor, nk_ilu0_solve
 USE fem_base, ONLY: oft_ml_fem_type
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_zerob, oft_lag_getlop, oft_lag_getmop
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr,nfail
 INTEGER(i4) :: case_id = 1
+INTEGER(i4) :: order = 2
 INTEGER(i4) :: its(2) = -1
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 TYPE(oft_seam), TARGET :: local_seam
-NAMELIST/test_ilu_options/case_id
+NAMELIST/test_ilu_options/case_id,order
 IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
@@ -63,12 +68,19 @@ SELECT CASE(case_id)
     CALL test_pivots()
     CALL test_shift()
     CALL test_copy()
+    CALL test_no_pattern()
+    CALL test_kernels()
   CASE(2,3)
     CALL multigrid_construct(mg_mesh)
     IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
     CALL oft_lag_setup(mg_mesh,2,ML_oft_lagrange,minlev=-1)
     lag_zerob%ML_lag_rep=>ML_oft_lagrange
     CALL test_lap(case_id)
+  CASE(4)
+    CALL multigrid_construct(mg_mesh)
+    CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,minlev=-1)
+    lag_zerob%ML_lag_rep=>ML_oft_lagrange
+    CALL test_timing()
   CASE DEFAULT
     CALL oft_abort('Unknown test case','main',__FILE__)
 END SELECT
@@ -90,10 +102,12 @@ IF(.NOT.pass)THEN
   WRITE(*,'(2A)')'FAILED: ',name
 END IF
 END SUBROUTINE check
-! Local (single process) square CSR matrix from its structure and values
-FUNCTION make_matrix(n,kr,lc,vals) RESULT(A)
+! Local (single process) square CSR matrix from its structure and values (optionally
+! without a pattern object, as built by code that sets kr/lc directly)
+FUNCTION make_matrix(n,kr,lc,vals,no_pattern) RESULT(A)
 INTEGER(i4), INTENT(in) :: n,kr(:),lc(:)
 REAL(r8), INTENT(in) :: vals(:)
+LOGICAL, OPTIONAL, INTENT(in) :: no_pattern
 TYPE(oft_native_matrix), POINTER :: A
 INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: krp,lcp
 TYPE(oft_native_pattern), POINTER :: pattern
@@ -108,6 +122,15 @@ A%i_map(1)%n=n
 A%j_map(1)%n=n
 ALLOCATE(krp(n+1),lcp(SIZE(lc)))
 krp=kr; lcp=lc
+IF(PRESENT(no_pattern))THEN
+  IF(no_pattern)THEN
+    A%kr=>krp; A%lc=>lcp
+    A%nnz=SIZE(lc)
+    ALLOCATE(A%M(A%nnz))
+    A%M=vals
+    RETURN
+  END IF
+END IF
 CALL native_pattern_create(pattern,n,n,krp,lcp)
 CALL native_matrix_set_pattern(A,pattern)
 ALLOCATE(A%M(A%nnz))
@@ -115,9 +138,10 @@ A%M=vals
 END FUNCTION make_matrix
 ! Non-symmetric, diagonally dominant banded matrix with all entries of the band
 ! (half-bandwidth bw) present, so ILU(0) has no dropped fill
-FUNCTION make_banded(n,bw,scale) RESULT(A)
+FUNCTION make_banded(n,bw,scale,no_pattern) RESULT(A)
 INTEGER(i4), INTENT(in) :: n,bw
 REAL(r8), INTENT(in) :: scale
+LOGICAL, OPTIONAL, INTENT(in) :: no_pattern
 TYPE(oft_native_matrix), POINTER :: A
 INTEGER(i4) :: i,j,k
 INTEGER(i4), ALLOCATABLE :: kr(:),lc(:)
@@ -137,7 +161,7 @@ DO i=1,n
   END DO
   kr(i+1)=k+1
 END DO
-A=>make_matrix(n,kr,lc(1:k),vals(1:k))
+A=>make_matrix(n,kr,lc(1:k),vals(1:k),no_pattern)
 DEALLOCATE(kr,lc,vals)
 END FUNCTION make_banded
 ! Local vector of size n that skips all stitching
@@ -342,6 +366,160 @@ CALL ilu_copy%delete
 DEALLOCATE(ilu_copy)
 CALL free_mat(A); CALL free_vec(u); CALL free_vec(g)
 END SUBROUTINE test_copy
+! Matrices without a pattern use a diagonal index private to the solver
+SUBROUTINE test_no_pattern()
+TYPE(oft_native_matrix), POINTER :: A
+TYPE(oft_native_vector), POINTER :: u,g
+TYPE(oft_ilusolver) :: ilu
+A=>make_banded(40,2,1.d0,no_pattern=.TRUE.)
+CALL check('Matrix without pattern',.NOT.ASSOCIATED(A%pattern))
+u=>make_vec(40); g=>make_vec(40)
+CALL fill_rhs(g)
+ilu%A=>A
+CALL ilu%apply(u,g)
+CALL check('ILU(0) exact for matrix without pattern',rel_resid(A,u%v,g%v)<1.d-13)
+A%M=2.d0*A%M
+CALL ilu%update
+CALL ilu%apply(u,g)
+CALL check('ILU(0) refactor for matrix without pattern',rel_resid(A,u%v,g%v)<1.d-13)
+CALL ilu%delete
+CALL free_mat(A); CALL free_vec(u); CALL free_vec(g)
+END SUBROUTINE test_no_pattern
+! Square banded CSR structure with all entries of the band (half-bandwidth bw)
+SUBROUTINE banded_pattern(n,bw,kr,lc,dloc)
+INTEGER(i4), INTENT(in) :: n,bw
+INTEGER(i4), ALLOCATABLE, INTENT(out) :: kr(:),lc(:),dloc(:)
+INTEGER(i4) :: i,j,k
+ALLOCATE(kr(n+1),dloc(n))
+kr(1)=1
+DO i=1,n
+  kr(i+1)=kr(i)+MIN(n,i+bw)-MAX(1,i-bw)+1
+END DO
+ALLOCATE(lc(kr(n+1)-1))
+DO i=1,n
+  k=kr(i)
+  DO j=MAX(1,i-bw),MIN(n,i+bw)
+    lc(k)=j
+    IF(j==i)dloc(i)=k
+    k=k+1
+  END DO
+END DO
+END SUBROUTINE banded_pattern
+! Relative residual of a complex CSR system, ||A x - b||_inf / ||b||_inf
+FUNCTION cresid(n,kr,lc,a,x,b) RESULT(res)
+INTEGER(i4), INTENT(in) :: n,kr(:),lc(:)
+COMPLEX(c8), INTENT(in) :: a(:),x(:),b(:)
+REAL(r8) :: res
+COMPLEX(c8) :: ax
+INTEGER(i4) :: i,j
+res=0.d0
+DO i=1,n
+  ax=(0.d0,0.d0)
+  DO j=kr(i),kr(i+1)-1
+    ax=ax+a(j)*x(lc(j))
+  END DO
+  res=MAX(res,ABS(ax-b(i)))
+END DO
+res=res/MAXVAL(ABS(b))
+END FUNCTION cresid
+! ILU(0) kernels called directly: exact factorization of complex (and real) banded
+! matrices with no dropped fill, with and without a diagonal shift, and replacement of
+! small pivots keeping the phase (complex) or sign (real) of the pivot
+SUBROUTINE test_kernels()
+INTEGER(i4), PARAMETER :: n=30
+INTEGER(i4) :: bw,i,j,k,nrep,ierr
+INTEGER(i4), ALLOCATABLE :: kr(:),lc(:),dloc(:)
+COMPLEX(c8), ALLOCATABLE :: a(:),as(:),fac(:),x(:),b(:)
+REAL(r8), ALLOCATABLE :: ar(:),facr(:),xr(:)
+COMPLEX(c8) :: d,piv,c2(4),cfac(4),cx(2)
+REAL(r8) :: pthresh,r2(4),rfac(4),rx(2)
+DO bw=1,2
+  CALL banded_pattern(n,bw,kr,lc,dloc)
+  ALLOCATE(a(kr(n+1)-1),as(kr(n+1)-1),fac(kr(n+1)-1),x(n),b(n))
+  DO i=1,n
+    DO j=kr(i),kr(i+1)-1
+      IF(lc(j)==i)THEN
+        a(j)=CMPLX(2.d0*bw+1.5d0+0.1d0*SIN(REAL(i,r8)),0.5d0*COS(REAL(i,r8)),c8)
+      ELSE
+        a(j)=CMPLX(-1.d0+0.3d0*COS(REAL(i+2*lc(j),r8)),0.4d0*SIN(REAL(i-lc(j),r8)),c8)
+      END IF
+    END DO
+    b(i)=CMPLX(1.d0+SIN(0.7d0*REAL(i,r8)),COS(0.3d0*REAL(i,r8)),c8)
+  END DO
+  CALL nk_ilu0_factor(n,kr,lc,dloc,a,1.d-12,0.d0,fac,nrep,ierr)
+  CALL check('Complex kernel: factorization',(ierr==0).AND.(nrep==0))
+  x=b
+  CALL nk_ilu0_solve(n,kr,lc,dloc,fac,x)
+  CALL check('Complex kernel: exact for banded matrix',cresid(n,kr,lc,a,x,b)<1.d-13)
+  !---Shifted factorization solves (A + alpha diag(A)) exactly
+  as=a
+  as(dloc)=1.25d0*a(dloc)
+  CALL nk_ilu0_factor(n,kr,lc,dloc,a,1.d-12,0.25d0,fac,nrep,ierr)
+  x=b
+  CALL nk_ilu0_solve(n,kr,lc,dloc,fac,x)
+  CALL check('Complex kernel: shifted matrix',cresid(n,kr,lc,as,x,b)<1.d-13)
+  !---Real instantiation on the real part
+  ALLOCATE(ar(SIZE(a)),facr(SIZE(a)),xr(n))
+  ar=REAL(a,r8)
+  CALL nk_ilu0_factor(n,kr,lc,dloc,ar,1.d-12,0.d0,facr,nrep,ierr)
+  xr=REAL(b,r8)
+  CALL nk_ilu0_solve(n,kr,lc,dloc,facr,xr)
+  CALL check('Real kernel: exact for banded matrix', &
+    cresid(n,kr,lc,CMPLX(ar,0.d0,c8),CMPLX(xr,0.d0,c8),CMPLX(REAL(b,r8),0.d0,c8))<1.d-13)
+  DEALLOCATE(kr,lc,dloc,a,as,fac,x,b,ar,facr,xr)
+END DO
+!---Pivot replacement on [[1,0],[1,d]]: the second pivot is exactly d (no cancellation)
+! and the largest magnitude in row 2 is 1, so |d| < pivot_tol replaces it
+ALLOCATE(kr(3),lc(4),dloc(2))
+kr=[1,3,5]; lc=[1,2,1,2]; dloc=[1,4]
+pthresh=1.d-8
+DO k=1,3
+  SELECT CASE(k)
+    CASE(1)
+      d=(0.d0,0.d0)
+    CASE(2)
+      d=CMPLX(3.d-12,4.d-12,c8)
+    CASE(3)
+      d=CMPLX(-1.2d-11,5.d-12,c8)
+  END SELECT
+  c2=[(1.d0,0.d0),(0.d0,0.d0),(1.d0,0.d0),d]
+  CALL nk_ilu0_factor(2,kr,lc,dloc,c2,pthresh,0.d0,cfac,nrep,ierr)
+  CALL check('Complex kernel: pivot replaced',(ierr==0).AND.(nrep==1))
+  !---Expected pivot: pivot_tol*d/|d|, or +pivot_tol for d=0
+  IF(d==(0.d0,0.d0))THEN
+    piv=CMPLX(pthresh,0.d0,c8)
+  ELSE
+    piv=pthresh*d/ABS(d)
+  END IF
+  CALL check('Complex kernel: replaced pivot keeps phase',ABS(cfac(4)*piv-(1.d0,0.d0))<1.d-14)
+  !---Solve with b = [1,0]: x2 = -1/piv, x1 = 1
+  cx=[(1.d0,0.d0),(0.d0,0.d0)]
+  CALL nk_ilu0_solve(2,kr,lc,dloc,cfac,cx)
+  CALL check('Complex kernel: solve with replaced pivot', &
+    (ABS(cx(2)+1.d0/piv)<=1.d-14*ABS(1.d0/piv)).AND.(ABS(cx(1)-1.d0)<1.d-14))
+  !---Real instantiation keeps the sign
+  r2=[1.d0,0.d0,1.d0,REAL(d,r8)]
+  CALL nk_ilu0_factor(2,kr,lc,dloc,r2,pthresh,0.d0,rfac,nrep,ierr)
+  IF(REAL(d,r8)==0.d0)THEN
+    CALL check('Real kernel: zero pivot replaced by +tol',(nrep==1).AND.(rfac(4)==1.d0/pthresh))
+  ELSE
+    CALL check('Real kernel: replaced pivot keeps sign',(nrep==1).AND. &
+      (rfac(4)==1.d0/SIGN(pthresh,REAL(d,r8))))
+  END IF
+  rx=[1.d0,0.d0]
+  CALL nk_ilu0_solve(2,kr,lc,dloc,rfac,rx)
+  CALL check('Real kernel: solve with replaced pivot',ABS(rx(2)+rfac(4))<=1.d-14*ABS(rfac(4)))
+END DO
+!---Exact zero pivot without a threshold, and a non-finite pivot
+c2=[(1.d0,0.d0),(0.d0,0.d0),(1.d0,0.d0),(0.d0,0.d0)]
+CALL nk_ilu0_factor(2,kr,lc,dloc,c2,0.d0,0.d0,cfac,nrep,ierr)
+CALL check('Complex kernel: zero pivot error',ierr==2)
+!---|HUGE+i HUGE| overflows
+c2(4)=CMPLX(HUGE(1.d0),HUGE(1.d0),c8)
+CALL nk_ilu0_factor(2,kr,lc,dloc,c2,0.d0,0.d0,cfac,nrep,ierr)
+CALL check('Complex kernel: non-finite pivot error',ierr==-2)
+DEALLOCATE(kr,lc,dloc)
+END SUBROUTINE test_kernels
 ! Poisson equation with GMRES, preconditioned by ILU(0) directly (case 2 on one process,
 ! case 3) and by block-Jacobi with boundary overlap and ILU(0) (case 2)
 SUBROUTINE test_lap(case_id)
@@ -396,4 +574,60 @@ CALL lop%delete; CALL mop%delete
 DEALLOCATE(lop,mop)
 CALL linv%delete
 END SUBROUTINE test_lap
+! Time ILU(0) factorization and solve for the Laplacian: the minimum over several
+! batches of the time per solve, and of the time per refactor plus solve minus the
+! time per solve for the factorization
+SUBROUTINE test_timing()
+INTEGER(i4), PARAMETER :: nbatch=5
+TYPE(oft_ilusolver) :: ilu
+CLASS(oft_vector), POINTER :: u,g
+CLASS(oft_matrix), POINTER :: lop => NULL()
+CLASS(oft_native_matrix), POINTER :: A_native
+TYPE(oft_timer) :: timer
+INTEGER(i4) :: i,k,nfactor,nsolve
+REAL(r8) :: tfactor,tsolve,tsetup
+CALL ML_oft_lagrange%vec_create(u)
+CALL ML_oft_lagrange%vec_create(g)
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
+IF(.NOT.native_matrix_cast(A_native,lop))CALL oft_abort('Native matrix required','test_timing',__FILE__)
+CALL g%set(1.d0)
+ilu%A=>lop
+CALL timer%tick
+CALL ilu%apply(u,g)
+tsetup=timer%tock()
+!---Batches of ~0.2 s
+nsolve=MAX(10,INT(0.2d0/MAX(tsetup,1.d-6)))
+nfactor=MAX(2,nsolve/4)
+tsolve=HUGE(1.d0)
+tfactor=HUGE(1.d0)
+DO k=1,nbatch
+  CALL timer%tick
+  DO i=1,nsolve
+    CALL ilu%apply(u,g)
+  END DO
+  tsolve=MIN(tsolve,timer%tock()/REAL(nsolve,r8))
+  CALL timer%tick
+  DO i=1,nfactor
+    CALL ilu%update
+    CALL ilu%apply(u,g)
+  END DO
+  tfactor=MIN(tfactor,timer%tock()/REAL(nfactor,r8))
+END DO
+tfactor=tfactor-tsolve
+CALL check('Timing solution finite',u%dot(u)<HUGE(1.d0))
+IF(oft_env%head_proc)THEN
+  WRITE(*,'(A,I10,A,I12)')'ILU timing: nr = ',A_native%nr,', nnz = ',A_native%nnz
+  WRITE(*,'(A,ES12.4,A,ES12.4,A,ES12.4)')'ILU timing (s): first apply = ',tsetup, &
+    ', factor = ',tfactor,', solve = ',tsolve
+  OPEN(NEWUNIT=io_unit,FILE='ilu_timing.results')
+  WRITE(io_unit,*)A_native%nr,A_native%nnz,nfactor,nsolve
+  WRITE(io_unit,*)tsetup,tfactor,tsolve
+  CLOSE(io_unit)
+END IF
+CALL ilu%delete
+CALL u%delete; CALL g%delete
+DEALLOCATE(u,g)
+CALL lop%delete
+DEALLOCATE(lop)
+END SUBROUTINE test_timing
 END PROGRAM test_native_ilu

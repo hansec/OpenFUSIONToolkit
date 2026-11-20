@@ -28,17 +28,18 @@ oft_in_template = """
 
 &test_ilu_options
  case_id={1}
+ order={2}
 /
 """
 
-def write_input(nprocs, case_id):
+def write_input(nprocs, case_id, order=2):
     # Distributed runs decompose the base mesh and refine once more
     nlevels = 3
     if nprocs > 1:
         nlevels = 4
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nlevels, case_id))
+        fid.write(oft_in_template.format(nlevels, case_id, order))
 
 def run_ilu(nprocs, case_id):
     write_input(nprocs, case_id)
@@ -115,3 +116,16 @@ def test_ilu_direct_mpi2_abort():
         pytest.skip("Configuration not supported")
     assert result.returncode != 0
     assert std_err.find('distributed across processes') > -1
+
+def test_ilu_timing():
+    '''Timing harness for the ILU(0) factorization and solve (Laplacian, quadratic Lagrange
+    elements, one process) on a small mesh; checks that it runs and reports the timings.
+    Larger cases are run by hand by raising nlevels/nbase and order in oft.in.'''
+    write_input(1, 4)
+    assert run_OFT("./test_native_ilu", 1, 60)
+    with open('ilu_timing.results', 'r') as fid:
+        nr, nnz = [int(val) for val in fid.readline().split()[:2]]
+        tfactor, tsolve = [float(val) for val in fid.readline().split()[1:]]
+    print("nr = {0}, nnz = {1}: factor {2:.3e} s, solve {3:.3e} s".format(nr, nnz, tfactor, tsolve))
+    assert nr > 0 and nnz > 0
+    assert tsolve > 0.0
