@@ -155,11 +155,13 @@ def test_gmres_schwarz(schwarz_type):
 #============================================================================
 # Native ILU(0) options from XML (restricted Schwarz sub-solver as above): a small-pivot threshold
 # leaves the factorization of this well-conditioned operator unchanged, while a diagonal shift
-# factors a perturbed operator and so weakens the preconditioner
-@pytest.mark.parametrize("ilu_opts", ("pivot_tol", "diag_shift"))
+# factors a perturbed operator and so weakens the preconditioner; the threaded (level-scheduled)
+# kernels give identical results, so disabling them changes nothing
+@pytest.mark.parametrize("ilu_opts", ("pivot_tol", "diag_shift", "threaded"))
 def test_gmres_schwarz_ilu_options(ilu_opts):
     opts = {"pivot_tol": "<pivot_tol>1.E-8</pivot_tol>",
-            "diag_shift": "<pivot_tol>0.0</pivot_tol><diag_shift>0.5</diag_shift>"}[ilu_opts]
+            "diag_shift": "<pivot_tol>0.0</pivot_tol><diag_shift>0.5</diag_shift>",
+            "threaded": "<threaded>F</threaded>"}[ilu_opts]
     xml_file = """
     <solver type="gmres">
         <its>-3</its>
@@ -172,7 +174,30 @@ def test_gmres_schwarz_ilu_options(ilu_opts):
         </pre>
     </solver>
     """.format(opts)
-    iteration_count = {"pivot_tol": 58, "diag_shift": 111}[ilu_opts]
+    iteration_count = {"pivot_tol": 58, "diag_shift": 111, "threaded": 58}[ilu_opts]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Native ILU(0) on the whole process-local subdomain (Schwarz with one block, applied from serial
+# code, where the level-scheduled kernels may use all threads) with and without threading: the
+# threaded kernels are bitwise identical to the serial ones, so the iteration count is the same
+@pytest.mark.parametrize("threaded", ("T", "F"))
+def test_gmres_schwarz_ilu_threaded(threaded):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>1</nlocal>
+            <overlap>1</overlap>
+            <type>restricted</type>
+            <pre type="ilu"><threaded>{0}</threaded></pre>
+        </pre>
+    </solver>
+    """.format(threaded)
+    iteration_count = 58
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=False)
     assert validate_result(iteration_count,converged_error)
