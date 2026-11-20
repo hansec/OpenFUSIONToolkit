@@ -17,7 +17,7 @@ oft_in_template = """
 &mesh_options
  meshname='cube'
  cad_type=92
- nlevels=3
+ nlevels={1}
  nbase=3
  grid_order=1
 /
@@ -34,14 +34,18 @@ xml_template = """
 """
 
 # Common setup function and process handling
-def xml_setup(xml_file, petsc=False):
+def xml_setup(xml_file, petsc=False, nprocs=1):
+    # Distributed runs decompose the base mesh and refine once more
+    nlevels = 3
+    if nprocs > 1:
+        nlevels = 4
     os.chdir(test_dir)
     petsc_flag=('T' if petsc else 'F')
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(petsc_flag))
+        fid.write(oft_in_template.format(petsc_flag, nlevels))
     with open('oft_in.xml','w+') as fid:
         fid.write(xml_template.format(xml_file))
-    return run_OFT("./test_solver_xml oft.in oft_in.xml", 1, 60)
+    return run_OFT("./test_solver_xml oft.in oft_in.xml", nprocs, 60)
 
 def validate_result(iteration_count,converged_error):
     #
@@ -123,4 +127,50 @@ def test_cg_jacobi(petsc_flag):
     iteration_count = 154
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=petsc_flag)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Native overlapping Schwarz selected from XML: blocks within the process grown by one layer
+# (plain additive combination counts overlap rows twice, hence more iterations; partition of
+# unity weights avoid this)
+@pytest.mark.parametrize("schwarz_type", ("restricted", "additive", "weighted"))
+def test_gmres_schwarz(schwarz_type):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>4</nlocal>
+            <overlap>1</overlap>
+            <type>{0}</type>
+            <pre type="ilu"></pre>
+        </pre>
+    </solver>
+    """.format(schwarz_type)
+    iteration_count = {"restricted": 58, "additive": 102, "weighted": 59}[schwarz_type]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Native overlapping Schwarz selected from XML: one subdomain per process grown by one layer
+# across processes
+@pytest.mark.mpi
+@pytest.mark.parametrize("schwarz_type", ("restricted", "additive", "weighted"))
+def test_gmres_schwarz_mpi2(schwarz_type):
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>1</nlocal>
+            <overlap>1</overlap>
+            <type>{0}</type>
+            <pre type="ilu"></pre>
+        </pre>
+    </solver>
+    """.format(schwarz_type)
+    iteration_count = {"restricted": 57, "additive": 85, "weighted": 59}[schwarz_type]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False,nprocs=2)
     assert validate_result(iteration_count,converged_error)

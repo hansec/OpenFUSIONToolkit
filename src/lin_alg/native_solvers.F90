@@ -33,11 +33,17 @@ MODULE oft_native_solvers
 USE oft_local
 USE oft_base
 USE oft_stitching, ONLY: oft_seam
+USE oft_scatter, ONLY: oft_scatter_plan, scatter_plan_setup_local, scatter_plan_delete, scatter_local, &
+  OFT_SCATTER_INSERT, OFT_SCATTER_ADD, oft_index_set, index_set_create, index_set_grow, index_set_delete
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
-  oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace
+  oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
+  OFT_ACCESS_READWRITE
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
   partition_graph, native_matrix_setup_full, oft_native_dense_cmatrix
+USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_update, &
+  native_overlap_gather, native_overlap_scatter, native_overlap_delete
+USE oft_native_kernels, ONLY: nk_jacobi_start, nk_jacobi_sweep, nk_jacobi_restart, nk_copy, nk_axpby
 USE oft_lu, ONLY: lapack_matinv
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
   oft_csolver, oft_csolver_bc, oft_eigsolver, solver_setup, csolver_setup, &
@@ -258,8 +264,26 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_bjprecond
   INTEGER(i4), POINTER, DIMENSION(:) :: part => NULL()
   TYPE(oft_native_submatrix), pointer, dimension(:) :: alocals => NULL() !< Local matrix block
   TYPE(oft_seam), pointer, dimension(:) :: local_stitch => NULL() !< Local vectors
+  TYPE(oft_native_vector), pointer, dimension(:) :: ulocs => NULL() !< Local solution vector for each block
+  TYPE(oft_native_vector), pointer, dimension(:) :: glocs => NULL() !< Local RHS vector for each block
   TYPE(oft_solver_ptr), pointer, dimension(:) :: solvers => NULL() !< Local block solvers
   TYPE(oft_1d_int), pointer, dimension(:) :: parts => NULL() !< Local partition indices
+  !> Gather/scatter plan of each block (rows `parts(i)%v`; with overlap, weights 1 on
+  !! rows assigned to the block and 0 on overlap rows, which are read but not written back,
+  !! unless `additive`; partition of unity weights if `additive` and `weighted`)
+  TYPE(oft_scatter_plan), pointer, dimension(:) :: bplans => NULL()
+  !> Number of overlap layers added to each block within a process (-1: one layer if
+  !! `loverlap`, none otherwise). Set by @ref oft_schwarz_precond.
+  INTEGER(i4) :: overlap_levels = -1
+  !> Combine overlapping blocks additively (sum of block solutions) instead of
+  !! restricting the write-back to the rows assigned to each block. Set by
+  !! @ref oft_schwarz_precond.
+  LOGICAL :: additive = .FALSE.
+  !> Weight the additive combination by a partition of unity: each block solution is
+  !! scaled on each row by one over the number of blocks containing the row. Only used
+  !! with `additive`. Set by @ref oft_schwarz_precond.
+  LOGICAL :: weighted = .FALSE.
+  INTEGER(i4), POINTER, DIMENSION(:) :: lunion => NULL() !< Rows covered by any block (additive combination)
 CONTAINS
   !> Solve system
   PROCEDURE :: apply => bjprecond_apply
@@ -270,6 +294,38 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => bjprecond_delete
 END TYPE oft_bjprecond
+!------------------------------------------------------------------------------
+!> Overlapping Schwarz preconditioner (restricted, additive or weighted additive)
+!!
+!! Subdomain problems are solved with the sub-solver `pre` (as for
+!! @ref oft_bjprecond) on subdomains grown from a non-overlapping partition by
+!! `overlap` layers along the matrix graph, and combined either restricted (each row
+!! is taken from the subdomain it was assigned to; default), additively (sum of
+!! the subdomain solutions, symmetric for symmetric sub-solves) or weighted additively
+!! (`additive` and `weighted`: sum of the subdomain solutions scaled on each row by
+!! one over the number of subdomains containing the row, a partition of unity).
+!! - `nlocal=1` (default): one subdomain per process made of its owned rows, grown
+!!   across processes (rows held only by other processes are transferred, see
+!!   @ref oft_native_overlap_mod::native_overlap_setup "native_overlap_setup").
+!!   `overlap=0` is block-Jacobi on the owned rows.
+!! - `nlocal>1` (or negative for slice groups, as for @ref oft_bjprecond): blocks
+!!   within each process, grown within the owned rows of the process (`overlap=1`
+!!   restricted is the `loverlap` option of @ref oft_bjprecond).
+!------------------------------------------------------------------------------
+TYPE, PUBLIC, EXTENDS(oft_bjprecond) :: oft_schwarz_precond
+  INTEGER(i4) :: overlap = 1 !< Number of overlap layers
+  TYPE(oft_native_overlap), POINTER :: ovl => NULL() !< Subdomain across processes (`nlocal=1`, `overlap>0`)
+  TYPE(oft_seam), POINTER :: sub_seam => NULL() !< Seam of subdomain vectors (no stitching)
+  TYPE(oft_native_vector), POINTER :: usub => NULL() !< Subdomain solution vector
+  TYPE(oft_native_vector), POINTER :: gsub => NULL() !< Subdomain right-hand side vector
+CONTAINS
+  !> Solve system
+  PROCEDURE :: apply => schwarz_apply
+  !> Setup solver from XML node
+  PROCEDURE :: setup_from_xml => schwarz_setup_xml
+  !> Clean-up internal storage
+  PROCEDURE :: delete => schwarz_delete
+END TYPE oft_schwarz_precond
 !------------------------------------------------------------------------------
 !> Inverted diagonal block for @ref oft_native_dense_cbjprecond
 !------------------------------------------------------------------------------
@@ -361,7 +417,7 @@ call u%new(p)
 call u%new(q)
 if(self%precond)then
   call u%new(r)
-  call r%add(0.d0,1.d0,g)
+  call r%copy(g)
 end if
 if(associated(self%pre))call u%new(s)
 if(associated(self%bc))call self%bc%apply(g)
@@ -378,13 +434,13 @@ else
   alfa=1.d0; f=pdq/2.d0-gg
 endif
 call g%add(1.d0,-1.d0,q)
-call p%add(0.d0,1.d0,g)
+call p%copy(g)
 if(associated(self%pre))then
   pm_save=oft_env%pm; oft_env%pm=self%pre%pm
   call self%pre%apply(s,p)
   oft_env%pm=pm_save
   if(associated(self%bc))call self%bc%apply(s)
-  call p%add(0.d0,1.d0,s)
+  call p%copy(s)
 end if
 gg = g%dot(p)
 ggin = g%dot(g)
@@ -396,7 +452,7 @@ if(its==0.or.gg==0.d0)then
   call q%delete
   deallocate(p,q)
   if(self%precond)then
-    call g%add(0.d0,1.d0,r)
+    call g%copy(r)
     CALL r%delete
     DEALLOCATE(r)
   end if
@@ -424,13 +480,13 @@ do k=1,max_its
   call u%add(1.d0,alfa,p)
   call g%add(1.d0,-alfa,q)
   if(associated(self%cleaner))call self%cleaner%apply(g)
-  call q%add(0.d0,1.d0,g)
+  call q%copy(g)
   if(associated(self%pre))then
     pm_save=oft_env%pm; oft_env%pm=self%pre%pm
     call self%pre%apply(s,q)
     oft_env%pm=pm_save
     if(associated(self%bc))call self%bc%apply(s)
-    call q%add(0.d0,1.d0,s)
+    call q%copy(s)
   end if
   if(associated(self%orthog))call self%orthog%apply(q)
   ggold=gg
@@ -457,7 +513,7 @@ call p%delete
 call q%delete
 DEALLOCATE(p,q)
 if(self%precond)then
-  call g%add(0.d0,1.d0,r)
+  call g%copy(r)
   CALL r%delete
   DEALLOCATE(r)
 end if
@@ -643,7 +699,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   do i=1,nrits
     ! Precondition search direction
     if(associated(self%pre))then
-      call w%add(0.d0,1.d0,v(i)%f)
+      call w%copy(v(i)%f)
       CALL z(i)%f%set(0.d0)
       pm_save=oft_env%pm; oft_env%pm=self%pre%pm
       pre_full_res=self%pre%full_residual
@@ -652,7 +708,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       self%pre%full_residual=pre_full_res
       oft_env%pm=pm_save
     else
-      call z(i)%f%add(0.d0,1.d0,v(i)%f)
+      call z(i)%f%copy(v(i)%f)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
@@ -667,16 +723,12 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
     h(1:i,i)=hdots(1:i)
     wnorm0=SQRT(hdots(i+1))
-    do k=1,i
-      call w%add(1.d0,-h(k,i),v(k)%f)
-    end do
+    call w%maxpy(-h(1:i,i),v(1:i),i)
     !if(associated(self%cleaner))call self%cleaner%apply(w)
     h(i+1,i)=SQRT(w%dot(w))
     IF(h(i+1,i)<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=w%mdot(v(1:i),i)
-      do k=1,i
-        call w%add(1.d0,-hdots(k),v(k)%f)
-      end do
+      call w%maxpy(-hdots(1:i),v(1:i),i)
       h(1:i,i)=h(1:i,i)+hdots(1:i)
       h(i+1,i)=SQRT(w%dot(w))
     END IF
@@ -707,10 +759,8 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       CALL gmres_backsolve(i,h,res,hdots)
       ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
-        call w%add(0.d0,1.d0,u) ! Form iterate in w (used as scratch)
-        do k=1,i
-          call w%add(1.d0,hdots(k),z(k)%f)
-        end do
+        call w%copy(u) ! Form iterate in w (used as scratch)
+        call w%maxpy(hdots(1:i),z(1:i),i)
         inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(w%dot(w)))
         IF(inner_conv)EXIT
       END IF
@@ -722,12 +772,10 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   k=i
   ! Update iterate
   IF(inner_conv)THEN
-    call u%add(0.d0,1.d0,w) ! Already formed by inner convergence check
+    call u%copy(w) ! Already formed by inner convergence check
   ELSE
     CALL gmres_backsolve(k,h,res,hdots)
-    do i=1,k
-      call u%add(1.d0,hdots(i),z(i)%f)
-    enddo
+    call u%maxpy(hdots(1:k),z(1:k),k)
   END IF
   ! Early inner exits based on |r|/|u| must be confirmed with the true residual
   IF(((nits==its).OR.((k<nrits).AND.(.NOT.inner_conv))).AND.(.NOT.self%full_residual))EXIT
@@ -750,7 +798,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(uu==uuold)EXIT
 end do
 END IF
-call g%add(0.d0,1.d0,r)
+call g%copy(r)
 deallocate(c,s,h,res,hdots,vw,znorm)
 self%cits=nits
 IF(nits==its)self%cits=-1
@@ -940,7 +988,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   do i=1,nrits
     ! Precondition search direction
     if(associated(self%pre))then
-      call w%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
+      call w%copy(v(i)%f)
       CALL z(i)%f%set((0.d0,0.d0))
       pm_save=oft_env%pm; oft_env%pm=self%pre%pm
       pre_full_res=self%pre%full_residual
@@ -949,7 +997,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       self%pre%full_residual=pre_full_res
       oft_env%pm=pm_save
     else
-      call z(i)%f%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
+      call z(i)%f%copy(v(i)%f)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
@@ -964,16 +1012,12 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
     h(1:i,i)=CONJG(hdots(1:i)) ! mdot gives w^H v_k
     wnorm0=SQRT(REAL(hdots(i+1),r8))
-    do k=1,i
-      call w%add((1.d0,0.d0),-h(k,i),v(k)%f)
-    end do
+    call w%maxpy(-h(1:i,i),v(1:i),i)
     !if(associated(self%cleaner))call self%cleaner%apply(w)
     h(i+1,i)=SQRT(REAL(w%dot(w),r8))
     IF(ABS(h(i+1,i))<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
       hdots(1:i)=CONJG(w%mdot(v(1:i),i))
-      do k=1,i
-        call w%add((1.d0,0.d0),-hdots(k),v(k)%f)
-      end do
+      call w%maxpy(-hdots(1:i),v(1:i),i)
       h(1:i,i)=h(1:i,i)+hdots(1:i)
       h(i+1,i)=SQRT(REAL(w%dot(w),r8))
     END IF
@@ -1004,10 +1048,8 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
       CALL gmres_backsolve(i,h,res,hdots)
       ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
-        call w%add((0.d0,0.d0),(1.d0,0.d0),u) ! Form iterate in w (used as scratch)
-        do k=1,i
-          call w%add((1.d0,0.d0),hdots(k),z(k)%f)
-        end do
+        call w%copy(u) ! Form iterate in w (used as scratch)
+        call w%maxpy(hdots(1:i),z(1:i),i)
         inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(REAL(w%dot(w),r8)))
         IF(inner_conv)EXIT
       END IF
@@ -1019,12 +1061,10 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   k=i
   ! Update iterate
   IF(inner_conv)THEN
-    call u%add((0.d0,0.d0),(1.d0,0.d0),w) ! Already formed by inner convergence check
+    call u%copy(w) ! Already formed by inner convergence check
   ELSE
     CALL gmres_backsolve(k,h,res,hdots)
-    do i=1,k
-      call u%add((1.d0,0.d0),hdots(i),z(i)%f)
-    enddo
+    call u%maxpy(hdots(1:k),z(1:k),k)
   END IF
   IF((nits==its).AND.(.NOT.self%full_residual))EXIT
   call A%apply(u,w)
@@ -1045,7 +1085,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(uu==uuold)EXIT
 end do
 END IF
-call g%add((0.d0,0.d0),(1.d0,0.d0),r)
+call g%copy(r)
 deallocate(c,s,h,res,hdots,vw,znorm)
 self%cits=nits
 IF(nits==its)self%cits=-1
@@ -1266,13 +1306,13 @@ call u%scale(sf)
 call b%scale(sf)
 call c%scale(sf)
 call g%add(0.d0,1.d0,c,-1.d0/ev,b)
-call f%add(0.d0,1.d0,g)
+call f%copy(g)
 if(associated(self%pre))then
   pm_save=oft_env%pm; oft_env%pm=self%pre%pm
   call self%pre%apply(s,f)
   oft_env%pm=pm_save
   if(associated(self%bc))call self%bc%apply(s)
-  call f%add(0.d0,1.d0,s)
+  call f%copy(s)
 end if
 gg = g%dot(f)
 ggnew = g%dot(g)
@@ -1297,7 +1337,7 @@ ninner = INT(u%ng,4)
 if((self%ninner>0).AND.(self%ninner<u%ng))ninner=self%ninner
 ! iterate to find the solution
 do ir=1,self%nrestarts ! restart loop
-call e%add(0.d0,1.d0,f)
+call e%copy(f)
 do n=1,ninner
   if(associated(self%orthog))call self%orthog%apply(e)
   call A%apply(e,g)
@@ -1331,13 +1371,13 @@ do n=1,ninner
   call b%add(sf,alfa*sf,f)
   call c%add(sf,alfa*sf,g)
   call g%add(0.d0,1.d0,c,-1.d0/ev,b)
-  call f%add(0.d0,1.d0,g)
+  call f%copy(g)
   if ( associated(self%pre) )then
     pm_save=oft_env%pm; oft_env%pm=self%pre%pm
     call self%pre%apply(s,f)
     oft_env%pm=pm_save
     if(associated(self%bc))call self%bc%apply(s)
-    call f%add(0.d0,1.d0,s)
+    call f%copy(s)
   end if
   gg = g%dot(f)
   ggnew = g%dot(g)
@@ -1494,7 +1534,7 @@ CLASS(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
 CLASS(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 DEBUG_STACK_PUSH
 if(g%n/=u%n)call oft_abort('Size mismatch','identity_inv_apply',__FILE__)
-call u%add(0.d0,1.d0,g)
+call u%copy(g)
 DEBUG_STACK_POP
 end subroutine identity_inv_apply
 !------------------------------------------------------------------------------
@@ -1537,7 +1577,7 @@ if(g%n/=self%A%nr)call oft_abort('Row mismatch.','diag_scale_apply',__FILE__)
 if(u%n/=self%A%nc)call oft_abort('Col mismatch.','diag_scale_apply',__FILE__)
 if(.NOT.associated(self%A%D))call oft_abort('No diagonal entries.','diag_scale_apply',__FILE__)
 !---
-call u%add(0.d0,1.d0,g)
+call u%copy(g)
 call u%mult(self%A%D,div_flag=.TRUE.)
 DEBUG_STACK_POP
 end subroutine diag_scale_apply
@@ -1604,7 +1644,7 @@ class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
 class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_vector), pointer :: p,q
 class(oft_native_vector), pointer :: uv,gv,md
-integer(i4) :: i,k,ierr
+integer(i4) :: k
 DEBUG_STACK_PUSH
 IF(g%n/=self%A%nr)CALL oft_abort('Row mismatch','jblock_precond_apply',__FILE__)
 IF(u%n/=self%A%nc)CALL oft_abort('Col mismatch','jblock_precond_apply',__FILE__)
@@ -1628,50 +1668,40 @@ IF(self%warn_once.AND.self%its<=0)THEN
 END IF
 !---
 if(self%down) then ! Down smoother
-  !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-  do i=1,u%n
-    uv%v(i)=0.d0
-    self%p%v(i)=self%df*gv%v(i)/md%v(i)
-  end do
+  CALL nk_jacobi_start(u%n,self%df,md%v,gv%v,uv%v,self%p%v)
   IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   do k=1,self%its
     call self%A%apply(self%p,self%q)
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
-    !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-    do i=1,u%n
-      uv%v(i)=uv%v(i)+self%p%v(i)
-      gv%v(i)=gv%v(i)-self%q%v(i)
-      self%p%v(i)=self%df*gv%v(i)/md%v(i)
-    end do
+    IF(k<self%its)THEN
+      CALL nk_jacobi_sweep(u%n,self%df,md%v,self%q%v,gv%v,self%p%v,u=uv%v)
+    ELSE ! Last iteration, also save state for up smoother (u and g are final here)
+      CALL nk_jacobi_sweep(u%n,self%df,md%v,self%q%v,gv%v,self%p%v,u=uv%v, &
+        usave=self%u_save,gsave=self%g_save)
+    END IF
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
   end do
-  !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
-  do i=1,u%n
-    self%u_save(i)=uv%v(i)
-    self%g_save(i)=gv%v(i)
-  end do
+  IF(self%its<1)THEN
+    CALL nk_copy(u%n,uv%v,self%u_save)
+    CALL nk_copy(u%n,gv%v,self%g_save)
+  END IF
   self%down=.FALSE.
 else ! Up smoother
-  !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
-  do i=1,u%n
-    self%p%v(i)=uv%v(i)-self%u_save(i)
-    gv%v(i)=self%g_save(i)
-  end do
+  CALL nk_jacobi_restart(u%n,uv%v,self%u_save,self%g_save,gv%v,self%p%v)
   IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
+  !---The update of u with the (BC-applied) correction from step k is deferred into the
+  !---sweep of step k+1, which is valid as neither A%apply nor bc%apply(q) touch u
   do k=1,self%its
     call self%A%apply(self%p,self%q)
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%q)
-    !$omp parallel do if(u%n>OFT_OMP_VTHRESH/2)
-    do i=1,u%n
-      gv%v(i)=gv%v(i)-self%q%v(i)
-      self%p%v(i)=self%df*gv%v(i)/md%v(i)
-    end do
+    IF(k==1)THEN
+      CALL nk_jacobi_sweep(u%n,self%df,md%v,self%q%v,gv%v,self%p%v)
+    ELSE
+      CALL nk_jacobi_sweep(u%n,self%df,md%v,self%q%v,gv%v,self%p%v,u=uv%v)
+    END IF
     IF(ASSOCIATED(self%bc))call self%bc%apply(self%p)
-    !$omp parallel do if(u%n>OFT_OMP_VTHRESH)
-    do i=1,u%n
-      uv%v(i)=uv%v(i)+self%p%v(i)
-    end do
   end do
+  IF(self%its>0)CALL nk_axpby(u%n,1.d0,1.d0,self%p%v,uv%v)
   self%down=.TRUE.
 end if
 DEBUG_STACK_POP
@@ -1809,7 +1839,7 @@ IF(.NOT.self%initialized)THEN
   END IF
   CALL solver_setup(self)
 END IF
-call self%r%add(0.d0,1.d0,g)
+call self%r%copy(g)
 !---Report input residual
 IF(self%report_err>0)CALL print_residual('In:')
 !---Apply down smoother
@@ -1841,7 +1871,7 @@ if(associated(self%base_solve))then
   self%timings(4)=self%timings(4)+mytimer%tock()
 end if
 !---Reset RHS
-call g%add(0.d0,1.d0,self%r)
+call g%copy(self%r)
 !---Apply up smoother
 if(associated(self%smooth_up))then
   !---Report up residual
@@ -1849,7 +1879,7 @@ if(associated(self%smooth_up))then
     CALL self%smooth_up%A%apply(u,g)
     CALL g%add(1.d0,-1.d0,self%r)
     CALL print_residual('Up:')
-    call g%add(0.d0,1.d0,self%r)
+    call g%copy(self%r)
   END IF
   !
   CALL mytimer%tick
@@ -2031,8 +2061,13 @@ LOGICAL :: thread_safe,color_avail
 LOGICAL, POINTER, DIMENSION(:) :: eflag
 INTEGER(i4) :: i,j,jr,k,ngroups,ncolors
 INTEGER(i4), POINTER, DIMENSION(:) :: part,part_tmp,sflag
-TYPE(oft_native_vector) :: uloc,gloc
-REAL(r8), POINTER, DIMENSION(:) :: vals,uvals,gvals,uinit
+TYPE(oft_native_vector) :: uloc
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: wt
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: nblk
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: allowed
+INTEGER(i4) :: nlev
+TYPE(oft_index_set) :: bset
 TYPE(oft_graph) :: graph
 CLASS(oft_native_matrix), POINTER :: A_native
 CLASS(oft_solver), POINTER :: pretmp
@@ -2189,43 +2224,37 @@ IF(.NOT.self%initialized)THEN
       self%parts(part(i))%n=self%parts(part(i))%n+1
       self%parts(part(i))%v(self%parts(part(i))%n) = i
     END DO
-    IF(self%loverlap.AND.self%nlocal>1)THEN
-      ALLOCATE(sflag(A_native%nr))
+    nlev=0
+    IF(self%loverlap)nlev=1
+    IF(self%overlap_levels>=0)nlev=self%overlap_levels
+    IF(nlev>0.AND.self%nlocal>1)THEN
+      !---Grow each block along the matrix graph, within rows of the same slice group
+      ALLOCATE(sflag(A_native%nr),allowed(A_native%nr))
+      sflag=-1
       DO i=1,self%A%ni
-        DO k=1,self%A%i_map(i)%nslice
-          j=self%A%i_map(i)%offset+self%A%i_map(i)%slice(k)
-          sflag(j)=self%slice_group(i)
-        END DO
-      END DO
-      parts_tmp=>self%parts
-      ALLOCATE(self%parts(self%nlocal))
-      !$omp parallel private(j,jr,k,eflag)
-      ALLOCATE(eflag(A_native%nr))
-      !$omp do
-      DO i=1,self%nlocal
-        eflag=(part==i)
-        DO j=1,parts_tmp(i)%n
-          jr=parts_tmp(i)%v(j)
-          DO k=A_native%kr(jr),A_native%kr(jr+1)-1
-            IF(sflag(A_native%lc(k))==sflag(jr))eflag(A_native%lc(k))=.TRUE.
+        IF(self%boundary_overlap)THEN
+          DO k=1,self%A%i_map(i)%n
+            sflag(self%A%i_map(i)%offset+k)=self%slice_group(i)
           END DO
-        END DO
-        DO j=1,A_native%nr
-          IF(part(j)<0)eflag(j)=.FALSE.
-        END DO
-        self%parts(i)%n=COUNT(eflag)
-        ALLOCATE(self%parts(i)%v(self%parts(i)%n))
-        k=0
-        DO j=1,A_native%nr
-          IF(.NOT.eflag(j))CYCLE
-          k=k+1
-          self%parts(i)%v(k)=j
-        END DO
-        DEALLOCATE(parts_tmp(i)%v)
+        ELSE
+          DO k=1,self%A%i_map(i)%nslice
+            j=self%A%i_map(i)%offset+self%A%i_map(i)%slice(k)
+            sflag(j)=self%slice_group(i)
+          END DO
+        END IF
       END DO
-      DEALLOCATE(eflag)
-      !$omp end parallel
-      DEALLOCATE(parts_tmp,sflag)
+      allowed=(part>=0)
+      !$omp parallel do private(bset)
+      DO i=1,self%nlocal
+        CALL index_set_create(bset,self%parts(i)%n,self%parts(i)%v)
+        CALL index_set_grow(bset,A_native%nr,A_native%kr,A_native%lc,nlev,allowed=allowed,same=sflag)
+        DEALLOCATE(self%parts(i)%v)
+        self%parts(i)%n=bset%n
+        ALLOCATE(self%parts(i)%v(bset%n))
+        IF(bset%n>0)self%parts(i)%v=bset%ind
+        CALL index_set_delete(bset)
+      END DO
+      DEALLOCATE(sflag,allowed)
     END IF
     !---Create dummy local vector
     uloc%n=A_native%nr
@@ -2238,12 +2267,50 @@ IF(.NOT.self%initialized)THEN
       ALLOCATE(self%solvers(i)%s, source=pretmp)
       IF(ASSOCIATED(pretmp%pre))ALLOCATE(self%solvers(i)%s%pre, source=pretmp%pre)
     END DO
-    IF(self%loverlap.AND.self%nlocal>1)THEN
-      !$omp parallel do private(j)
+    !---Block gather/scatter plans (restricted write-back on overlap rows)
+    ALLOCATE(self%bplans(self%nlocal))
+    IF(nlev>0.AND.self%nlocal>1.AND.(.NOT.self%additive))THEN
+      !$omp parallel do private(j,wt)
+      DO i=1,self%nlocal
+        ALLOCATE(wt(self%parts(i)%n))
+        DO j=1,self%parts(i)%n
+          wt(j)=MERGE(1.d0,0.d0,part(self%parts(i)%v(j))==i)
+        END DO
+        CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v,wt=wt)
+        DEALLOCATE(wt)
+      END DO
+    ELSE IF(nlev>0.AND.self%nlocal>1.AND.self%weighted)THEN
+      !---Partition of unity: one over the number of blocks containing each row
+      ALLOCATE(nblk(A_native%nr))
+      nblk=0
       DO i=1,self%nlocal
         DO j=1,self%parts(i)%n
-          IF(part(self%parts(i)%v(j))/=i)self%parts(i)%v(j)=-self%parts(i)%v(j)
+          nblk(self%parts(i)%v(j))=nblk(self%parts(i)%v(j))+1
         END DO
+      END DO
+      !$omp parallel do private(j,wt)
+      DO i=1,self%nlocal
+        ALLOCATE(wt(self%parts(i)%n))
+        DO j=1,self%parts(i)%n
+          wt(j)=1.d0/REAL(nblk(self%parts(i)%v(j)),r8)
+        END DO
+        CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v,wt=wt)
+        DEALLOCATE(wt)
+      END DO
+      DEALLOCATE(nblk)
+    ELSE
+      DO i=1,self%nlocal
+        CALL scatter_plan_setup_local(self%bplans(i),self%parts(i)%n,self%parts(i)%v)
+      END DO
+    END IF
+    !---Rows covered by the blocks (zeroed before an additive combination)
+    IF(self%additive)THEN
+      ALLOCATE(self%lunion(COUNT(part>=0)))
+      j=0
+      DO i=1,A_native%nr
+        IF(part(i)<0)CYCLE
+        j=j+1
+        self%lunion(j)=i
       END DO
     END IF
     DEALLOCATE(part)
@@ -2263,6 +2330,12 @@ IF(self%nlocal>1)THEN
       self%local_stitch(i)%be=.FALSE.
     END DO
   END IF
+  !---Persistent local vectors for each block
+  IF(.NOT.ASSOCIATED(self%ulocs))ALLOCATE(self%ulocs(self%nlocal),self%glocs(self%nlocal))
+  DO i=1,self%nlocal
+    CALL bjprecond_local_vec(self%ulocs(i),self%parts(i)%n,self%local_stitch(i))
+    CALL bjprecond_local_vec(self%glocs(i),self%parts(i)%n,self%local_stitch(i))
+  END DO
   IF(self%update_slice)THEN
     CALL A_native%update_slice
     !$omp parallel do
@@ -2270,115 +2343,96 @@ IF(self%nlocal>1)THEN
       CALL self%alocals(i)%update_slice
     END DO
   END IF
+  !---Borrow local values (no copy for native vectors)
   NULLIFY(uvals,gvals)
-  CALL u%get_local(uvals)
-  CALL g%get_local(gvals)
-  !---With overlap, parts read rows owned by other parts. Take initial guesses
-  !   from a copy so they do not depend on the order parts are solved in.
-  IF(self%loverlap)THEN
-    ALLOCATE(uinit(SIZE(uvals)))
-    uinit=uvals
-  ELSE
-    uinit=>uvals
-  END IF
-  !---Only open a parallel region if the sub-solver is thread safe and we are
-  !   not already in an active parallel region. Sub-solvers that are not thread
-  !   safe (eg. SuperLU-DIST, MUMPS) may use OpenMP internally, and even an
-  !   inactive outer region makes their teams nested. On targets where libgomp
-  !   uses its POSIX barrier (eg. macOS) nested teams that create tasks can
-  !   deadlock or release threads early.
-  IF(thread_safe.AND.(.NOT.omp_in_parallel()))THEN
-    !$omp parallel do schedule(dynamic,1)
-    DO i=1,self%nlocal
-      CALL apply_part(i)
+  CALL u%borrow_local(uvals,OFT_ACCESS_READWRITE)
+  CALL g%borrow_local(gvals,OFT_ACCESS_READ)
+  !---Each block (and its local vectors) is only accessed by one thread
+  !$omp parallel if(thread_safe)
+  !$omp do schedule(dynamic,1)
+  DO i=1,self%nlocal
+    !---Get local slice for solve
+    CALL scatter_local(self%bplans(i),gvals,self%glocs(i)%v,OFT_SCATTER_INSERT)
+    CALL scatter_local(self%bplans(i),uvals,self%ulocs(i)%v,OFT_SCATTER_INSERT)
+    !---Solve sub-system
+    self%solvers(i)%s%A=>self%alocals(i)
+    CALL self%solvers(i)%s%apply(self%ulocs(i),self%glocs(i))
+    !---Replace local slice into solution (rows with non-zero weight only)
+    IF(.NOT.self%additive)CALL scatter_local(self%bplans(i),self%ulocs(i)%v,uvals,OFT_SCATTER_INSERT,reverse=.TRUE.)
+  END DO
+  !$omp end parallel
+  !---Additive combination: sum of the (weighted) block solutions (blocks in order)
+  IF(self%additive)THEN
+    DO j=1,SIZE(self%lunion)
+      uvals(self%lunion(j))=0.d0
     END DO
-  ELSE
     DO i=1,self%nlocal
-      CALL apply_part(i)
+      CALL scatter_local(self%bplans(i),self%ulocs(i)%v,uvals,OFT_SCATTER_ADD,reverse=.TRUE.)
     END DO
   END IF
-  CALL u%restore_local(uvals)
-  IF(self%loverlap)DEALLOCATE(uinit)
-  DEALLOCATE(uvals,gvals)
+  !---Local solves on shared rows differ between processes, so synchronize from owner
+  CALL u%release_local(uvals,OFT_ACCESS_READWRITE,sync=.TRUE.)
+  CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
 ELSE
+  !---Persistent local vectors, with a local seam that skips all stitching/reductions
+  IF(.NOT.ASSOCIATED(self%local_stitch))THEN
+    ALLOCATE(self%local_stitch(1))
+    self%local_stitch(1)%skip=.TRUE.
+  END IF
+  IF(.NOT.ASSOCIATED(self%ulocs))ALLOCATE(self%ulocs(1),self%glocs(1))
   IF(self%boundary_overlap)THEN
     IF(self%update_slice)CALL A_native%update_slice
     !---Setup local vectors
-    gloc%n=g%n; uloc%n=u%n
-    NULLIFY(gloc%local_tmp,uloc%local_tmp)
-    ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
-    ALLOCATE(gloc%stitch_info,uloc%stitch_info)
-    gloc%stitch_info%skip=.TRUE.
-    uloc%stitch_info%skip=.TRUE.
+    CALL bjprecond_local_vec(self%glocs(1),g%n,self%local_stitch(1))
+    CALL bjprecond_local_vec(self%ulocs(1),u%n,self%local_stitch(1))
     !---Get local slice for solve
-    CALL g%get_local(gloc%v)
-    CALL u%get_local(uloc%v)
+    CALL g%get_local(self%glocs(1)%v)
+    CALL u%get_local(self%ulocs(1)%v)
     !---Zero source on redundant rows
     IF(ASSOCIATED(A_native%redind))THEN
       DO i=1,A_native%nred
-        gloc%v(A_native%redind(i))=0.d0
+        self%glocs(1)%v(A_native%redind(i))=0.d0
       END DO
     END IF
     !---Solve sub-system
     self%solvers(1)%s%A=>self%A
-    CALL self%solvers(1)%s%apply(uloc,gloc)
+    CALL self%solvers(1)%s%apply(self%ulocs(1),self%glocs(1))
     !---Replace local slice into solution
-    CALL u%restore_local(uloc%v)
+    CALL u%restore_local(self%ulocs(1)%v)
   ELSE
     IF(self%update_slice)CALL self%alocals(1)%update_slice
     !---Setup local vectors
-    gloc%n=g%nslice; uloc%n=u%nslice
-    NULLIFY(gloc%local_tmp,uloc%local_tmp)
-    ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
-    ALLOCATE(gloc%stitch_info,uloc%stitch_info)
-    gloc%stitch_info%skip=.TRUE.
-    uloc%stitch_info%skip=.TRUE.
+    CALL bjprecond_local_vec(self%glocs(1),g%nslice,self%local_stitch(1))
+    CALL bjprecond_local_vec(self%ulocs(1),u%nslice,self%local_stitch(1))
     !---Get local slice for solve
-    CALL g%get_slice(gloc%v)
-    CALL u%get_slice(uloc%v)
+    CALL g%get_slice(self%glocs(1)%v)
+    CALL u%get_slice(self%ulocs(1)%v)
     !---Solve sub-system
     self%solvers(1)%s%A=>self%alocals(1)
-    CALL self%solvers(1)%s%apply(uloc,gloc)
+    CALL self%solvers(1)%s%apply(self%ulocs(1),self%glocs(1))
     !---Replace local slice into solution
-    CALL u%restore_slice(uloc%v)
+    CALL u%restore_slice(self%ulocs(1)%v)
   END IF
-  DEALLOCATE(gloc%v,uloc%v,gloc%stitch_info,uloc%stitch_info)
 END IF
 self%update_slice=.FALSE.
 DEBUG_STACK_POP
-CONTAINS
-!------------------------------------------------------------------------------
-!> Solve the local sub-system for a single part
-!------------------------------------------------------------------------------
-RECURSIVE SUBROUTINE apply_part(ii)
-INTEGER(i4), INTENT(in) :: ii !< Index of part to solve
-INTEGER(i4) :: jj
-TYPE(oft_native_vector) :: uloc,gloc
-NULLIFY(gloc%local_tmp,uloc%local_tmp)
-!---Setup local vectors
-gloc%n=self%parts(ii)%n; uloc%n=self%parts(ii)%n
-gloc%ng=self%parts(ii)%n; uloc%ng=self%parts(ii)%n
-gloc%nslice=self%parts(ii)%n; uloc%nslice=self%parts(ii)%n
-ALLOCATE(gloc%v(gloc%n),uloc%v(uloc%n))
-gloc%stitch_info=>self%local_stitch(ii)
-uloc%stitch_info=>self%local_stitch(ii)
-!---Get local slice for solve
-!$omp simd
-DO jj=1,self%parts(ii)%n
-  gloc%v(jj)=gvals(ABS(self%parts(ii)%v(jj)))
-  uloc%v(jj)=uinit(ABS(self%parts(ii)%v(jj)))
-END DO
-!---Solve sub-system
-self%solvers(ii)%s%A=>self%alocals(ii)
-CALL self%solvers(ii)%s%apply(uloc,gloc)
-!---Replace local slice into solution
-!$omp simd
-DO jj=1,self%parts(ii)%n
-  IF(self%parts(ii)%v(jj)>0)uvals(self%parts(ii)%v(jj))=uloc%v(jj)
-END DO
-DEALLOCATE(gloc%v,uloc%v)
-END SUBROUTINE apply_part
 END SUBROUTINE bjprecond_apply
+!------------------------------------------------------------------------------
+!> Setup a persistent local vector for @ref oft_bjprecond, (re)allocating if needed
+!------------------------------------------------------------------------------
+SUBROUTINE bjprecond_local_vec(vec,n,seam)
+TYPE(oft_native_vector), INTENT(inout) :: vec !< Local vector
+INTEGER(i4), INTENT(in) :: n !< Number of local values
+TYPE(oft_seam), TARGET, INTENT(inout) :: seam !< Local seam for vector
+IF(ASSOCIATED(vec%v))THEN
+  IF(SIZE(vec%v)/=n)DEALLOCATE(vec%v)
+END IF
+IF(.NOT.ASSOCIATED(vec%v))ALLOCATE(vec%v(n))
+vec%n=n
+vec%ng=INT(n,i8)
+vec%nslice=n
+vec%stitch_info=>seam
+END SUBROUTINE bjprecond_local_vec
 !------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
 !------------------------------------------------------------------------------
@@ -2485,6 +2539,14 @@ IF(ASSOCIATED(self%alocals))THEN
   END DO
   DEALLOCATE(self%alocals)
 END IF
+IF(ASSOCIATED(self%lunion))DEALLOCATE(self%lunion)
+!---Destroy block plans
+IF(ASSOCIATED(self%bplans))THEN
+  DO i=1,SIZE(self%bplans)
+    CALL scatter_plan_delete(self%bplans(i))
+  END DO
+  DEALLOCATE(self%bplans)
+END IF
 !---Destory local partitions
 IF(ASSOCIATED(self%parts))THEN
   DO i=1,self%nlocal
@@ -2492,9 +2554,17 @@ IF(ASSOCIATED(self%parts))THEN
   END DO
   DEALLOCATE(self%parts)
 END IF
+!---Destroy local vectors
+IF(ASSOCIATED(self%ulocs))THEN
+  DO i=1,SIZE(self%ulocs)
+    IF(ASSOCIATED(self%ulocs(i)%v))DEALLOCATE(self%ulocs(i)%v)
+    IF(ASSOCIATED(self%glocs(i)%v))DEALLOCATE(self%glocs(i)%v)
+  END DO
+  DEALLOCATE(self%ulocs,self%glocs)
+END IF
 !---Destroy local stitch information
 IF(ASSOCIATED(self%local_stitch))THEN
-  DO i=1,self%nlocal
+  DO i=1,SIZE(self%local_stitch)
     IF(ASSOCIATED(self%local_stitch(i)%be))DEALLOCATE(self%local_stitch(i)%be)
   END DO
   DEALLOCATE(self%local_stitch)
@@ -2504,6 +2574,159 @@ self%nlocal=1
 self%initialized=.FALSE.
 DEBUG_STACK_POP
 end subroutine bjprecond_delete
+!------------------------------------------------------------------------------
+!> Precondition a linear system using an overlapping Schwarz method
+!!
+!! With several blocks per process (`nlocal/=1`) or no overlap this is the
+!! block-Jacobi method of @ref oft_bjprecond with blocks grown by `overlap` layers
+!! within each process. Otherwise the subdomain of each process (owned rows plus
+!! `overlap` layers, across processes) is solved with the sub-solver and combined
+!! restricted (owned rows taken from the local subdomain, then synchronized) or
+!! additively (sum over subdomains).
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE schwarz_apply(self,u,g)
+CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
+CLASS(oft_vector), INTENT(inout) :: u !< Guess (input), Solution (output)
+CLASS(oft_vector), INTENT(inout) :: g !< RHS (input), Residual (output)
+CLASS(oft_native_matrix), POINTER :: A_native
+CLASS(oft_solver), POINTER :: pretmp
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
+DEBUG_STACK_PUSH
+IF(self%overlap<0)CALL oft_abort('Negative overlap','schwarz_apply',__FILE__)
+!---Blocks within each process (or no overlap): block-Jacobi with grown blocks
+IF((self%nlocal/=1).OR.(self%overlap==0).OR.self%boundary_overlap)THEN
+  self%overlap_levels=self%overlap
+  CALL bjprecond_apply(self,u,g)
+  DEBUG_STACK_POP
+  RETURN
+END IF
+!---One subdomain per process, overlapping across processes
+IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
+  'schwarz_apply',__FILE__)
+IF(.NOT.self%initialized)THEN
+  IF(.NOT.ASSOCIATED(self%pre))CALL oft_abort('No sub-solver (preconditioner defined)', &
+    'schwarz_apply',__FILE__)
+  CALL solver_setup(self)
+  ALLOCATE(self%ovl)
+  CALL native_overlap_setup(self%ovl,A_native,u,self%overlap)
+  pretmp=>self%pre
+  ALLOCATE(self%solvers(1))
+  ALLOCATE(self%solvers(1)%s, source=pretmp)
+  IF(ASSOCIATED(pretmp%pre))ALLOCATE(self%solvers(1)%s%pre, source=pretmp%pre)
+  ALLOCATE(self%sub_seam,self%usub,self%gsub)
+  self%sub_seam%skip=.TRUE.
+  CALL bjprecond_local_vec(self%usub,self%ovl%n,self%sub_seam)
+  CALL bjprecond_local_vec(self%gsub,self%ovl%n,self%sub_seam)
+  self%update_slice=.FALSE.
+ELSE IF(self%update_slice)THEN
+  CALL native_overlap_update(self%ovl)
+  self%update_slice=.FALSE.
+END IF
+!---Gather subdomain values, solve, combine
+NULLIFY(uvals,gvals)
+CALL u%borrow_local(uvals,OFT_ACCESS_READWRITE)
+CALL g%borrow_local(gvals,OFT_ACCESS_READ)
+CALL native_overlap_gather(self%ovl,gvals,self%gsub%v)
+CALL native_overlap_gather(self%ovl,uvals,self%usub%v)
+self%solvers(1)%s%A=>self%ovl%amat
+CALL self%solvers(1)%s%apply(self%usub,self%gsub)
+CALL native_overlap_scatter(self%ovl,self%usub%v,uvals,self%additive,weighted=self%weighted)
+!---Restricted: copies of owned rows are synchronized; additive: already consistent
+CALL u%release_local(uvals,OFT_ACCESS_READWRITE,sync=(.NOT.self%additive))
+CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
+DEBUG_STACK_POP
+END SUBROUTINE schwarz_apply
+!------------------------------------------------------------------------------
+!> Setup Schwarz preconditioner from XML definition
+!!
+!! Reads the block-Jacobi options (`nlocal`, `groups`; see @ref bjprecond_setup_xml),
+!! `overlap` (number of overlap layers, default 1) and `type` (`restricted`, default,
+!! `additive`, or `weighted` for additive with partition of unity weights).
+!------------------------------------------------------------------------------
+subroutine schwarz_setup_xml(self,solver_node,level)
+CLASS(oft_schwarz_precond), INTENT(inout) :: self !< Solver object
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
+TYPE(xml_node) :: current_node
+INTEGER(i4) :: ierr,val_level
+INTEGER(i4), POINTER, DIMENSION(:) :: read_tmp
+CHARACTER(LEN=:), ALLOCATABLE :: stype
+DEBUG_STACK_PUSH
+val_level=1
+IF(PRESENT(level))val_level=level
+CALL bjprecond_setup_xml(self,solver_node,level)
+IF(self%loverlap)CALL oft_abort('Use "overlap" instead of "loverlap" for the Schwarz preconditioner', &
+  'schwarz_setup_xml',__FILE__)
+!---Number of overlap layers (one value, or one per level)
+CALL xml_get_element(solver_node,"overlap",current_node,ierr)
+IF(ierr==0)THEN
+  NULLIFY(read_tmp)
+  CALL xml_read_content(current_node,read_tmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `overlap` node","schwarz_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_tmp))THEN
+    IF(SIZE(read_tmp)>1)THEN
+      IF(SIZE(read_tmp)<val_level)CALL oft_abort("Not enough overlap values specified", &
+        "schwarz_setup_xml",__FILE__)
+      self%overlap=read_tmp(val_level)
+    ELSE
+      self%overlap=read_tmp(1)
+    END IF
+    DEALLOCATE(read_tmp)
+  END IF
+END IF
+!---Combination type
+CALL xml_get_element(solver_node,"type",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,stype,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `type` node","schwarz_setup_xml",__FILE__)
+  SELECT CASE(TRIM(stype))
+  CASE("restricted")
+    self%additive=.FALSE.
+    self%weighted=.FALSE.
+  CASE("additive")
+    self%additive=.TRUE.
+    self%weighted=.FALSE.
+  CASE("weighted")
+    self%additive=.TRUE.
+    self%weighted=.TRUE.
+  CASE DEFAULT
+    CALL oft_abort('Unknown Schwarz type "'//TRIM(stype)//'"','schwarz_setup_xml',__FILE__)
+  END SELECT
+END IF
+IF(oft_debug_print(1))THEN
+  WRITE(*,'(A)')'Schwarz solver setup:'
+  WRITE(*,'(2X,A,I4)')  '- Overlap:   ',self%overlap
+  WRITE(*,'(2X,A,3X,L1)')'- Additive:  ',self%additive
+  WRITE(*,'(2X,A,3X,L1)')'- Weighted:  ',self%weighted
+END IF
+DEBUG_STACK_POP
+end subroutine schwarz_setup_xml
+!------------------------------------------------------------------------------
+!> Destroy Schwarz preconditioner and deallocate all internal storage
+!------------------------------------------------------------------------------
+subroutine schwarz_delete(self,propogate)
+class(oft_schwarz_precond), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%ovl))THEN
+  CALL native_overlap_delete(self%ovl)
+  DEALLOCATE(self%ovl)
+  !---Single sub-solver of the cross-process subdomain
+  IF(ASSOCIATED(self%solvers))THEN
+    CALL self%solvers(1)%s%delete(propogate)
+    DEALLOCATE(self%solvers(1)%s)
+    DEALLOCATE(self%solvers)
+  END IF
+END IF
+IF(ASSOCIATED(self%usub))THEN
+  IF(ASSOCIATED(self%usub%v))DEALLOCATE(self%usub%v)
+  IF(ASSOCIATED(self%gsub%v))DEALLOCATE(self%gsub%v)
+  DEALLOCATE(self%usub,self%gsub,self%sub_seam)
+END IF
+CALL bjprecond_delete(self,propogate)
+self%overlap_levels=-1
+DEBUG_STACK_POP
+end subroutine schwarz_delete
 !------------------------------------------------------------------------------
 !> Setup Block-Jacobi preconditioner for a native dense complex matrix
 !!
@@ -2631,8 +2854,8 @@ IF(g%n/=self%A%nr)CALL oft_abort('Row mismatch','dense_cbjprecond_apply',__FILE_
 IF(u%n/=self%A%nc)CALL oft_abort('Col mismatch','dense_cbjprecond_apply',__FILE__)
 IF(self%nlocal/=SIZE(self%blocks))CALL oft_abort('"nlocal" changed since setup','dense_cbjprecond_apply',__FILE__)
 NULLIFY(uvals,gvals)
-CALL u%get_local(uvals)
-CALL g%get_local(gvals)
+CALL u%borrow_local(uvals,OFT_ACCESS_WRITE)
+CALL g%borrow_local(gvals,OFT_ACCESS_READ)
 uvals=(0.d0,0.d0)
 !$omp parallel private(vloc,i,j,n)
 ALLOCATE(vloc(self%max_block_size,2))
@@ -2651,8 +2874,9 @@ END DO
 !$omp end do
 DEALLOCATE(vloc)
 !$omp end parallel
-CALL u%restore_local(uvals)
-DEALLOCATE(uvals,gvals)
+!---Block solves on shared rows differ between processes, so synchronize from owner
+CALL u%release_local(uvals,OFT_ACCESS_WRITE,sync=.TRUE.)
+CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
 DEBUG_STACK_POP
 END SUBROUTINE dense_cbjprecond_apply
 !------------------------------------------------------------------------------
