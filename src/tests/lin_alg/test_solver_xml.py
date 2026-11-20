@@ -153,6 +153,31 @@ def test_gmres_schwarz(schwarz_type):
     assert validate_result(iteration_count,converged_error)
 
 #============================================================================
+# Native ILU(0) options from XML (restricted Schwarz sub-solver as above): a small-pivot threshold
+# leaves the factorization of this well-conditioned operator unchanged, while a diagonal shift
+# factors a perturbed operator and so weakens the preconditioner
+@pytest.mark.parametrize("ilu_opts", ("pivot_tol", "diag_shift"))
+def test_gmres_schwarz_ilu_options(ilu_opts):
+    opts = {"pivot_tol": "<pivot_tol>1.E-8</pivot_tol>",
+            "diag_shift": "<pivot_tol>0.0</pivot_tol><diag_shift>0.5</diag_shift>"}[ilu_opts]
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>4</nlocal>
+            <overlap>1</overlap>
+            <type>restricted</type>
+            <pre type="ilu">{0}</pre>
+        </pre>
+    </solver>
+    """.format(opts)
+    iteration_count = {"pivot_tol": 58, "diag_shift": 111}[ilu_opts]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
 # Native overlapping Schwarz selected from XML: one subdomain per process grown by one layer
 # across processes
 @pytest.mark.mpi
