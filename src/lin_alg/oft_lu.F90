@@ -25,8 +25,11 @@ USE oft_local
 USE oft_base
 USE oft_la_base, ONLY: oft_vector, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE
 USE oft_solver_base, ONLY: oft_solver
-USE oft_native_la, ONLY: oft_native_matrix, native_matrix_cast, native_pattern_diag
-USE oft_native_kernels, ONLY: nk_ilu0_factor, nk_ilu0_solve
+USE oft_native_la, ONLY: oft_native_matrix, native_matrix_cast, native_pattern_diag, &
+  native_pattern_ilu_sched
+USE oft_native_kernels, ONLY: nk_ilu0_factor, nk_ilu0_solve, nk_ilu0_sched_values, &
+  native_ilu_sched, native_ilu_sched_build, native_ilu_sched_free, native_ilu_sched_stats, &
+  native_ilu_sched_active
 IMPLICIT NONE
 #include "local.h"
 #ifdef HAVE_MUMPS
@@ -68,8 +71,11 @@ PUBLIC lapack_matinv, lapack_cholesky
 !! entry itself. The diagonal locations come from the matrix's pattern
 !! (@ref oft_native_la::native_pattern_diag "native_pattern_diag", shared by all
 !! matrices and solvers using the pattern), or from a private index for matrices
-!! without one. Owned storage is allocatable so that copies of a solver (eg.
-!! `ALLOCATE(..., source=)` in block-Jacobi) are independent deep copies.
+!! without one. The level schedules used by the threaded kernels are likewise those
+!! of the pattern (@ref oft_native_la::native_pattern_ilu_sched
+!! "native_pattern_ilu_sched") or private ones. Owned storage is allocatable so that
+!! copies of a solver (eg. `ALLOCATE(..., source=)` in block-Jacobi) are independent
+!! deep copies.
 !------------------------------------------------------------------------------
 TYPE :: native_ilu_struc
   REAL(r8), ALLOCATABLE, DIMENSION(:) :: fac !< Factor values in the CSR layout of the matrix [nnz]
@@ -77,6 +83,13 @@ TYPE :: native_ilu_struc
   !> Diagonal locations of the matrix pattern [nr] (reference only, owned by the pattern;
   !! valid while the solver's symbolic key matches the matrix)
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: pdloc => NULL()
+  !> Level schedules, for matrices without a pattern only (threaded solver only)
+  TYPE(native_ilu_sched), ALLOCATABLE :: sched
+  !> Level schedules of the matrix pattern (reference only, owned by the pattern; valid
+  !! while the solver's symbolic key matches the matrix)
+  TYPE(native_ilu_sched), POINTER :: psched => NULL()
+  !> Factor values reordered for the threaded solve [nnz] (only while it is used)
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: sfac
 END TYPE native_ilu_struc
 !------------------------------------------------------------------------------
 !> Matrix structure a factorization was set up for (symbolic setup is redone when it changes)
@@ -176,6 +189,14 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
   REAL(r8) :: pivot_tol = 1.d-12
   !> Diagonal shift ("native" only): factor \f$ A + \alpha \mathrm{diag}(A) \f$ instead of \f$ A \f$
   REAL(r8) :: diag_shift = 0.d0
+  !> Use the level-scheduled (OpenMP threaded) factorization and solve ("native" only).
+  !! Results are bitwise identical either way; the threaded kernels are only used when
+  !! called outside of a parallel region and when the level structure of the matrix
+  !! makes them worthwhile (see @ref oft_native_kernels_base::native_ilu_sched_build
+  !! "native_ilu_sched_build"). Disabling takes effect at the next application;
+  !! enabling at the next symbolic setup (eg. `update(new_pattern=.TRUE.)`), where the
+  !! schedules are fetched (only when more than one thread is available).
+  LOGICAL :: threaded = .TRUE.
   INTEGER(i4) :: npivot_replaced = 0 !< Number of pivots replaced in the last factorization ("native" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL() !< Storage for additional RHS data
   CHARACTER(LEN=7) :: package = DEF_ILU_PACK !< Factorization package
@@ -971,6 +992,23 @@ IF(self%update_graph.OR.(.NOT.lu_key_matches(self%sym_key,A_native)))THEN
           END DO
         END DO
       END IF
+      !---Level schedules, only where the threaded kernels can be used
+      IF(self%threaded.AND.(omp_get_max_threads()>1).AND.(.NOT.omp_in_parallel()))THEN
+        IF(ASSOCIATED(A_native%pattern))THEN
+          self%native_struct%psched=>native_pattern_ilu_sched(A_native%pattern)
+        ELSE
+          ALLOCATE(self%native_struct%sched)
+          CALL native_ilu_sched_build(A_native%nr,A_native%kr,A_native%lc,self%native_struct%sched)
+        END IF
+        IF(oft_debug_print(2))THEN
+          WRITE(*,'(2X,A,I0,A,I0,A)')'ILU(0) level schedules (',A_native%nr,' rows, ',A_native%nnz,' non-zeros):'
+          IF(ASSOCIATED(self%native_struct%psched))THEN
+            CALL native_ilu_sched_stats(self%native_struct%psched,'    ')
+          ELSE
+            CALL native_ilu_sched_stats(self%native_struct%sched,'    ')
+          END IF
+        END IF
+      END IF
     CASE("mkl")
 #ifdef HAVE_MKL
       !---Factor storage is sized for the previous matrix
@@ -986,12 +1024,14 @@ CALL lu_get_values(A_native,self%full_local,self%refactor,mat_vals,'ilusolver_ap
 IF(self%refactor)THEN
   SELECT CASE(TRIM(self%package))
     CASE("native")
-      IF(ASSOCIATED(self%native_struct%pdloc))THEN
-        CALL nk_ilu0_factor(A_native%nr,A_native%kr,A_native%lc,self%native_struct%pdloc, &
-          mat_vals,self%pivot_tol,self%diag_shift,self%native_struct%fac,self%npivot_replaced,ierr)
+      IF(.NOT.self%threaded)THEN
+        CALL ilu_native_factor(self,A_native,mat_vals,ierr)
+      ELSE IF(ASSOCIATED(self%native_struct%psched))THEN
+        CALL ilu_native_factor(self,A_native,mat_vals,ierr,self%native_struct%psched)
+      ELSE IF(ALLOCATED(self%native_struct%sched))THEN
+        CALL ilu_native_factor(self,A_native,mat_vals,ierr,self%native_struct%sched)
       ELSE
-        CALL nk_ilu0_factor(A_native%nr,A_native%kr,A_native%lc,self%native_struct%dloc, &
-          mat_vals,self%pivot_tol,self%diag_shift,self%native_struct%fac,self%npivot_replaced,ierr)
+        CALL ilu_native_factor(self,A_native,mat_vals,ierr)
       END IF
       IF(ierr/=0)THEN
         IF(ierr>0)THEN
@@ -1061,12 +1101,14 @@ INTEGER(i4) :: i,ierr
 SELECT CASE(TRIM(self%package))
   CASE("native")
     DO i=1,nrhs
-      IF(ASSOCIATED(self%native_struct%pdloc))THEN
-        CALL nk_ilu0_solve(A_native%nr,A_native%kr,A_native%lc,self%native_struct%pdloc, &
-          self%native_struct%fac,x(:,i))
+      IF(.NOT.(self%threaded.AND.ALLOCATED(self%native_struct%sfac)))THEN
+        CALL ilu_native_solve(self%native_struct,A_native,x(:,i))
+      ELSE IF(ASSOCIATED(self%native_struct%psched))THEN
+        CALL ilu_native_solve(self%native_struct,A_native,x(:,i),self%native_struct%psched)
+      ELSE IF(ALLOCATED(self%native_struct%sched))THEN
+        CALL ilu_native_solve(self%native_struct,A_native,x(:,i),self%native_struct%sched)
       ELSE
-        CALL nk_ilu0_solve(A_native%nr,A_native%kr,A_native%lc,self%native_struct%dloc, &
-          self%native_struct%fac,x(:,i))
+        CALL ilu_native_solve(self%native_struct,A_native,x(:,i))
       END IF
     END DO
   CASE("mkl")
@@ -1082,13 +1124,73 @@ SELECT CASE(TRIM(self%package))
 END SELECT
 END SUBROUTINE ilusolver_solve
 !------------------------------------------------------------------------------
+!> Native ILU(0) factorization with the diagonal index of the solver (and optional schedules)
+!------------------------------------------------------------------------------
+SUBROUTINE ilu_native_factor(self,A_native,mat_vals,ierr,sched)
+CLASS(oft_ilusolver), INTENT(inout) :: self
+CLASS(oft_native_matrix), INTENT(in) :: A_native !< Matrix to factor
+REAL(r8), CONTIGUOUS, INTENT(in) :: mat_vals(:) !< Values to factor [nnz]
+INTEGER(i4), INTENT(out) :: ierr !< Error flag from @ref oft_native_kernels::nk_ilu0_factor "nk_ilu0_factor"
+TYPE(native_ilu_sched), OPTIONAL, INTENT(in) :: sched !< Level schedules (optional)
+IF(ASSOCIATED(self%native_struct%pdloc))THEN
+  CALL nk_ilu0_factor(A_native%nr,A_native%kr,A_native%lc,self%native_struct%pdloc,mat_vals, &
+    self%pivot_tol,self%diag_shift,self%native_struct%fac,self%npivot_replaced,ierr,sched)
+ELSE
+  CALL nk_ilu0_factor(A_native%nr,A_native%kr,A_native%lc,self%native_struct%dloc,mat_vals, &
+    self%pivot_tol,self%diag_shift,self%native_struct%fac,self%npivot_replaced,ierr,sched)
+END IF
+!---Reordered copy of the factors, only while the threaded solve is used
+IF(.NOT.PRESENT(sched))THEN
+  IF(ALLOCATED(self%native_struct%sfac))DEALLOCATE(self%native_struct%sfac)
+ELSE IF((ierr==0).AND.native_ilu_sched_active(sched,A_native%nr,.FALSE.))THEN
+  IF(.NOT.ALLOCATED(self%native_struct%sfac))ALLOCATE(self%native_struct%sfac(A_native%nnz))
+  IF(ASSOCIATED(self%native_struct%pdloc))THEN
+    CALL nk_ilu0_sched_values(A_native%nr,A_native%kr,self%native_struct%pdloc, &
+      self%native_struct%fac,sched,self%native_struct%sfac)
+  ELSE
+    CALL nk_ilu0_sched_values(A_native%nr,A_native%kr,self%native_struct%dloc, &
+      self%native_struct%fac,sched,self%native_struct%sfac)
+  END IF
+ELSE
+  IF(ALLOCATED(self%native_struct%sfac))DEALLOCATE(self%native_struct%sfac)
+END IF
+END SUBROUTINE ilu_native_factor
+!------------------------------------------------------------------------------
+!> Native ILU(0) solve with the diagonal index of the solver (and optional schedules)
+!------------------------------------------------------------------------------
+SUBROUTINE ilu_native_solve(nstruct,A_native,x,sched)
+TYPE(native_ilu_struc), INTENT(in) :: nstruct !< Native ILU(0) storage
+CLASS(oft_native_matrix), INTENT(in) :: A_native !< Factored matrix
+REAL(r8), INTENT(inout) :: x(A_native%nr) !< Input: RHS, Output: Solution
+TYPE(native_ilu_sched), OPTIONAL, INTENT(in) :: sched !< Level schedules (optional, requires `nstruct%sfac`)
+IF(PRESENT(sched))THEN
+  IF(ASSOCIATED(nstruct%pdloc))THEN
+    CALL nk_ilu0_solve(A_native%nr,A_native%kr,A_native%lc,nstruct%pdloc,nstruct%fac,x,sched,nstruct%sfac)
+  ELSE
+    CALL nk_ilu0_solve(A_native%nr,A_native%kr,A_native%lc,nstruct%dloc,nstruct%fac,x,sched,nstruct%sfac)
+  END IF
+ELSE
+  IF(ASSOCIATED(nstruct%pdloc))THEN
+    CALL nk_ilu0_solve(A_native%nr,A_native%kr,A_native%lc,nstruct%pdloc,nstruct%fac,x)
+  ELSE
+    CALL nk_ilu0_solve(A_native%nr,A_native%kr,A_native%lc,nstruct%dloc,nstruct%fac,x)
+  END IF
+END IF
+END SUBROUTINE ilu_native_solve
+!------------------------------------------------------------------------------
 !> Free native ILU(0) factor storage
 !------------------------------------------------------------------------------
 SUBROUTINE ilu_native_free(nstruct)
 TYPE(native_ilu_struc), INTENT(inout) :: nstruct !< Native ILU(0) storage
 IF(ALLOCATED(nstruct%fac))DEALLOCATE(nstruct%fac)
 IF(ALLOCATED(nstruct%dloc))DEALLOCATE(nstruct%dloc)
+IF(ALLOCATED(nstruct%sfac))DEALLOCATE(nstruct%sfac)
 NULLIFY(nstruct%pdloc)
+IF(ALLOCATED(nstruct%sched))THEN
+  CALL native_ilu_sched_free(nstruct%sched)
+  DEALLOCATE(nstruct%sched)
+END IF
+NULLIFY(nstruct%psched)
 END SUBROUTINE ilu_native_free
 #ifdef HAVE_MKL
 !------------------------------------------------------------------------------
@@ -1145,8 +1247,9 @@ end subroutine ilusolver_update
 !> Setup solver from XML definition
 !!
 !! Options: `package` (factorization package), `pivot_tol` (relative small-pivot
-!! threshold) and `diag_shift` (relative diagonal shift); the last two are used by
-!! the "native" package only.
+!! threshold), `diag_shift` (relative diagonal shift) and `threaded` (use the
+!! level-scheduled threaded kernels, default `T`); the last three are used by the
+!! "native" package only.
 !------------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
@@ -1181,11 +1284,17 @@ IF(ierr==0)THEN
   IF(ierr/=0)CALL oft_xml_abort("Error reading `diag_shift` node","ilusolver_setup_xml",__FILE__)
   self%diag_shift=rtmp
 END IF
+CALL xml_get_element(solver_node,"threaded",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,self%threaded,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `threaded` node","ilusolver_setup_xml",__FILE__)
+END IF
 IF(oft_debug_print(1))THEN
   WRITE(*,'(A)')'ILU solver setup:'
   WRITE(*,'(2X,2A)')'- Package:    ',self%package
   WRITE(*,'(2X,A,ES11.3)')'- Pivot tol:  ',self%pivot_tol
   WRITE(*,'(2X,A,ES11.3)')'- Diag shift: ',self%diag_shift
+  WRITE(*,'(2X,A,L1)')'- Threaded:   ',self%threaded
 END IF
 DEBUG_STACK_POP
 end subroutine ilusolver_setup_xml
