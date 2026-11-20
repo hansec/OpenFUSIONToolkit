@@ -165,7 +165,7 @@ end type native_diag_index
 !!
 !! Holds everything that depends only on the location of the non-zeros: the CRS
 !! structure (`kr`, `lc`), the block maps, the 2-byte column list, the transposed
-!! (CSC) index, the diagonal locations and the seam and redundant-row data used to
+!! (CSC) index, the diagonal locations, the ILU(0) level schedules and the seam and redundant-row data used to
 !! assemble full local matrices (@ref native_matrix_setup_full). Matrices with the
 !! same structure (eg. several operators on one FE space) can share one pattern, each
 !! holding only its own values.
@@ -184,7 +184,7 @@ end type native_diag_index
 !!   different threads (eg. block matrices created in a parallel loop). Only the
 !!   thread releasing the last reference frees the pattern.
 !! - A pattern must not be modified once created; derived data (2-byte column list,
-!!   CSC index, diagonal locations, linkage) is built on first use and is valid for
+!!   CSC index, diagonal locations, ILU(0) level schedules, linkage) is built on first use and is valid for
 !!   the lifetime of the pattern.
 !!
 !! `kr`, `lc`, `map`, `linkage`, `redind`, `nred` and `nnz` of a matrix are aliases of
@@ -207,6 +207,7 @@ type, public :: oft_native_pattern
   type(oft_seam), pointer :: linkage => NULL() !< Seam for full local matrices (built by @ref native_matrix_setup_full)
   type(native_csc_index), private :: csc !< Transposed index (built by transpose products)
   type(native_diag_index), private :: diag_index !< Diagonal locations (built by assembly)
+  type(native_ilu_sched), pointer, private :: ilu_sched => NULL() !< ILU(0) level schedules (see @ref native_pattern_ilu_sched)
   type(native_extraction), pointer :: extracts => NULL() !< Cached submatrix extractions (see @ref native_extraction_get)
 end type oft_native_pattern
 !---------------------------------------------------------------------------------
@@ -444,7 +445,7 @@ public partition_graph, native_matrix_setup_full
 public native_vector_slice_push, native_vector_slice_pop
 public native_pattern_create, native_pattern_retain, native_pattern_release
 public native_matrix_set_pattern, native_matrix_adopt_pattern, native_matrix_share
-public native_extraction_get, native_pattern_diag
+public native_extraction_get, native_pattern_diag, native_pattern_ilu_sched
 contains
 !---------------------------------------------------------------------------------
 !> Cast an abstract vector object to @ref oft_native_vector
@@ -2330,6 +2331,10 @@ IF(nleft<=0)THEN
   END DO
   CALL native_csc_delete(pattern%csc)
   CALL native_diag_delete(pattern%diag_index)
+  IF(ASSOCIATED(pattern%ilu_sched))THEN
+    CALL native_ilu_sched_free(pattern%ilu_sched)
+    DEALLOCATE(pattern%ilu_sched)
+  END IF
   IF(ASSOCIATED(pattern%map))THEN
     DO i=1,SIZE(pattern%map,DIM=1)
       DO j=1,SIZE(pattern%map,DIM=2)
@@ -2635,6 +2640,31 @@ CALL native_diag_build(pattern%diag_index,pattern%kr,pattern%lc,pattern%nr)
 !$omp end critical (oft_native_diag_build)
 loc=>pattern%diag_index%loc
 END FUNCTION native_pattern_diag
+!---------------------------------------------------------------------------------
+!> Get the ILU(0) level schedules of a square native CRS pattern
+!!
+!! The schedules (see @ref oft_native_kernels_base::native_ilu_sched_build
+!! "native_ilu_sched_build") are built on first use, serialized between threads, and
+!! owned by the pattern, so all matrices and solvers using the pattern share them.
+!! The result is valid for the lifetime of the pattern and must not be modified or
+!! deallocated.
+!!
+!! @result Level schedules for the pattern
+!---------------------------------------------------------------------------------
+FUNCTION native_pattern_ilu_sched(pattern) RESULT(sched)
+TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Pattern
+TYPE(native_ilu_sched), POINTER :: sched
+IF(.NOT.ASSOCIATED(pattern))CALL oft_abort('Pattern not associated','native_pattern_ilu_sched',__FILE__)
+IF(pattern%nr/=pattern%nc)CALL oft_abort('Square pattern required','native_pattern_ilu_sched',__FILE__)
+!$omp critical (oft_native_ilu_sched_build)
+IF(.NOT.ASSOCIATED(pattern%ilu_sched))THEN
+  ALLOCATE(sched)
+  CALL native_ilu_sched_build(pattern%nr,pattern%kr,pattern%lc,sched)
+  pattern%ilu_sched=>sched
+END IF
+sched=>pattern%ilu_sched
+!$omp end critical (oft_native_ilu_sched_build)
+END FUNCTION native_pattern_ilu_sched
 !---------------------------------------------------------------------------------
 !> Release index of diagonal entry locations
 !---------------------------------------------------------------------------------
