@@ -192,6 +192,7 @@ end type native_diag_index
 !---------------------------------------------------------------------------------
 type, public :: oft_native_pattern
   integer(i4) :: refcount = 0 !< Number of references held (matrices and other holders)
+  integer(i8) :: id = 0 !< Unique identifier, never reused within a run (set by @ref native_pattern_create)
   integer(i4) :: nr = 0 !< Number of rows
   integer(i4) :: nc = 0 !< Number of columns
   integer(i4) :: nnz = 0 !< Number of non-zero entries
@@ -414,6 +415,8 @@ INTERFACE native_put_vals
 END INTERFACE native_put_vals
 !> Number of native CRS patterns currently allocated (for diagnostics and testing)
 INTEGER(i4), PUBLIC, PROTECTED :: native_pattern_live = 0
+!> Number of native CRS patterns created so far (source of @ref oft_native_pattern::id)
+INTEGER(i8), PRIVATE :: native_pattern_count = 0
 !---------------------------------------------------------------------------------
 !> Use a non-zero pattern for a native CRS matrix (real or complex)
 !---------------------------------------------------------------------------------
@@ -441,7 +444,7 @@ public partition_graph, native_matrix_setup_full
 public native_vector_slice_push, native_vector_slice_pop
 public native_pattern_create, native_pattern_retain, native_pattern_release
 public native_matrix_set_pattern, native_matrix_adopt_pattern, native_matrix_share
-public native_extraction_get
+public native_extraction_get, native_pattern_diag
 contains
 !---------------------------------------------------------------------------------
 !> Cast an abstract vector object to @ref oft_native_vector
@@ -2268,6 +2271,10 @@ IF(.NOT.ASSOCIATED(kr))CALL oft_abort('Row pointer not allocated','native_patter
 IF(SIZE(kr)/=nr+1)CALL oft_abort('Row pointer size does not match number of rows', &
   'native_pattern_create',__FILE__)
 ALLOCATE(pattern)
+!$omp atomic capture
+native_pattern_count=native_pattern_count+1
+pattern%id=native_pattern_count
+!$omp end atomic
 pattern%nr=nr
 pattern%nc=nc
 pattern%nnz=kr(nr+1)-1
@@ -2610,6 +2617,24 @@ DO i=1,nr
   dind%loc(i)=jr
 END DO
 END SUBROUTINE native_diag_build
+!---------------------------------------------------------------------------------
+!> Get the location of the diagonal entry in each row of a native CRS pattern
+!!
+!! The index is built on first use (serialized with matrix assembly) and is owned by
+!! the pattern, so the result is valid for the lifetime of the pattern and must not be
+!! modified or deallocated.
+!!
+!! @result Location of the diagonal in each row's entries (0 for rows without one) [nr]
+!---------------------------------------------------------------------------------
+FUNCTION native_pattern_diag(pattern) RESULT(loc)
+TYPE(oft_native_pattern), POINTER, INTENT(in) :: pattern !< Pattern
+INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: loc
+IF(.NOT.ASSOCIATED(pattern))CALL oft_abort('Pattern not associated','native_pattern_diag',__FILE__)
+!$omp critical (oft_native_diag_build)
+CALL native_diag_build(pattern%diag_index,pattern%kr,pattern%lc,pattern%nr)
+!$omp end critical (oft_native_diag_build)
+loc=>pattern%diag_index%loc
+END FUNCTION native_pattern_diag
 !---------------------------------------------------------------------------------
 !> Release index of diagonal entry locations
 !---------------------------------------------------------------------------------
