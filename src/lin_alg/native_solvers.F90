@@ -44,7 +44,7 @@ USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
 USE oft_native_overlap_mod, ONLY: oft_native_overlap, native_overlap_setup, native_overlap_update, &
   native_overlap_gather, native_overlap_scatter, native_overlap_delete
 USE oft_native_kernels, ONLY: nk_jacobi_start, nk_jacobi_sweep, nk_jacobi_restart, nk_copy, nk_axpby
-USE oft_lu, ONLY: lapack_matinv
+USE oft_lu, ONLY: lapack_matinv, oft_lusolver, oft_ilusolver
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
   oft_csolver, oft_csolver_bc, oft_eigsolver, solver_setup, csolver_setup, &
   eigsolver_setup, solver_delete, csolver_delete
@@ -2108,6 +2108,8 @@ IF(.NOT.self%initialized)THEN
     END IF
     ALLOCATE(self%solvers(1)%s, source=pretmp)
     IF(ASSOCIATED(pretmp%pre))ALLOCATE(self%solvers(1)%s%pre, source=pretmp%pre)
+    !---Sub-solver is given the distributed matrix, so factor its full local matrix
+    IF(self%boundary_overlap)CALL bjprecond_set_full_local(self%solvers(1)%s)
   ELSE
     DEALLOCATE(self%alocals)
     ALLOCATE(self%alocals(0:ABS(self%nlocal)))
@@ -2417,6 +2419,25 @@ END IF
 self%update_slice=.FALSE.
 DEBUG_STACK_POP
 END SUBROUTINE bjprecond_apply
+!------------------------------------------------------------------------------
+!> Have the (I)LU solvers of a block-Jacobi sub-solver factor the full local matrix
+!!
+!! Used when the sub-solver is given the parent distributed matrix (one block with
+!! `boundary_overlap`). Follows the chain of preconditioners of the sub-solver,
+!! stopping at nested block-Jacobi preconditioners.
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE bjprecond_set_full_local(solver)
+CLASS(oft_solver), INTENT(inout) :: solver !< Sub-solver
+SELECT TYPE(solver)
+  CLASS IS(oft_ilusolver)
+    solver%full_local=.TRUE.
+  CLASS IS(oft_lusolver)
+    solver%full_local=.TRUE.
+  CLASS IS(oft_bjprecond)
+    RETURN
+END SELECT
+IF(ASSOCIATED(solver%pre))CALL bjprecond_set_full_local(solver%pre)
+END SUBROUTINE bjprecond_set_full_local
 !------------------------------------------------------------------------------
 !> Setup a persistent local vector for @ref oft_bjprecond, (re)allocating if needed
 !------------------------------------------------------------------------------

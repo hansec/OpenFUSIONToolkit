@@ -19,12 +19,13 @@
 !! @ingroup doxy_oft_lin_alg
 !------------------------------------------------------------------------------
 MODULE oft_lu
-USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr, c_f_pointer, c_loc
+USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr, c_f_pointer, c_loc, &
+  c_associated
 USE oft_local
 USE oft_base
-USE oft_la_base, ONLY: oft_vector, oft_graph
+USE oft_la_base, ONLY: oft_vector, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE
 USE oft_solver_base, ONLY: oft_solver
-USE oft_native_la, ONLY: oft_native_matrix, native_matrix_cast
+USE oft_native_la, ONLY: oft_native_matrix, native_matrix_cast, native_pattern_diag
 IMPLICIT NONE
 #include "local.h"
 #ifdef HAVE_MUMPS
@@ -58,12 +59,30 @@ PRIVATE
 PUBLIC lapack_matinv, lapack_cholesky
 !------------------------------------------------------------------------------
 !> Native ILU(0) preconditioner information object
+!!
+!! Storage is allocatable so that copies of a solver (eg. `ALLOCATE(..., source=)` in
+!! block-Jacobi) are independent deep copies.
 !------------------------------------------------------------------------------
 TYPE :: native_ilu_struc
-  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: ju => NULL() !< Diagonal entry indices
-  INTEGER(i4), CONTIGUOUS, POINTER, DIMENSION(:) :: jlu => NULL() !< Column values in iLU factors
-  REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: alu => NULL() !< Values of iLU factors
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ju !< Start of the U part of each row in `alu`/`jlu` [nr]
+  INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: jlu !< Row pointer (1:nr+1) and column indices (nr+2:) of the factors [nnz+1]
+  REAL(r8), ALLOCATABLE, DIMENSION(:) :: alu !< Inverted diagonal (1:nr) and off-diagonal (nr+2:) factor values [nnz+1]
 END TYPE native_ilu_struc
+!------------------------------------------------------------------------------
+!> Matrix structure a factorization was set up for (symbolic setup is redone when it changes)
+!!
+!! Identified by the matrix's non-zero pattern (@ref oft_native_pattern::id, which is
+!! never reused) when the matrix has one, otherwise by the row pointer and column
+!! list arrays it uses, together with the number of rows and non-zeros. The pointers
+!! are references only and are never deallocated through this object.
+!------------------------------------------------------------------------------
+TYPE :: lu_symbolic_key
+  INTEGER(i8) :: pattern_id = -1 !< Id of the matrix pattern (0 if the matrix has none, -1 if not set up)
+  INTEGER(i4) :: nr = -1 !< Number of rows
+  INTEGER(i4) :: nnz = -1 !< Number of non-zeros
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: kr => NULL() !< Row pointer used (matrices without a pattern)
+  INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: lc => NULL() !< Column list used (matrices without a pattern)
+END TYPE lu_symbolic_key
 !------------------------------------------------------------------------------
 !> SuperLU solver information
 !------------------------------------------------------------------------------
@@ -99,6 +118,10 @@ END TYPE pardiso_struc
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
+  !> Factor the full local matrix of a distributed matrix (`Mfull`, refreshed with
+  !! `update_slice`) instead of its local values. Set by @ref oft_native_solvers::oft_bjprecond
+  !! "block-Jacobi" with `boundary_overlap`; distributed matrices are rejected otherwise.
+  LOGICAL :: full_local = .FALSE.
   LOGICAL(kind=c_bool) :: iter_refine = .FALSE. !< Perform iterative refinement
   INTEGER(i4) :: nrhs = 1 !< Number of right hand sides
   INTEGER(i4), POINTER, DIMENSION(:) :: ipiv => NULL() !< Row pivot array ("lapack" only)
@@ -132,9 +155,21 @@ END TYPE oft_lusolver
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
+  !> Factor the full local matrix of a distributed matrix (`Mfull`, refreshed with
+  !! `update_slice`) instead of its local values. Set by @ref oft_native_solvers::oft_bjprecond
+  !! "block-Jacobi" with `boundary_overlap`; distributed matrices are rejected otherwise.
+  LOGICAL :: full_local = .FALSE.
   INTEGER(i4) :: nrhs = 1 !< Number of right hand sides
+  !> Relative small-pivot threshold ("native" only): a pivot smaller in magnitude than
+  !! `pivot_tol` times the largest magnitude in its row of the matrix is replaced by
+  !! that value, keeping its sign (0 to only catch exact zero pivots)
+  REAL(r8) :: pivot_tol = 1.d-12
+  !> Diagonal shift ("native" only): factor \f$ A + \alpha \mathrm{diag}(A) \f$ instead of \f$ A \f$
+  REAL(r8) :: diag_shift = 0.d0
+  INTEGER(i4) :: npivot_replaced = 0 !< Number of pivots replaced in the last factorization ("native" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL() !< Storage for additional RHS data
   CHARACTER(LEN=7) :: package = DEF_ILU_PACK !< Factorization package
+  TYPE(lu_symbolic_key) :: sym_key !< Matrix structure the factor storage was set up for
   TYPE(native_ilu_struc) :: native_struct !< Data for native iLU solver
 #if defined( HAVE_SUPERLU )
   TYPE(superlu_struc) :: superlu_struct !< SuperLU solver information
@@ -362,7 +397,8 @@ CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
 INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
-REAL(r8), POINTER, DIMENSION(:) :: mat_vals,csc_vals,vtmp
+REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: mat_vals
+REAL(r8), POINTER, DIMENSION(:) :: csc_vals,vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vals,b
 CLASS(oft_native_matrix), POINTER :: A_native
 TYPE(oft_timer) :: mytimer
@@ -378,11 +414,7 @@ IF(self%package(1:5)=='mumps')THEN
   IF(omp_get_num_threads()>1)CALL oft_abort('MUMPS used by multiple threads', &
     'lusolver_apply',__FILE__)
 END IF
-IF(ASSOCIATED(A_native%Mfull))THEN
-  mat_vals=>A_native%Mfull
-ELSE
-  mat_vals=>A_native%M
-END IF
+CALL lu_get_values(A_native,self%full_local,self%refactor,mat_vals,'lusolver_apply')
 !---Initialize solvers
 IF(.NOT.self%initialized)THEN
   !---
@@ -781,176 +813,312 @@ NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine lusolver_delete
 !------------------------------------------------------------------------------
-!> Solve a linear system using a direct solve
+!> Get the values to factor for a direct or incomplete LU solver
+!!
+!! With `full_local` the full local matrix (`Mfull`) is used, refreshed with
+!! `update_slice` if out of date. Otherwise the matrix must not be distributed
+!! across processes, as its local values do not include contributions from other
+!! processes on shared rows.
+!------------------------------------------------------------------------------
+SUBROUTINE lu_get_values(A_native,full_local,refresh,mat_vals,caller)
+CLASS(oft_native_matrix), INTENT(inout) :: A_native !< Matrix to factor
+LOGICAL, INTENT(in) :: full_local !< Use the full local matrix?
+LOGICAL, INTENT(in) :: refresh !< Refresh the full local matrix if out of date?
+REAL(r8), CONTIGUOUS, POINTER, INTENT(out) :: mat_vals(:) !< Values to factor
+CHARACTER(LEN=*), INTENT(in) :: caller !< Calling routine (for error messages)
+IF(full_local)THEN
+  IF(refresh.AND.(.NOT.A_native%full_current))CALL A_native%update_slice
+  IF(.NOT.ASSOCIATED(A_native%Mfull))CALL oft_abort('Full local matrix not available', &
+    caller,__FILE__)
+  mat_vals=>A_native%Mfull
+ELSE
+  IF((.NOT.A_native%force_local).AND.(INT(A_native%nr,i8)/=A_native%nrg))CALL oft_abort( &
+    'Matrix is distributed across processes; use this solver inside a "block_jacobi" '// &
+    'or "add_schwarz" preconditioner',caller,__FILE__)
+  mat_vals=>A_native%M
+END IF
+END SUBROUTINE lu_get_values
+!------------------------------------------------------------------------------
+!> Check if a factorization's symbolic setup matches the structure of a matrix
+!!
+!! @result Structure matches `key`?
+!------------------------------------------------------------------------------
+FUNCTION lu_key_matches(key,A_native) RESULT(match)
+TYPE(lu_symbolic_key), INTENT(in) :: key !< Structure used for the existing setup
+CLASS(oft_native_matrix), INTENT(in) :: A_native !< Matrix to factor
+LOGICAL :: match
+match=(key%nr==A_native%nr).AND.(key%nnz==A_native%nnz)
+IF(.NOT.match)RETURN
+IF(ASSOCIATED(A_native%pattern))THEN
+  match=(key%pattern_id==A_native%pattern%id)
+ELSE
+  match=(key%pattern_id==0).AND.ASSOCIATED(key%kr,A_native%kr).AND.ASSOCIATED(key%lc,A_native%lc)
+END IF
+END FUNCTION lu_key_matches
+!------------------------------------------------------------------------------
+!> Record the structure of a matrix for a factorization's symbolic setup
+!------------------------------------------------------------------------------
+SUBROUTINE lu_key_set(key,A_native)
+TYPE(lu_symbolic_key), INTENT(inout) :: key !< Structure used for the setup
+CLASS(oft_native_matrix), INTENT(in) :: A_native !< Matrix to factor
+key%nr=A_native%nr
+key%nnz=A_native%nnz
+IF(ASSOCIATED(A_native%pattern))THEN
+  key%pattern_id=A_native%pattern%id
+  NULLIFY(key%kr,key%lc)
+ELSE
+  key%pattern_id=0
+  key%kr=>A_native%kr
+  key%lc=>A_native%lc
+END IF
+END SUBROUTINE lu_key_set
+!------------------------------------------------------------------------------
+!> Check that a CSR matrix has a diagonal entry in every row and sorted columns
+!!
+!! Required by the ILU(0) factorizations, which store the factors in modified
+!! sparse row format (one slot per non-zero plus one) and eliminate in column order.
+!! Aborts naming the first offending row.
+!------------------------------------------------------------------------------
+SUBROUTINE ilu_check_structure(A_native)
+CLASS(oft_native_matrix), INTENT(in) :: A_native !< Matrix to factor
+INTEGER(i4) :: i,j,ndiag
+INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: dloc
+CHARACTER(LEN=OFT_ERROR_SLEN) :: msg
+IF(A_native%nr/=A_native%nc)CALL oft_abort('ILU requires a square matrix','ilu_check_structure',__FILE__)
+NULLIFY(dloc)
+IF(ASSOCIATED(A_native%pattern))dloc=>native_pattern_diag(A_native%pattern)
+DO i=1,A_native%nr
+  !---Sorted (strictly increasing) columns
+  DO j=A_native%kr(i),A_native%kr(i+1)-2
+    IF(A_native%lc(j)>=A_native%lc(j+1))THEN
+      WRITE(msg,'(A,I0,A)')'ILU requires sorted, unique column indices (row ',i,')'
+      CALL oft_abort(msg,'ilu_check_structure',__FILE__)
+    END IF
+  END DO
+  !---Diagonal entry
+  IF(ASSOCIATED(dloc))THEN
+    ndiag=MIN(dloc(i),1)
+  ELSE
+    ndiag=COUNT(A_native%lc(A_native%kr(i):A_native%kr(i+1)-1)==i)
+  END IF
+  IF(ndiag<1)THEN
+    WRITE(msg,'(A,I0,A)')'ILU requires a diagonal entry in every row (missing in row ',i,')'
+    CALL oft_abort(msg,'ilu_check_structure',__FILE__)
+  END IF
+END DO
+END SUBROUTINE ilu_check_structure
+!------------------------------------------------------------------------------
+!> Apply ILU(0) preconditioner (approximate solve of the linear system)
+!!
+!! The factor storage is set up (symbolic setup) on first use, on
+!! `update(new_pattern=.TRUE.)` and whenever the non-zero pattern or size of the
+!! matrix changes; the factorization is redone after any call to `update`.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE ilusolver_apply(self,u,g)
 CLASS(oft_ilusolver), INTENT(inout) :: self
 CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
-INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
-REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: mat_vals
-REAL(r8), POINTER, DIMENSION(:) :: csc_vals,vtmp
-REAL(r8), POINTER, DIMENSION(:,:) :: vals,b
+INTEGER(i4) :: i,ierr,nrhs
+REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:) :: mat_vals,uvals,gvals
+REAL(r8), POINTER, DIMENSION(:) :: vtmp
+REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: vals
 CLASS(oft_native_matrix), POINTER :: A_native
-TYPE(oft_timer) :: mytimer
-TYPE(oft_graph) :: csr_graph
-TYPE(oft_graph) :: csc_graph
+CHARACTER(LEN=OFT_ERROR_SLEN) :: msg
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
-IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting ILU solver: ',self%package,self%refactor
+IF(oft_debug_print(3))WRITE(*,'(2X,3A,L1)')'Starting ILU solver: ',TRIM(self%package),' ',self%refactor
 IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
   'ilusolver_apply',__FILE__)
-IF(ASSOCIATED(A_native%Mfull))THEN
-  mat_vals=>A_native%Mfull
-ELSE
-  mat_vals=>A_native%M
-END IF
-!---Initialize solvers
+!---Check package
 IF(.NOT.self%initialized)THEN
-  !---
   SELECT CASE(TRIM(self%package))
-    CASE DEFAULT
-      CALL oft_abort('Unknown ILU package','ilusolver_apply', __FILE__)
     CASE("native")
-      ALLOCATE(self%native_struct%ju(A_native%nr))
-      ALLOCATE(self%native_struct%jlu(A_native%nnz+1))
-      ALLOCATE(self%native_struct%alu(A_native%nnz+1))
-!     CASE("super")
-! #ifdef HAVE_SUPERLU
-!       ALLOCATE(self%superlu_struct%kr(A_native%nr+1))
-!       ALLOCATE(self%superlu_struct%lc(A_native%nnz))
-!       self%superlu_struct%kr=A_native%kr-1
-!       self%superlu_struct%lc=A_native%lc-1
-! #else
-!       CALL oft_abort('OFT not compiled with SUPERLU','ilusolver_apply',__FILE__)
-! #endif
+      ! Nothing to do
     CASE("mkl")
 #if !defined(HAVE_MKL)
       CALL oft_abort('OFT not compiled with MKL-PARDISO','ilusolver_apply',__FILE__)
 #endif
+    CASE DEFAULT
+      CALL oft_abort('Unknown ILU package','ilusolver_apply', __FILE__)
   END SELECT
   self%initialized=.TRUE.
 END IF
-!---Call factorization
-ALLOCATE(vals(u%n,self%nrhs))
-nrhs=1
-vtmp=>vals(:,1)
-CALL g%get_local(vtmp)
+!---Symbolic setup for a new matrix structure
+IF(self%update_graph.OR.(.NOT.lu_key_matches(self%sym_key,A_native)))THEN
+  CALL ilu_check_structure(A_native)
+  SELECT CASE(TRIM(self%package))
+    CASE("native")
+      IF(ALLOCATED(self%native_struct%alu))DEALLOCATE(self%native_struct%alu, &
+        self%native_struct%jlu,self%native_struct%ju)
+      ALLOCATE(self%native_struct%ju(A_native%nr))
+      ALLOCATE(self%native_struct%jlu(A_native%nnz+1))
+      ALLOCATE(self%native_struct%alu(A_native%nnz+1))
+    CASE("mkl")
+#ifdef HAVE_MKL
+      !---Factor storage is sized for the previous matrix
+      CALL ilusolver_mkl_free(self)
+#endif
+  END SELECT
+  CALL lu_key_set(self%sym_key,A_native)
+  self%update_graph=.FALSE.
+  self%refactor=.TRUE.
+END IF
+!---Numerical factorization
+CALL lu_get_values(A_native,self%full_local,self%refactor,mat_vals,'ilusolver_apply')
+IF(self%refactor)THEN
+  SELECT CASE(TRIM(self%package))
+    CASE("native")
+      CALL ilu0(A_native%nr,mat_vals,A_native%lc,A_native%kr,self%native_struct%alu, &
+        self%native_struct%jlu,self%native_struct%ju,self%pivot_tol,self%diag_shift, &
+        self%npivot_replaced,ierr)
+      IF(ierr/=0)THEN
+        IF(ierr>0)THEN
+          WRITE(msg,'(A,I0,A)')'Zero pivot in row ',ierr,' (try increasing "pivot_tol" or "diag_shift")'
+        ELSE
+          WRITE(msg,'(A,I0)')'Non-finite pivot in row ',-ierr
+        END IF
+        CALL oft_abort(msg,'ilusolver_apply',__FILE__)
+      END IF
+      IF(self%npivot_replaced>0)CALL ilu_pivot_warning(self%npivot_replaced,A_native%nr)
+    CASE("mkl")
+#ifdef HAVE_MKL
+      ALLOCATE(vtmp(A_native%nr)) ! RHS argument (not used by the factorization)
+      CALL oft_mkl_ilu(1,A_native%nr,A_native%nnz,mat_vals,A_native%lc, &
+        A_native%kr,vtmp,self%pardiso_struct%f_factors,ierr)
+      DEALLOCATE(vtmp)
+      IF(ierr/=0)THEN
+        WRITE(msg,'(A,I0,A)')'Factorization failed (MKL error ',ierr,')'
+        CALL oft_abort(msg,'ilusolver_apply',__FILE__)
+      END IF
+#endif
+  END SELECT
+  self%refactor=.FALSE.
+END IF
+!---Approximate solve
 IF(self%nrhs>1)THEN
+  IF(.NOT.ASSOCIATED(self%sec_rhs))CALL oft_abort('Additional RHS storage ("sec_rhs") not set', &
+    'ilusolver_apply',__FILE__)
   nrhs=self%nrhs
-  DO i=2,self%nrhs
+  ALLOCATE(vals(A_native%nr,nrhs))
+  vtmp=>vals(:,1)
+  CALL g%get_local(vtmp)
+  DO i=2,nrhs
     vals(:,i) = self%sec_rhs(:,i-1)
   END DO
-END IF
-ldb=A_native%nr
-! NULLIFY(vals)
-! CALL g%get_local(vals)
-SELECT CASE(TRIM(self%package))
-  CASE("mkl")
-#ifdef HAVE_MKL
-    IF(self%refactor)THEN
-      !---Update matrix
-      CALL oft_mkl_ilu(1,A_native%nr,A_native%nnz,mat_vals,A_native%lc, &
-        A_native%kr,vals,self%pardiso_struct%f_factors,ierr)
-      IF(ierr/=0)CALL oft_abort('Factorization failed','ilusolver_apply',__FILE__)
-      self%refactor=.FALSE.
-      self%update_graph=.FALSE.
-    END IF
-    CALL oft_mkl_ilu(2,A_native%nr,A_native%nnz,mat_vals,A_native%lc, &
-      A_native%kr,vals,self%pardiso_struct%f_factors,ierr)
-#else
-    CALL oft_abort('OFT not compiled with MKL-PARDISO','ilusolver_apply',__FILE__)
-#endif
-!   CASE("super")
-! #ifdef HAVE_SUPERLU
-!     IF(self%refactor)THEN
-!       mode=3
-!       IF(self%update_graph)mode=1
-! #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
-!       !$omp critical (superlu_solve)
-! #endif
-!       CALL oft_superlu_dgsisx(mode,A_native%nr,A_native%nnz,nrhs, &
-!         mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
-!         self%superlu_struct%f_factors,self%superlu_struct%col_perm,1.d-1,ierr)
-!       IF(ierr/=0)THEN
-!         WRITE(*,*)ierr,A_native%nr
-!         IF(.NOT.((ierr>=0).AND.(ierr<=A_native%nr)))THEN
-!           CALL oft_abort('Factorization failed','ilusolver_apply',__FILE__)
-!         END IF
-!       END IF
-! #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
-!       !$omp end critical (superlu_solve)
-! #endif
-!       self%refactor=.FALSE.
-!       self%update_graph=.FALSE.
-!     END IF
-!     mode=2
-! #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
-!     !$omp critical (superlu_solve)
-! #endif
-!     CALL oft_superlu_dgsisx(mode,A_native%nr,A_native%nnz,nrhs, &
-!       mat_vals,self%superlu_struct%lc,self%superlu_struct%kr,vals,ldb, &
-!       self%superlu_struct%f_factors,self%superlu_struct%col_perm,1.d3,ierr)
-!       IF(ierr/=0)THEN
-!         WRITE(*,*)ierr
-!         CALL oft_abort('Solve failed','ilusolver_apply',__FILE__)
-!       END IF
-! #if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
-!     !$omp end critical (superlu_solve)
-! #endif
-! #else
-!   CALL oft_abort('OFT not compiled with SuperLU','ilusolver_apply',__FILE__)
-! #endif
-  CASE("native")
-    IF(self%refactor)THEN
-      CALL ilu0(A_native%nr,mat_vals,A_native%lc,A_native%kr,self%native_struct%alu, &
-        self%native_struct%jlu,self%native_struct%ju, ierr)
-      IF(ierr/=0)THEN
-        WRITE(*,*)ierr
-        CALL oft_abort('Factorization failed','ilusolver_apply',__FILE__)
-      END IF
-      self%refactor=.FALSE.
-      self%update_graph=.FALSE.
-    END IF
-    CALL lusol(A_native%nr,nrhs,vals,self%native_struct%alu,self%native_struct%jlu, &
-      self%native_struct%ju)
-  CASE DEFAULT
-    CALL oft_abort('Unknown factorization package','ilusolver_apply',__FILE__)
-END SELECT
-CALL u%restore_local(vals(:,1))
-IF(self%nrhs>1)THEN
-  DO i=2,self%nrhs
+  CALL ilusolver_solve(self,A_native%nr,nrhs,vals)
+  CALL u%restore_local(vals(:,1))
+  DO i=2,nrhs
     self%sec_rhs(:,i-1) = vals(:,i)
   END DO
+  DEALLOCATE(vals)
+ELSE
+  !---Solve in place in the local values of u (no copies for native vectors)
+  NULLIFY(uvals,gvals)
+  CALL g%borrow_local(gvals,OFT_ACCESS_READ)
+  CALL u%borrow_local(uvals,OFT_ACCESS_WRITE)
+  uvals=gvals
+  CALL g%release_local(gvals,OFT_ACCESS_READ,sync=.FALSE.)
+  vals(1:A_native%nr,1:1)=>uvals
+  CALL ilusolver_solve(self,A_native%nr,1,vals)
+  CALL u%release_local(uvals,OFT_ACCESS_WRITE,sync=.TRUE.)
 END IF
-DEALLOCATE(vals)
 DEBUG_STACK_POP
 END SUBROUTINE ilusolver_apply
 !------------------------------------------------------------------------------
+!> Approximate solve with existing ILU(0) factors (in place)
+!------------------------------------------------------------------------------
+SUBROUTINE ilusolver_solve(self,n,nrhs,x)
+CLASS(oft_ilusolver), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: n !< Number of rows
+INTEGER(i4), INTENT(in) :: nrhs !< Number of right hand sides
+REAL(r8), INTENT(inout) :: x(n,nrhs) !< Input: RHS, Output: Solution
+INTEGER(i4) :: i,ierr
+CLASS(oft_native_matrix), POINTER :: A_native
+SELECT CASE(TRIM(self%package))
+  CASE("native")
+    CALL lusol(n,nrhs,x,self%native_struct%alu,self%native_struct%jlu,self%native_struct%ju)
+  CASE("mkl")
+#ifdef HAVE_MKL
+    IF(.NOT.native_matrix_cast(A_native,self%A))CALL oft_abort('Native matrix required', &
+      'ilusolver_solve',__FILE__)
+    DO i=1,nrhs
+      CALL oft_mkl_ilu(2,A_native%nr,A_native%nnz,A_native%M,A_native%lc, &
+        A_native%kr,x(:,i),self%pardiso_struct%f_factors,ierr)
+      IF(ierr/=0)CALL oft_abort('Solve failed (MKL)','ilusolver_solve',__FILE__)
+    END DO
+#endif
+  CASE DEFAULT
+    CALL oft_abort('Unknown factorization package','ilusolver_solve',__FILE__)
+END SELECT
+END SUBROUTINE ilusolver_solve
+#ifdef HAVE_MKL
+!------------------------------------------------------------------------------
+!> Free MKL ILU(0) factor storage
+!------------------------------------------------------------------------------
+SUBROUTINE ilusolver_mkl_free(self)
+CLASS(oft_ilusolver), INTENT(inout) :: self
+INTEGER(i4) :: ierr,ivals(1)
+REAL(r8) :: rvals(1)
+IF(.NOT.c_associated(self%pardiso_struct%f_factors))RETURN
+ivals=0; rvals=0.d0
+CALL oft_mkl_ilu(3,1,1,rvals,ivals,ivals,rvals,self%pardiso_struct%f_factors,ierr)
+self%pardiso_struct%f_factors=C_NULL_PTR
+END SUBROUTINE ilusolver_mkl_free
+#endif
+!------------------------------------------------------------------------------
+!> Report replaced ILU(0) pivots (once per process)
+!------------------------------------------------------------------------------
+SUBROUTINE ilu_pivot_warning(nreplaced,nr)
+INTEGER(i4), INTENT(in) :: nreplaced !< Number of replaced pivots
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+LOGICAL, SAVE :: warned = .FALSE.
+LOGICAL :: do_warn
+CHARACTER(LEN=OFT_ERROR_SLEN) :: msg
+do_warn=.FALSE.
+!$omp critical (oft_ilu_pivot_warning)
+IF(.NOT.warned)THEN
+  warned=.TRUE.
+  do_warn=.TRUE.
+END IF
+!$omp end critical (oft_ilu_pivot_warning)
+IF(do_warn)THEN
+  WRITE(msg,'(A,I0,A,I0,A)')'ILU(0): replaced ',nreplaced,' small pivot(s) of ',nr, &
+    ' rows (further replacements are not reported)'
+  CALL oft_warn(msg)
+END IF
+END SUBROUTINE ilu_pivot_warning
+!------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
+!!
+!! The factorization is redone on the next application, including the symbolic
+!! setup if `new_pattern` is `.TRUE.`. Changes to the matrix structure are also
+!! detected automatically.
 !------------------------------------------------------------------------------
 recursive subroutine ilusolver_update(self,new_pattern)
 class(oft_ilusolver), intent(inout) :: self
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix pattern (optional)
 self%refactor=.TRUE.
-IF(PRESENT(new_pattern))self%update_graph=new_pattern
+IF(PRESENT(new_pattern))THEN
+  IF(new_pattern)self%update_graph=.TRUE.
+END IF
 end subroutine ilusolver_update
 !------------------------------------------------------------------------------
 !> Setup solver from XML definition
+!!
+!! Options: `package` (factorization package), `pivot_tol` (relative small-pivot
+!! threshold) and `diag_shift` (relative diagonal shift); the last two are used by
+!! the "native" package only.
 !------------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
 TYPE(xml_node), INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
-INTEGER(i4) :: nnodes,nread
 TYPE(xml_node) :: current_node
-!---
 CHARACTER(LEN=:), ALLOCATABLE :: factor_package
-CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
+REAL(r8) :: rtmp
 DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
@@ -962,9 +1130,24 @@ IF(ierr==0)THEN
     self%package=factor_package
   END IF
 END IF
+CALL xml_get_element(solver_node,"pivot_tol",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,rtmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `pivot_tol` node","ilusolver_setup_xml",__FILE__)
+  IF(rtmp<0.d0)CALL oft_abort('"pivot_tol" must be non-negative','ilusolver_setup_xml',__FILE__)
+  self%pivot_tol=rtmp
+END IF
+CALL xml_get_element(solver_node,"diag_shift",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,rtmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `diag_shift` node","ilusolver_setup_xml",__FILE__)
+  self%diag_shift=rtmp
+END IF
 IF(oft_debug_print(1))THEN
-  WRITE(*,'(A)')'LU solver setup:'
-  WRITE(*,'(2X,2A)')'- Package:  ',self%package
+  WRITE(*,'(A)')'ILU solver setup:'
+  WRITE(*,'(2X,2A)')'- Package:    ',self%package
+  WRITE(*,'(2X,A,ES11.3)')'- Pivot tol:  ',self%pivot_tol
+  WRITE(*,'(2X,A,ES11.3)')'- Diag shift: ',self%diag_shift
 END IF
 DEBUG_STACK_POP
 end subroutine ilusolver_setup_xml
@@ -975,42 +1158,31 @@ recursive function ilusolver_check_thread(self) result(thread_safe)
 class(oft_ilusolver), intent(inout) :: self
 logical :: thread_safe
 thread_safe=.TRUE.
-! IF(self%package(1:5)=='mumps')thread_safe=.FALSE.
-! IF(self%package(1:6)=='superd')thread_safe=.FALSE.
 end function ilusolver_check_thread
 !------------------------------------------------------------------------------
-!> Destroy direct solver and deallocate all internal storage
+!> Destroy ILU solver and deallocate all internal storage
 !------------------------------------------------------------------------------
 subroutine ilusolver_delete(self,propogate)
 class(oft_ilusolver), intent(inout) :: self
 LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
-INTEGER(i4) :: mode,nrhs,ierr,ldb,nr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ivals
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: rvals
+TYPE(lu_symbolic_key) :: key_reset
 self%refactor=.TRUE.
 self%update_graph=.TRUE.
+self%sym_key=key_reset
 IF(.NOT.self%initialized)THEN
   NULLIFY(self%A)
   RETURN
 END IF
-ALLOCATE(ivals(1),rvals(1))
 SELECT CASE(TRIM(self%package))
-! #ifdef HAVE_SUPERLU
-!   CASE("super")
-!     mode=4
-!     CALL oft_superlu_dgssv(mode,nrhs,nrhs,nrhs,rvals,ivals,ivals, &
-!       rvals,ldb,self%superlu_struct%f_factors,nrhs,ierr)
-! #endif
 #ifdef HAVE_MKL
   CASE("mkl")
-    CALL oft_mkl_ilu(3,1,1,rvals,ivals,ivals,rvals,self%pardiso_struct%f_factors,ierr)
+    CALL ilusolver_mkl_free(self)
 #endif
   CASE("native")
-    IF(ASSOCIATED(self%native_struct%alu))THEN
+    IF(ALLOCATED(self%native_struct%alu))THEN
       DEALLOCATE(self%native_struct%alu,self%native_struct%jlu,self%native_struct%ju)
     END IF
 END SELECT
-DEALLOCATE(ivals,rvals)
 NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine ilusolver_delete
@@ -1229,24 +1401,37 @@ IF(oft_env%pm)THEN
 END IF
 END SUBROUTINE lapack_cholesky_real4
 !---------------------------------------------------------------------------------
-!> Native Incomplete LU factorization with no fill
+!> Native incomplete LU factorization with no fill (ILU(0))
 !!
-!! Based on ILU++ by Mayer (https://dx.doi.org/10.1002/pamm.200700911)
+!! Derived from the `ilu0` routine of SPARSKIT (Y. Saad). The factors are stored in
+!! modified sparse row format: the inverted diagonal of U in `alu(1:n)`, the row
+!! pointer in `jlu(1:n+1)` and the off-diagonal entries of L (unit diagonal) and U,
+!! with their columns, from `alu(n+2)`/`jlu(n+2)`; `ju(i)` is the start of the U part
+!! of row `i`.
 !!
-!! @note Requires CSR graph with sorted column list and diagonal entries
+!! Pivot protection: a pivot whose magnitude is below `pivot_tol` times the largest
+!! magnitude in its row of the matrix is replaced by that value, keeping its sign
+!! (positive for an exact zero). With `diag_shift` the factorization is of
+!! \f$ A + \alpha \mathrm{diag}(A) \f$.
+!!
+!! @note Requires a CSR graph with sorted column indices and a diagonal entry in every
+!! row (see @ref ilu_check_structure); `alu` and `jlu` must have `nnz+1` entries.
 !---------------------------------------------------------------------------------
-subroutine ilu0(n,a,lc,kr,alu,jlu,ju,ierr)
-integer(4), intent(in) :: n !< Size of matrix
-real(8), contiguous, dimension(:), intent(in) :: a !< Matrix entries
-real(8), contiguous, dimension(:), intent(inout) :: alu !< Entries for L/U factors
-integer(4), contiguous, dimension(:), intent(inout) :: lc !< Column indices
-integer(4), contiguous, dimension(:), intent(inout) :: kr !< Row pointer
-integer(4), contiguous, dimension(:), intent(inout) :: jlu !< Column indices for alu
-integer(4), contiguous, dimension(:), intent(inout) :: ju !< Diagonal indices for alu
-integer(4), intent(out) :: ierr !< Error flag
-integer(4), allocatable, dimension(:) :: iw
-integer(4) :: i,ii,j,jj,jcol,jf,jm,jrow,js,ju0,jw
-real(8) :: tl
+subroutine ilu0(n,a,lc,kr,alu,jlu,ju,pivot_tol,diag_shift,nreplaced,ierr)
+integer(i4), intent(in) :: n !< Size of matrix
+real(r8), contiguous, dimension(:), intent(in) :: a !< Matrix entries
+integer(i4), contiguous, dimension(:), intent(in) :: lc !< Column indices
+integer(i4), contiguous, dimension(:), intent(in) :: kr !< Row pointer
+real(r8), contiguous, dimension(:), intent(inout) :: alu !< Entries for L/U factors
+integer(i4), contiguous, dimension(:), intent(inout) :: jlu !< Column indices for alu
+integer(i4), contiguous, dimension(:), intent(inout) :: ju !< Diagonal indices for alu
+real(r8), intent(in) :: pivot_tol !< Relative small-pivot threshold (0 to only catch exact zeros)
+real(r8), intent(in) :: diag_shift !< Relative diagonal shift
+integer(i4), intent(out) :: nreplaced !< Number of pivots replaced
+integer(i4), intent(out) :: ierr !< Error flag (0: success, i>0: zero pivot in row i, i<0: non-finite pivot in row -i)
+integer(i4), allocatable, dimension(:) :: iw
+integer(i4) :: i,ii,j,jj,jcol,jf,jm,jrow,js,ju0,jw
+real(r8) :: tl,rowmax,pthresh
 !
 ju0 = n+2
 jlu(1) = ju0
@@ -1257,14 +1442,17 @@ do i=1, n
 end do
 !---
 ierr = 0
+nreplaced = 0
 do ii=1,n
   js=ju0
+  rowmax=0.d0
   !---Generating row ii of L and U
   do j=kr(ii),kr(ii+1)-1
     ! copy row ii of a, ja, ia into row ii of alu, jlu (L/U) matrix.
     jcol=lc(j)
+    rowmax=MAX(rowmax,ABS(a(j)))
     if(jcol==ii)then
-      alu(ii)=a(j)
+      alu(ii)=a(j)*(1.d0+diag_shift)
       iw(jcol)=ii
       ju(ii)=ju0
     else
@@ -1287,11 +1475,20 @@ do ii=1,n
       if(jw/=0)alu(jw)=alu(jw)-tl*alu(jj)
     end do
   end do
-  if(alu(ii)==0.0d0)then
+  !---Check pivot
+  if(.NOT.(ABS(alu(ii))<=HUGE(alu(ii))))then
+    ierr = -ii
+    exit
+  end if
+  pthresh=pivot_tol*rowmax
+  if(ABS(alu(ii))<pthresh)then
+    alu(ii)=SIGN(pthresh,alu(ii))
+    nreplaced=nreplaced+1
+  else if(alu(ii)==0.d0)then
     ierr = ii
     exit
   endif
-  alu(ii)=1.0d0/alu(ii)
+  alu(ii)=1.d0/alu(ii)
   !---Reset iw pointer
   iw(ii)=0
   do i=js,jf
@@ -1299,7 +1496,7 @@ do ii=1,n
   end do
 end do
 DEALLOCATE(iw)
-END SUBROUTINE
+END SUBROUTINE ilu0
 !---------------------------------------------------------------------------------
 !> Approximate solve using ILU(0) factorization produced by ilu0
 !---------------------------------------------------------------------------------
