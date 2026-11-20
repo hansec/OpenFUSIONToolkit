@@ -26,6 +26,9 @@
 !! - `native_kernels_prod.inc`: left (or matrix), right and result types
 !!   (`nk_owned_dot`, `nk_owned_mdot`, `nk_csr_matvec`, `nk_csc_matvec`,
 !!   `nk_dense_matvec`, `nk_dense_matvect`) for all four real/complex combinations.
+!! - `native_kernels_ilu.inc`: one value type, incomplete LU factorization and solve
+!!   in the CSR layout of the matrix (`nk_ilu0_factor`, `nk_ilu0_solve`) for real and
+!!   complex.
 !!
 !! Specific procedures in each instantiation are private and share their names; only
 !! generic names are public, and the generics of each instantiation merge in
@@ -35,7 +38,10 @@
 !!
 !! Threading follows the rest of the native backend: each kernel opens its own
 !! OpenMP parallel region, conditional on the problem size exceeding
-!! `OFT_OMP_VTHRESH`, so kernels must be called from serial code.
+!! `OFT_OMP_VTHRESH`, so kernels must be called from serial code. The exception is
+!! the incomplete LU kernels, which are serial and may be called from inside a
+!! parallel region (block-Jacobi factors and applies several local blocks per process
+!! in a parallel loop).
 !!
 !! @authors Chris Hansen
 !! @date November 2026
@@ -233,6 +239,27 @@ END MODULE oft_native_kernels_vec_c8
 #undef KONE
 #undef KPTR
 !---------------------------------------------------------------------------------
+! Incomplete LU kernels
+!---------------------------------------------------------------------------------
+#define KT REAL(r8)
+#define KZERO 0.d0
+#define KONE 1.d0
+MODULE oft_native_kernels_ilu_r8
+#include "native_kernels_ilu.inc"
+END MODULE oft_native_kernels_ilu_r8
+#undef KT
+#undef KZERO
+#undef KONE
+#define KT COMPLEX(c8)
+#define KZERO (0.d0,0.d0)
+#define KONE (1.d0,0.d0)
+MODULE oft_native_kernels_ilu_c8
+#include "native_kernels_ilu.inc"
+END MODULE oft_native_kernels_ilu_c8
+#undef KT
+#undef KZERO
+#undef KONE
+!---------------------------------------------------------------------------------
 ! Update kernels (destination/source)
 !---------------------------------------------------------------------------------
 #define KY REAL(r8)
@@ -348,12 +375,15 @@ END MODULE oft_native_kernels_prod_cc
 !! - Products: `nk_owned_dot`, `nk_owned_mdot`, `nk_csr_matvec` (4- and 2-byte
 !!   column indices), `nk_csc_matvec`, `nk_dense_matvec`, `nk_dense_matvect`
 !!   (all real/complex combinations; the left operand of dot products is conjugated)
+!! - Incomplete LU: `nk_ilu0_factor`, `nk_ilu0_solve` (real and complex; serial)
 !! - Real only: `nk_jacobi_start`, `nk_jacobi_sweep`, `nk_jacobi_restart`
 !---------------------------------------------------------------------------------
 MODULE oft_native_kernels
 USE oft_native_kernels_base
 USE oft_native_kernels_vec_r8
 USE oft_native_kernels_vec_c8
+USE oft_native_kernels_ilu_r8
+USE oft_native_kernels_ilu_c8
 USE oft_native_kernels_upd_rr
 USE oft_native_kernels_upd_cr
 USE oft_native_kernels_upd_cc
