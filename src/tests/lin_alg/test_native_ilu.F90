@@ -5,7 +5,8 @@
 !---------------------------------------------------------------------------------
 !> @file test_native_ilu.F90
 !
-!> Regression tests for the native ILU(0) solver (@ref oft_lu::oft_ilusolver).
+!> Regression tests for the ILU solver (@ref oft_lu::oft_ilusolver): native ILU(0) and
+!! SuperLU ILUTP.
 !!
 !! The current test cases are (selected by `case_id` in `test_ilu_options`):
 !! - 1: Local matrices built directly: ILU(0) of banded matrices with a full band
@@ -14,11 +15,11 @@
 !!   size (with and without `update(new_pattern=.TRUE.)`), matrices without a
 !!   pattern, small-pivot replacement (sign preserving), diagonal shift, deep copies
 !!   of a factored solver, and the real and complex ILU(0) kernels called directly.
-!! - 2: Poisson equation on a unit cube with GMRES: ILU(0) applied directly to the
-!!   operator (single process only) and inside block-Jacobi with `boundary_overlap`
-!!   (full local matrix of the distributed operator).
-!! - 3: ILU(0) applied directly to a distributed operator (aborts on more than one
-!!   process, solves on one).
+!! - 2: Poisson equation on a unit cube with GMRES: ILU (package `ilu_pkg`) applied
+!!   directly to the operator (single process only) and inside block-Jacobi with
+!!   `boundary_overlap` (full local matrix of the distributed operator).
+!! - 3: ILU (package `ilu_pkg`) applied directly to a distributed operator (aborts on
+!!   more than one process, solves on one).
 !! - 4: Timing of the ILU(0) factorization and solve for the Lagrange Laplacian of
 !!   order `order` on a single process (written to `ilu_timing.results`), and of the
 !!   factorization and the serial and level-scheduled (threaded) solves for 1, 2, 4,
@@ -33,6 +34,16 @@
 !!   iteration counts and solutions must be identical; wall times of the first
 !!   solve (including setup and factorization) and of a repeated solve are written
 !!   to `ilu_timing.results`.
+!! - 7: SuperLU ILUTP ("super") on local matrices built directly: complete LU with no
+!!   dropping (also for several right hand sides and matrices without a pattern),
+!!   refactoring after value and option changes (bitwise equal to a new factorization),
+!!   after pattern and size changes and after `update(new_pattern=.TRUE.)`, column
+!!   permutation changes, zero pivot replacement, copies and repeated deletion.
+!! - 8: Comparison of native ILU(0) and SuperLU ILUTP for several drop tolerances on the
+!!   Lagrange Laplacian of order `order` on a single process: factorization and solve
+!!   times, non-zeros of the factors and GMRES iterations (written to `ilu_compare.results`).
+!!
+!! Cases 7 and 8, and case 2 or 3 with `ilu_pkg='super'`, print `SKIP TEST` without SuperLU.
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -60,11 +71,12 @@ INTEGER(i4) :: io_unit,ierr,nfail
 INTEGER(i4) :: case_id = 1
 INTEGER(i4) :: order = 2
 INTEGER(i4) :: its(2) = -1
+CHARACTER(LEN=7) :: ilu_pkg = 'native'
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
 TYPE(oft_seam), TARGET :: local_seam
-NAMELIST/test_ilu_options/case_id,order
+NAMELIST/test_ilu_options/case_id,order,ilu_pkg
 IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
@@ -76,6 +88,12 @@ READ(io_unit,test_ilu_options,IOSTAT=ierr)
 CLOSE(io_unit)
 local_seam%skip=.TRUE.
 nfail=0
+#if !defined( HAVE_SUPERLU )
+IF((case_id==7).OR.(case_id==8).OR.(TRIM(ilu_pkg)=='super'))THEN
+  WRITE(*,*)'SKIP TEST'
+  CALL oft_finalize
+END IF
+#endif
 SELECT CASE(case_id)
   CASE(1)
     CALL test_exact()
@@ -106,6 +124,17 @@ SELECT CASE(case_id)
     CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,minlev=-1)
     lag_zerob%ML_lag_rep=>ML_oft_lagrange
     CALL test_schwarz_timing()
+  CASE(7)
+    CALL test_super_exact()
+    CALL test_super_refactor()
+    CALL test_super_options()
+    CALL test_super_pivots()
+    CALL test_super_copy()
+  CASE(8)
+    CALL multigrid_construct(mg_mesh)
+    CALL oft_lag_setup(mg_mesh,order,ML_oft_lagrange,minlev=-1)
+    lag_zerob%ML_lag_rep=>ML_oft_lagrange
+    CALL test_compare()
   CASE DEFAULT
     CALL oft_abort('Unknown test case','main',__FILE__)
 END SELECT
@@ -571,6 +600,8 @@ linv%nrits=20
 DO k=1,2
   IF(case_id==2.AND.k==1.AND.oft_env%nprocs>1)CYCLE
   IF(case_id==3.AND.k==2)CYCLE
+  ilu_pre%package=ilu_pkg
+  ilu_sub%package=ilu_pkg
   IF(k==1)THEN
     ilu_pre%A=>lop
     linv%pre=>ilu_pre
@@ -1060,4 +1091,417 @@ END DO
 CALL check('Schwarz: same iterations on repeated solve',linv%cits==nits)
 CALL sw%delete
 END SUBROUTINE schwarz_solve
+! Non-symmetric, diagonally dominant five-point (convection-diffusion like) matrix on an
+! m x m grid: ILU(0) drops fill here, a complete LU does not
+FUNCTION make_grid(m,scale,no_pattern) RESULT(A)
+INTEGER(i4), INTENT(in) :: m
+REAL(r8), INTENT(in) :: scale
+LOGICAL, OPTIONAL, INTENT(in) :: no_pattern
+TYPE(oft_native_matrix), POINTER :: A
+INTEGER(i4) :: i,j,k,n,row
+INTEGER(i4), ALLOCATABLE :: kr(:),lc(:)
+REAL(r8), ALLOCATABLE :: vals(:)
+n=m*m
+ALLOCATE(kr(n+1),lc(5*n),vals(5*n))
+k=0
+kr(1)=1
+DO j=1,m
+  DO i=1,m
+    row=(j-1)*m+i
+    IF(j>1)THEN
+      k=k+1; lc(k)=row-m; vals(k)=-1.3d0
+    END IF
+    IF(i>1)THEN
+      k=k+1; lc(k)=row-1; vals(k)=-1.2d0
+    END IF
+    k=k+1; lc(k)=row; vals(k)=4.5d0+0.1d0*SIN(REAL(row,r8))
+    IF(i<m)THEN
+      k=k+1; lc(k)=row+1; vals(k)=-0.8d0
+    END IF
+    IF(j<m)THEN
+      k=k+1; lc(k)=row+m; vals(k)=-0.7d0
+    END IF
+    kr(row+1)=k+1
+  END DO
+END DO
+A=>make_matrix(n,kr,lc(1:k),scale*vals(1:k),no_pattern)
+DEALLOCATE(kr,lc,vals)
+END FUNCTION make_grid
+! SuperLU ILUTP solver with no dropping (a complete LU for the small matrices used here)
+SUBROUTINE super_exact_opts(ilu)
+TYPE(oft_ilusolver), INTENT(inout) :: ilu
+ilu%package='super'
+ilu%drop_tol=0.d0
+ilu%fill_factor=1.d3
+END SUBROUTINE super_exact_opts
+! Apply a new SuperLU ILUTP solver with the options of ilu to A and return the solution
+SUBROUTINE super_fresh(ilu,A,g,x,nnz)
+TYPE(oft_ilusolver), INTENT(in) :: ilu
+TYPE(oft_native_matrix), POINTER, INTENT(in) :: A
+TYPE(oft_native_vector), INTENT(inout) :: g
+REAL(r8), INTENT(out) :: x(:)
+INTEGER(i8), INTENT(out) :: nnz
+TYPE(oft_ilusolver) :: fresh
+TYPE(oft_native_vector), POINTER :: u
+fresh%package='super'
+fresh%drop_tol=ilu%drop_tol
+fresh%fill_factor=ilu%fill_factor
+fresh%milu=ilu%milu
+fresh%col_perm=ilu%col_perm
+fresh%fill_tol=ilu%fill_tol
+fresh%pivot_thresh=ilu%pivot_thresh
+u=>make_vec(A%nr)
+fresh%A=>A
+CALL fresh%apply(u,g)
+x=u%v
+nnz=fresh%nnz_factor
+CALL fresh%delete
+CALL free_vec(u)
+END SUBROUTINE super_fresh
+! With no dropping SuperLU ILUTP is a complete LU (where ILU(0) is not), for one and
+! several right hand sides and for matrices without a pattern; the matrix values are
+! not modified (they are passed to SuperLU without a copy)
+SUBROUTINE test_super_exact()
+TYPE(oft_native_matrix), POINTER :: A
+TYPE(oft_native_vector), POINTER :: u,g
+TYPE(oft_ilusolver) :: ilu,ilu0
+REAL(r8), ALLOCATABLE :: vsave(:),rhs(:,:)
+INTEGER(i4) :: i,k,n
+REAL(r8) :: res
+A=>make_grid(8,1.d0)
+n=A%nr
+ALLOCATE(vsave(A%nnz))
+vsave=A%M
+u=>make_vec(n); g=>make_vec(n)
+CALL fill_rhs(g)
+!---ILU(0) drops fill for this matrix
+ilu0%package='native'
+ilu0%A=>A
+CALL ilu0%apply(u,g)
+CALL check('Super: ILU(0) not exact for grid matrix',rel_resid(A,u%v,g%v)>1.d-6)
+CALL ilu0%delete
+!---No dropping
+CALL super_exact_opts(ilu)
+ilu%A=>A
+u%v=0.d0
+CALL ilu%apply(u,g)
+CALL check('Super: exact without dropping',rel_resid(A,u%v,g%v)<1.d-13)
+CALL check('Super: no pivots replaced',ilu%npivot_replaced==0)
+CALL check('Super: factors have fill',ilu%nnz_factor>A%nnz)
+CALL check('Super: matrix values unchanged',same_r(vsave,A%M))
+u%v=0.d0
+CALL ilu%apply(u,g)
+CALL check('Super: reapplied',rel_resid(A,u%v,g%v)<1.d-13)
+CALL ilu%delete
+!---Several right hand sides solved together
+ilu%nrhs=3
+ALLOCATE(ilu%sec_rhs(n,2),rhs(n,2))
+DO k=1,2
+  DO i=1,n
+    rhs(i,k)=COS(0.3d0*REAL(k*(n-i),r8))
+  END DO
+END DO
+ilu%sec_rhs=rhs
+ilu%A=>A
+u%v=0.d0
+CALL ilu%apply(u,g)
+res=rel_resid(A,u%v,g%v)
+DO k=1,2
+  res=MAX(res,rel_resid(A,ilu%sec_rhs(:,k),rhs(:,k)))
+END DO
+CALL check('Super: several right hand sides',res<1.d-13)
+CALL ilu%delete
+DEALLOCATE(ilu%sec_rhs,rhs)
+ilu%nrhs=1
+CALL free_mat(A)
+!---Matrix without a pattern (keyed on its arrays)
+A=>make_grid(8,1.d0,no_pattern=.TRUE.)
+ilu%A=>A
+u%v=0.d0
+CALL ilu%apply(u,g)
+CALL check('Super: exact for matrix without pattern',rel_resid(A,u%v,g%v)<1.d-13)
+A%M=2.d0*A%M
+CALL ilu%update
+CALL ilu%apply(u,g)
+CALL check('Super: refactor for matrix without pattern',rel_resid(A,u%v,g%v)<1.d-13)
+CALL ilu%delete
+CALL free_mat(A); CALL free_vec(u); CALL free_vec(g)
+DEALLOCATE(vsave)
+END SUBROUTINE test_super_exact
+! Refactoring: new values with the same pattern reuse the column permutation and
+! elimination tree (SamePattern), which must give the same factors as a new
+! factorization (bitwise) even with dropping; pattern and size changes are detected
+SUBROUTINE test_super_refactor()
+TYPE(oft_native_matrix), POINTER :: A1,A2,A3
+TYPE(oft_native_vector), POINTER :: u,g
+TYPE(oft_ilusolver) :: ilu
+REAL(r8), ALLOCATABLE :: x(:)
+INTEGER(i4) :: i,j
+INTEGER(i8) :: nnz
+A1=>make_grid(8,1.d0)
+u=>make_vec(A1%nr); g=>make_vec(A1%nr)
+ALLOCATE(x(A1%nr))
+CALL fill_rhs(g)
+ilu%package='super'
+ilu%drop_tol=5.d-2
+ilu%A=>A1
+CALL ilu%apply(u,g)
+CALL check('Super refactor: dropping is inexact',rel_resid(A1,u%v,g%v)>1.d-8)
+!---New values (row dependent, so the dropped entries change): SamePattern refactor
+DO i=1,A1%nr
+  DO j=A1%kr(i),A1%kr(i+1)-1
+    IF(A1%lc(j)/=i)A1%M(j)=A1%M(j)*(1.d0+0.5d0*COS(REAL(3*i+j,r8)))
+  END DO
+END DO
+CALL ilu%update
+CALL ilu%apply(u,g)
+CALL super_fresh(ilu,A1,g,x,nnz)
+CALL check('Super refactor: new values = new factorization',same_r(u%v,x))
+CALL check('Super refactor: new values, same fill',ilu%nnz_factor==nnz)
+!---No update: factors are kept
+A1%M=2.d0*A1%M
+CALL ilu%apply(u,g)
+CALL check('Super refactor: no update keeps factors',same_r(u%v,x))
+CALL free_vec(u); CALL free_vec(g)
+!---Larger matrix (new pattern and size), detected without update
+CALL super_exact_opts(ilu)
+A2=>make_grid(10,1.d0)
+u=>make_vec(A2%nr); g=>make_vec(A2%nr)
+CALL fill_rhs(g)
+ilu%A=>A2
+CALL ilu%apply(u,g)
+CALL check('Super refactor: larger matrix, new pattern detected',rel_resid(A2,u%v,g%v)<1.d-13)
+!---Same size, different pattern object
+A3=>make_banded(A2%nr,3,0.5d0)
+ilu%A=>A3
+CALL ilu%apply(u,g)
+CALL check('Super refactor: new pattern object detected',rel_resid(A3,u%v,g%v)<1.d-13)
+!---Explicit request for a new symbolic setup
+A3%M=3.d0*A3%M
+CALL ilu%update(new_pattern=.TRUE.)
+CALL ilu%apply(u,g)
+CALL check('Super refactor: update(new_pattern)',rel_resid(A3,u%v,g%v)<1.d-13)
+CALL free_vec(u); CALL free_vec(g)
+!---Back to the smaller matrix
+u=>make_vec(A1%nr); g=>make_vec(A1%nr)
+CALL fill_rhs(g)
+ilu%A=>A1
+CALL ilu%apply(u,g)
+CALL check('Super refactor: smaller matrix',rel_resid(A1,u%v,g%v)<1.d-13)
+CALL ilu%delete
+CALL free_mat(A1); CALL free_mat(A2); CALL free_mat(A3)
+CALL free_vec(u); CALL free_vec(g)
+DEALLOCATE(x)
+END SUBROUTINE test_super_refactor
+! Option changes: numerical options take effect at the next update, the column
+! permutation at the next symbolic setup (triggered by the change); each result
+! matches a new solver with the same options bitwise
+SUBROUTINE test_super_options()
+TYPE(oft_native_matrix), POINTER :: A
+TYPE(oft_native_vector), POINTER :: u,g
+TYPE(oft_ilusolver) :: ilu
+REAL(r8), ALLOCATABLE :: x(:)
+INTEGER(i8) :: nnz,nnz_ref
+INTEGER(i4) :: k
+A=>make_grid(10,1.d0)
+u=>make_vec(A%nr); g=>make_vec(A%nr)
+ALLOCATE(x(A%nr))
+CALL fill_rhs(g)
+ilu%package='super'
+ilu%drop_tol=1.d-2
+ilu%A=>A
+CALL ilu%apply(u,g)
+nnz_ref=ilu%nnz_factor
+DO k=1,6
+  SELECT CASE(k)
+    CASE(1)
+      ilu%drop_tol=1.d-1
+    CASE(2)
+      ilu%fill_factor=2.d0
+    CASE(3)
+      ilu%milu=2
+    CASE(4)
+      ilu%pivot_thresh=1.d0
+    CASE(5)
+      ilu%fill_tol=1.d-4
+    CASE(6)
+      ilu%col_perm=0
+  END SELECT
+  IF(k<6)CALL ilu%update
+  CALL ilu%apply(u,g)
+  CALL super_fresh(ilu,A,g,x,nnz)
+  CALL check('Super options: changed option = new solver',same_r(u%v,x).AND.(ilu%nnz_factor==nnz))
+  IF(k==1)CALL check('Super options: larger drop tolerance, fewer non-zeros',ilu%nnz_factor<nnz_ref)
+  IF(k==2)CALL check('Super options: fill bounded by fill_factor',ilu%nnz_factor<=2*A%nnz+A%nr)
+END DO
+CALL ilu%delete
+CALL free_mat(A); CALL free_vec(u); CALL free_vec(g)
+DEALLOCATE(x)
+END SUBROUTINE test_super_options
+! Zero pivots: SuperLU replaces a pivot only when its whole remaining column is zero, so
+! the singular [[1,1],[1,1]] has one replaced pivot (counted, factorization completes);
+! the zero diagonal of [[0,1],[1,0]] is never chosen as a pivot, even when diagonal
+! pivots are always preferred (pivot_thresh=0)
+SUBROUTINE test_super_pivots()
+TYPE(oft_native_matrix), POINTER :: A
+TYPE(oft_native_vector), POINTER :: u,g
+TYPE(oft_ilusolver) :: ilu
+A=>make_matrix(2,[1,3,5],[1,2,1,2],[1.d0,1.d0,1.d0,1.d0])
+u=>make_vec(2); g=>make_vec(2)
+g%v=[1.d0,2.d0]
+CALL super_exact_opts(ilu)
+ilu%col_perm=0
+ilu%A=>A
+CALL ilu%apply(u,g)
+CALL check('Super pivots: zero pivot replaced',ilu%npivot_replaced==1)
+CALL check('Super pivots: solution finite',ALL(ABS(u%v)<HUGE(1.d0)))
+CALL ilu%delete
+CALL free_mat(A)
+A=>make_matrix(2,[1,3,5],[1,2,1,2],[0.d0,1.d0,1.d0,0.d0])
+ilu%pivot_thresh=0.d0
+ilu%A=>A
+CALL ilu%apply(u,g)
+CALL check('Super pivots: zero diagonal not used',(ilu%npivot_replaced==0).AND.(rel_resid(A,u%v,g%v)<1.d-14))
+CALL ilu%delete
+CALL free_mat(A); CALL free_vec(u); CALL free_vec(g)
+END SUBROUTINE test_super_pivots
+! Copies of a factored solver (as made by block-Jacobi with ALLOCATE(source=)) do not
+! share the SuperLU factors: each copy factors anew, and deleting either leaves the
+! other intact; deleting twice, or before factoring, is safe
+SUBROUTINE test_super_copy()
+TYPE(oft_native_matrix), POINTER :: A
+TYPE(oft_native_vector), POINTER :: u,g
+CLASS(oft_solver), POINTER :: ilu,ilu_copy,ilu_copy2
+TYPE(oft_ilusolver) :: tmp
+A=>make_grid(8,1.d0)
+u=>make_vec(A%nr); g=>make_vec(A%nr)
+CALL fill_rhs(g)
+CALL super_exact_opts(tmp)
+ALLOCATE(ilu, source=tmp)
+!---Copy of a solver that was never applied
+ALLOCATE(ilu_copy2, source=ilu)
+ilu%A=>A
+CALL ilu%apply(u,g)
+CALL check('Super copy: original',rel_resid(A,u%v,g%v)<1.d-13)
+ALLOCATE(ilu_copy, source=ilu)
+!---Both in use
+u%v=0.d0
+CALL ilu_copy%apply(u,g)
+CALL check('Super copy: copy factors anew',rel_resid(A,u%v,g%v)<1.d-13)
+u%v=0.d0
+CALL ilu%apply(u,g)
+CALL check('Super copy: original after copy',rel_resid(A,u%v,g%v)<1.d-13)
+!---Deleting the original leaves the copy intact
+CALL ilu%delete
+CALL ilu%delete
+DEALLOCATE(ilu)
+u%v=0.d0
+CALL ilu_copy%apply(u,g)
+CALL check('Super copy: copy after original deleted',rel_resid(A,u%v,g%v)<1.d-13)
+CALL ilu_copy%delete
+DEALLOCATE(ilu_copy)
+!---Copy of the template, applied after its original is gone
+ilu_copy2%A=>A
+u%v=0.d0
+CALL ilu_copy2%apply(u,g)
+CALL check('Super copy: copy of unapplied solver',rel_resid(A,u%v,g%v)<1.d-13)
+CALL ilu_copy2%delete
+!---Reuse after delete
+ilu_copy2%A=>A
+u%v=0.d0
+CALL ilu_copy2%apply(u,g)
+CALL check('Super copy: apply after delete',rel_resid(A,u%v,g%v)<1.d-13)
+CALL ilu_copy2%delete
+DEALLOCATE(ilu_copy2)
+CALL free_mat(A); CALL free_vec(u); CALL free_vec(g)
+END SUBROUTINE test_super_copy
+! Native ILU(0) against SuperLU ILUTP for several drop tolerances (and fill bounds and MILU
+! variants) on the Laplacian (one process): time of the first application (setup and factorization), refactorization and
+! solve (minimum over batches), non-zeros of the factors and GMRES iterations
+SUBROUTINE test_compare()
+INTEGER(i4), PARAMETER :: ncfg=8,nbatch=3
+CHARACTER(LEN=7), PARAMETER :: pkgs(ncfg)=['native','super ','super ','super ','super ','super ','super ','super ']
+REAL(r8), PARAMETER :: dtols(ncfg)=[0.d0,1.d-2,1.d-3,1.d-4,1.d-4,1.d-2,1.d-3,1.d-3]
+REAL(r8), PARAMETER :: ffacs(ncfg)=[10.d0,10.d0,10.d0,10.d0,30.d0,10.d0,10.d0,10.d0]
+INTEGER(i4), PARAMETER :: milus(ncfg)=[0,0,0,0,0,2,2,1]
+TYPE(oft_native_gmres_solver) :: linv
+TYPE(oft_ilusolver), TARGET :: ilu
+CLASS(oft_vector), POINTER :: u,v,b
+CLASS(oft_matrix), POINTER :: lop => NULL()
+CLASS(oft_matrix), POINTER :: mop => NULL()
+CLASS(oft_native_matrix), POINTER :: A_native
+TYPE(oft_timer) :: timer
+INTEGER(i4) :: k,i,j,nsolve,nfactor,nits
+REAL(r8) :: tfirst,tfactor,tsolve,res
+CALL ML_oft_lagrange%vec_create(u)
+CALL ML_oft_lagrange%vec_create(v)
+CALL ML_oft_lagrange%vec_create(b)
+CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
+CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
+IF(.NOT.native_matrix_cast(A_native,lop))CALL oft_abort('Native matrix required','test_compare',__FILE__)
+CALL u%set(1.d0)
+CALL mop%apply(u,b)
+CALL lag_zerob%apply(b)
+IF(oft_env%head_proc)THEN
+  OPEN(NEWUNIT=io_unit,FILE='ilu_compare.results')
+  WRITE(io_unit,*)A_native%nr,A_native%nnz
+  WRITE(*,'(A,I10,A,I12)')'ILU comparison: nr = ',A_native%nr,', nnz = ',A_native%nnz
+  WRITE(*,'(A)')'ILU comparison: package  drop_tol  fill milu   first (s)  factor (s)   solve (s)  nnz(L+U)/nnz(A)  GMRES its'
+END IF
+DO k=1,ncfg
+  ilu%package=pkgs(k)
+  ilu%drop_tol=dtols(k)
+  ilu%fill_factor=ffacs(k)
+  ilu%milu=milus(k)
+  ilu%A=>lop
+  CALL v%set(1.d0)
+  CALL timer%tick
+  CALL ilu%apply(u,v)
+  tfirst=timer%tock()
+  nsolve=MAX(5,INT(0.2d0/MAX(tfirst,1.d-6)))
+  nfactor=MAX(2,nsolve/4)
+  tsolve=HUGE(1.d0); tfactor=HUGE(1.d0)
+  DO j=1,nbatch
+    CALL timer%tick
+    DO i=1,nsolve
+      CALL ilu%apply(u,v)
+    END DO
+    tsolve=MIN(tsolve,timer%tock()/REAL(nsolve,r8))
+    CALL timer%tick
+    DO i=1,nfactor
+      CALL ilu%update
+      CALL ilu%apply(u,v)
+    END DO
+    tfactor=MIN(tfactor,timer%tock()/REAL(nfactor,r8))
+  END DO
+  tfactor=tfactor-tsolve
+  !---GMRES with the factored preconditioner
+  linv%A=>lop
+  linv%its=-3
+  linv%nrits=20
+  linv%pre=>ilu
+  CALL u%set(0.d0)
+  CALL v%add(0.d0,1.d0,b)
+  CALL linv%apply(u,v)
+  nits=linv%cits
+  CALL lop%apply(u,v)
+  CALL v%add(1.d0,-1.d0,b)
+  res=v%dot(v)
+  CALL check('Comparison: GMRES converged',SQRT(res)<1.d-6*SQRT(b%dot(b)))
+  CALL check('Comparison: iterations',nits>0)
+  IF(oft_env%head_proc)THEN
+    WRITE(*,'(A,A8,ES9.1,F6.0,I5,3ES12.3,F17.3,I11)')'ILU comparison: ',pkgs(k),dtols(k),ffacs(k),milus(k), &
+      tfirst,tfactor,tsolve,REAL(ilu%nnz_factor,r8)/REAL(A_native%nnz,r8),nits
+    WRITE(io_unit,*)k,tfirst,tfactor,tsolve,ilu%nnz_factor,nits
+  END IF
+  NULLIFY(linv%pre)
+  CALL linv%delete
+  CALL ilu%delete
+END DO
+IF(oft_env%head_proc)CLOSE(io_unit)
+CALL u%delete; CALL v%delete; CALL b%delete
+DEALLOCATE(u,v,b)
+CALL lop%delete; CALL mop%delete
+DEALLOCATE(lop,mop)
+END SUBROUTINE test_compare
 END PROGRAM test_native_ilu

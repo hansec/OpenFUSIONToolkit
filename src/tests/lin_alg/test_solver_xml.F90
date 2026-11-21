@@ -12,6 +12,9 @@
 !! - Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$
 !! - Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$, with MG
 !!
+!! Solver definitions that need SuperLU set `need_superlu` in `test_xml_options`; the
+!! test prints `SKIP TEST` for them when OFT is built without SuperLU.
+!!
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
@@ -33,11 +36,22 @@ USE oft_lag_operators, ONLY: lag_setup_interp, lag_mloptions, &
 IMPLICIT NONE
 INTEGER(i4), PARAMETER :: order=4
 INTEGER(i4) :: io_unit,ierr
+LOGICAL :: need_superlu = .FALSE.
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
+NAMELIST/test_xml_options/need_superlu
 !---Initialize enviroment
 CALL oft_init
+OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
+READ(io_unit,test_xml_options,IOSTAT=ierr)
+CLOSE(io_unit)
+#if !defined( HAVE_SUPERLU )
+IF(need_superlu)THEN
+  WRITE(*,*)'SKIP TEST'
+  CALL oft_finalize
+END IF
+#endif
 !---Setup grid
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)

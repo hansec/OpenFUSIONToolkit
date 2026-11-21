@@ -25,6 +25,10 @@ oft_in_template = """
 &cube_options
  mesh_type=1
 /
+
+&test_xml_options
+ need_superlu={2}
+/
 """
 #
 xml_template = """
@@ -34,15 +38,16 @@ xml_template = """
 """
 
 # Common setup function and process handling
-def xml_setup(xml_file, petsc=False, nprocs=1):
+def xml_setup(xml_file, petsc=False, nprocs=1, superlu=False):
     # Distributed runs decompose the base mesh and refine once more
     nlevels = 3
     if nprocs > 1:
         nlevels = 4
     os.chdir(test_dir)
     petsc_flag=('T' if petsc else 'F')
+    superlu_flag=('T' if superlu else 'F')
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(petsc_flag, nlevels))
+        fid.write(oft_in_template.format(petsc_flag, nlevels, superlu_flag))
     with open('oft_in.xml','w+') as fid:
         fid.write(xml_template.format(xml_file))
     return run_OFT("./test_solver_xml oft.in oft_in.xml", nprocs, 60)
@@ -180,6 +185,39 @@ def test_gmres_schwarz_ilu_options(ilu_opts):
     assert validate_result(iteration_count,converged_error)
 
 #============================================================================
+# SuperLU ILUTP ("super" package) options from XML (restricted Schwarz sub-solver as above): the
+# default drop tolerance (1E-3) keeps much more fill than ILU(0) and needs far fewer iterations (18
+# against 58); a larger drop tolerance keeps less fill and needs more, and a tight fill bound (twice
+# the non-zeros of the matrix) drops by size alone and is weaker than ILU(0); the MILU variant and
+# natural column ordering are weaker on this operator; the pivoting options leave the
+# factorization of this operator essentially unchanged. Skipped without SuperLU.
+@pytest.mark.parametrize("ilu_opts", ("default", "drop_tol", "fill_factor", "milu", "col_perm", "pivoting"))
+def test_gmres_schwarz_ilut_options(ilu_opts):
+    opts = {"default": "",
+            "drop_tol": "<drop_tol>1.E-2</drop_tol>",
+            "fill_factor": "<fill_factor>2.0</fill_factor>",
+            "milu": "<milu>2</milu>",
+            "col_perm": "<col_perm>0</col_perm>",
+            "pivoting": "<fill_tol>1.E-4</fill_tol><pivot_thresh>1.0</pivot_thresh>"}[ilu_opts]
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="add_schwarz">
+            <nlocal>4</nlocal>
+            <overlap>1</overlap>
+            <type>restricted</type>
+            <pre type="ilu"><package>super</package>{0}</pre>
+        </pre>
+    </solver>
+    """.format(opts)
+    iteration_count = {"default": 18, "drop_tol": 22, "fill_factor": 66,
+                       "milu": 20, "col_perm": 33, "pivoting": 18}[ilu_opts]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False,superlu=True)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
 # Native ILU(0) on the whole process-local subdomain (Schwarz with one block, applied from serial
 # code, where the level-scheduled solve may use all threads) with and without threading: the
 # threaded solve is bitwise identical to the serial one, so the iteration count is the same
@@ -223,4 +261,29 @@ def test_gmres_schwarz_mpi2(schwarz_type):
     iteration_count = {"restricted": 57, "additive": 85, "weighted": 59}[schwarz_type]
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=False,nprocs=2)
+    assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# SuperLU ILUTP sub-solver of Schwarz (one subdomain per process grown by one layer across
+# processes, as above) and of block-Jacobi with boundary overlap (full local matrix) on 2 processes.
+# Skipped without SuperLU.
+@pytest.mark.mpi
+@pytest.mark.parametrize("pre_type", ("add_schwarz", "block_jacobi"))
+def test_gmres_ilut_mpi2(pre_type):
+    pre_opts = {"add_schwarz": "<overlap>1</overlap><type>restricted</type>",
+                "block_jacobi": "<boverlap>T</boverlap>"}[pre_type]
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="{0}">
+            <nlocal>1</nlocal>
+            {1}
+            <pre type="ilu"><package>super</package><drop_tol>1.E-3</drop_tol></pre>
+        </pre>
+    </solver>
+    """.format(pre_type, pre_opts)
+    iteration_count = {"add_schwarz": 14, "block_jacobi": 34}[pre_type]
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=False,nprocs=2,superlu=True)
     assert validate_result(iteration_count,converged_error)

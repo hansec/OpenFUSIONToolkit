@@ -6,7 +6,10 @@
 !> @file test_native_bjacobi.F90
 !
 !> Regression tests for native Block-Jacobi solver. Tests are performed
-!! on a unit cube at different polynomial orders using SuperLU.
+!! on a unit cube at different polynomial orders using direct (`use_ilu=F`)
+!! or incomplete (`use_ilu=T`) LU sub-solvers from the package selected by
+!! `sol_type` (LU: 1 SuperLU, 2 SuperLU-DIST, 3 MUMPS, 4 UMFPACK, 5 MKL;
+!! ILU: 0 native ILU(0), 1 SuperLU ILUTP with default options, 5 MKL ILU(0)).
 !!
 !! The current test cases are:
 !! - Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$
@@ -148,8 +151,8 @@ IF(use_ilu)THEN
   SELECT CASE(sol_type)
     CASE(0)
       linv_pre_ilu%package='native'
-    ! CASE(1)
-    !   linv_pre_ilu%package='super'
+    CASE(1)
+      linv_pre_ilu%package='super'
     CASE(5)
       linv_pre_ilu%package='mkl'
     CASE DEFAULT
