@@ -65,7 +65,8 @@ PUBLIC lapack_matinv, lapack_cholesky
 !> Native ILU(0) preconditioner information object
 !!
 !! The factorization and solve are the `nk_ilu0_factor` and `nk_ilu0_solve` kernels
-!! of @ref oft_native_kernels (derived from SPARSKIT, Y. Saad). The factors are
+!! of @ref oft_native_kernels (IKJ ILU(0), see Y. Saad, "Iterative Methods for Sparse
+!! Linear Systems", 2nd ed., SIAM (2003), Sec. 10.3). The factors are
 !! stored in the CSR layout of the matrix (`kr`/`lc`), with the unit-diagonal L to the
 !! left of each diagonal entry, U to its right and the inverted pivot in the diagonal
 !! entry itself. The diagonal locations come from the matrix's pattern
