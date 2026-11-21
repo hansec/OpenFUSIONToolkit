@@ -243,9 +243,9 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
   !! schedules are fetched (only when more than one thread is available).
   LOGICAL :: threaded = .TRUE.
   !> Drop tolerance ("super" only, SuperLU `ILU_DropTol`): entries of the factors smaller
-  !! than `drop_tol` in relative magnitude (U: relative to the largest entry of the matrix
-  !! row; L: after division by the pivot) are dropped. With 0 only the fill bound of
-  !! `fill_factor` drops entries, so a large enough `fill_factor` gives a complete LU.
+  !! than `drop_tol` in relative magnitude are dropped (see the SuperLU documentation for
+  !! the exact rules). With 0 only the fill bound of `fill_factor` drops entries, so a large
+  !! enough `fill_factor` gives a complete LU factorization.
   REAL(r8) :: drop_tol = 1.d-3
   !> Fill factor ("super" only, SuperLU `ILU_FillFactor`): bound on the growth of the
   !! number of non-zeros of the factors relative to the matrix (column-wise area rule)
