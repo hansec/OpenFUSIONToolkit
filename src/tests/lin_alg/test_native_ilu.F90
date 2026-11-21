@@ -21,13 +21,12 @@
 !!   process, solves on one).
 !! - 4: Timing of the ILU(0) factorization and solve for the Lagrange Laplacian of
 !!   order `order` on a single process (written to `ilu_timing.results`), and of the
-!!   factorization and the serial and level-scheduled (threaded) solves for 1, 2, 4,
-!!   ... threads.
-!! - 5: Level-scheduled (threaded) ILU(0) solve and solver on a non-symmetric variant
-!!   of the Lagrange Laplacian: schedule structure, bitwise identity with the serial
-!!   solve (real and complex, with pivot replacement and diagonal shift, for several
-!!   thread counts), the serial path inside parallel regions, and the threaded solver
-!!   against the serial one.
+!!   serial and level-scheduled (threaded) kernels for 1, 2, 4, ... threads.
+!! - 5: Level-scheduled (threaded) ILU(0) kernels and solver on a non-symmetric
+!!   variant of the Lagrange Laplacian: schedule structure, bitwise identity with the
+!!   serial kernels (real and complex, with pivot replacement and diagonal shift, for
+!!   several thread counts), identical errors, the serial path inside parallel
+!!   regions, and the threaded solver against the serial one.
 !! - 6: GMRES on the Laplacian of order `order` preconditioned by Schwarz (one
 !!   subdomain per process, overlap 1) with ILU(0), with and without threading:
 !!   iteration counts and solutions must be identical; wall times of the first
@@ -37,6 +36,7 @@
 !! @ingroup testing
 !------------------------------------------------------------------------------
 PROGRAM test_native_ilu
+USE, INTRINSIC :: ieee_arithmetic, ONLY: ieee_value, ieee_positive_inf
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
 USE multigrid, ONLY: multigrid_mesh
@@ -656,10 +656,9 @@ DEALLOCATE(u,g)
 CALL lop%delete
 DEALLOCATE(lop)
 END SUBROUTINE test_timing
-! Time the ILU(0) kernels for 1, 2, 4, ... threads (up to the OpenMP maximum): the
-! (serial) factorization, and the serial and level-scheduled solves with the profitability
-! heuristic overridden (min over batches, per call). Also prints the level structure of
-! the matrix.
+! Time the ILU(0) kernels for 1, 2, 4, ... threads (up to the OpenMP maximum): serial
+! kernels, and level-scheduled ones with the profitability heuristic overridden (min over
+! batches, per call). Also prints the level structure of the matrix.
 SUBROUTINE timing_kernels(A,nfactor,nsolve)
 CLASS(oft_native_matrix), INTENT(in) :: A
 INTEGER(i4), INTENT(in) :: nfactor,nsolve
@@ -669,19 +668,21 @@ TYPE(oft_timer) :: timer
 INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: dloc
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: fac,sfac,x,b
 INTEGER(i4) :: i,k,nt,nthreads_max,nrep,ierr
-REAL(r8) :: tf,ts(2)
-LOGICAL :: use_solve
+REAL(r8) :: tf(2),ts(2)
+LOGICAL :: use_factor,use_solve
 dloc=>native_pattern_diag(A%pattern)
 sched=native_pattern_ilu_sched(A%pattern)
+use_factor=sched%use_factor
 use_solve=sched%use_solve
+sched%use_factor=.TRUE.
 sched%use_solve=.TRUE.
 ALLOCATE(fac(A%nnz),sfac(A%nnz),x(A%nr),b(A%nr))
 b=1.d0
 nthreads_max=omp_get_max_threads()
 IF(oft_env%head_proc)THEN
   CALL native_ilu_sched_stats(sched,'ILU schedule: ')
-  WRITE(*,'(A,L2)')'ILU schedule: heuristic would use threaded solve: ',use_solve
-  WRITE(*,'(A)')'ILU kernels:  threads          factor (s)    solve serial (s)    solve sched (s)'
+  WRITE(*,'(A,2L2)')'ILU schedule: heuristic would use threaded factor/solve: ',use_factor,use_solve
+  WRITE(*,'(A)')'ILU kernels:  threads   factor serial (s)   factor sched (s)    solve serial (s)    solve sched (s)'
 END IF
 nt=1
 DO WHILE(nt<=nthreads_max)
@@ -692,7 +693,12 @@ DO WHILE(nt<=nthreads_max)
     DO i=1,nfactor
       CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,A%M,1.d-12,0.d0,fac,nrep,ierr)
     END DO
-    tf=MIN(tf,timer%tock()/REAL(nfactor,r8))
+    tf(1)=MIN(tf(1),timer%tock()/REAL(nfactor,r8))
+    CALL timer%tick
+    DO i=1,nfactor
+      CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,A%M,1.d-12,0.d0,fac,nrep,ierr,sched)
+    END DO
+    tf(2)=MIN(tf(2),timer%tock()/REAL(nfactor,r8))
     CALL timer%tick
     DO i=1,nsolve
       x=b
@@ -707,7 +713,7 @@ DO WHILE(nt<=nthreads_max)
     END DO
     ts(2)=MIN(ts(2),timer%tock()/REAL(nsolve,r8))
   END DO
-  IF(oft_env%head_proc)WRITE(*,'(A,I8,3ES20.4)')'ILU kernels: ',nt,tf,ts
+  IF(oft_env%head_proc)WRITE(*,'(A,I8,4ES20.4)')'ILU kernels: ',nt,tf,ts
   nt=2*nt
 END DO
 CALL omp_set_num_threads(nthreads_max)
@@ -809,8 +815,8 @@ DO s=1,ls%nseg
 END DO
 ok=ok.AND.(npar==ls%npar)
 END FUNCTION seg_valid
-! Factor with the (serial) real kernel, then solve with the serial and the scheduled
-! kernels and compare bitwise; returns the number of replaced pivots and the error flag
+! Factor and solve with the serial and the scheduled real kernels and compare bitwise;
+! returns the number of replaced pivots and the error flag of the serial factorization
 SUBROUTINE compare_real(A,dloc,vals,b,sched,ptol,shift,name,nrep,ierr)
 CLASS(oft_native_matrix), INTENT(in) :: A
 INTEGER(i4), INTENT(in) :: dloc(:)
@@ -819,19 +825,27 @@ TYPE(native_ilu_sched), INTENT(in) :: sched
 REAL(r8), INTENT(in) :: ptol,shift
 CHARACTER(LEN=*), INTENT(in) :: name
 INTEGER(i4), INTENT(out) :: nrep,ierr
-REAL(r8), ALLOCATABLE :: fac(:),sfac(:),x0(:),x1(:)
-ALLOCATE(fac(A%nnz),sfac(A%nnz),x0(A%nr),x1(A%nr))
-CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,vals,ptol,shift,fac,nrep,ierr)
-CALL check(name//': factorization succeeded',ierr==0)
+REAL(r8), ALLOCATABLE :: fac0(:),fac1(:),sfac(:),x0(:),x1(:)
+INTEGER(i4) :: nrep1,ierr1,jend
+ALLOCATE(fac0(A%nnz),fac1(A%nnz),sfac(A%nnz),x0(A%nr),x1(A%nr))
+CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,vals,ptol,shift,fac0,nrep,ierr)
+CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,vals,ptol,shift,fac1,nrep1,ierr1,sched)
+CALL check(name//': same error flag',ierr1==ierr)
+CALL check(name//': same number of replaced pivots',nrep1==nrep)
 IF(ierr==0)THEN
+  CALL check(name//': identical factors',same_r(fac0,fac1))
   x0=b
-  CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac,x0)
-  CALL nk_ilu0_sched_values(A%nr,A%kr,dloc,fac,sched,sfac)
+  CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac0,x0)
+  CALL nk_ilu0_sched_values(A%nr,A%kr,dloc,fac1,sched,sfac)
   x1=b
-  CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac,x1,sched,sfac)
+  CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac1,x1,sched,sfac)
   CALL check(name//': identical solution',same_r(x0,x1))
+ELSE
+  !---Rows before the failing one are complete
+  jend=A%kr(ABS(ierr))-1
+  CALL check(name//': identical factors before failing row',same_r(fac0(1:jend),fac1(1:jend)))
 END IF
-DEALLOCATE(fac,sfac,x0,x1)
+DEALLOCATE(fac0,fac1,sfac,x0,x1)
 END SUBROUTINE compare_real
 ! Complex version of compare_real
 SUBROUTINE compare_cplx(A,dloc,vals,b,sched,ptol,shift,name,nrep,ierr)
@@ -842,21 +856,28 @@ TYPE(native_ilu_sched), INTENT(in) :: sched
 REAL(r8), INTENT(in) :: ptol,shift
 CHARACTER(LEN=*), INTENT(in) :: name
 INTEGER(i4), INTENT(out) :: nrep,ierr
-COMPLEX(c8), ALLOCATABLE :: fac(:),sfac(:),x0(:),x1(:)
-ALLOCATE(fac(A%nnz),sfac(A%nnz),x0(A%nr),x1(A%nr))
-CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,vals,ptol,shift,fac,nrep,ierr)
-CALL check(name//': factorization succeeded',ierr==0)
+COMPLEX(c8), ALLOCATABLE :: fac0(:),fac1(:),sfac(:),x0(:),x1(:)
+INTEGER(i4) :: nrep1,ierr1,jend
+ALLOCATE(fac0(A%nnz),fac1(A%nnz),sfac(A%nnz),x0(A%nr),x1(A%nr))
+CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,vals,ptol,shift,fac0,nrep,ierr)
+CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,vals,ptol,shift,fac1,nrep1,ierr1,sched)
+CALL check(name//': same error flag',ierr1==ierr)
+CALL check(name//': same number of replaced pivots',nrep1==nrep)
 IF(ierr==0)THEN
+  CALL check(name//': identical factors',same_c(fac0,fac1))
   x0=b
-  CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac,x0)
-  CALL nk_ilu0_sched_values(A%nr,A%kr,dloc,fac,sched,sfac)
+  CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac0,x0)
+  CALL nk_ilu0_sched_values(A%nr,A%kr,dloc,fac1,sched,sfac)
   x1=b
-  CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac,x1,sched,sfac)
+  CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac1,x1,sched,sfac)
   CALL check(name//': identical solution',same_c(x0,x1))
+ELSE
+  jend=A%kr(ABS(ierr))-1
+  CALL check(name//': identical factors before failing row',same_c(fac0(1:jend),fac1(1:jend)))
 END IF
-DEALLOCATE(fac,sfac,x0,x1)
+DEALLOCATE(fac0,fac1,sfac,x0,x1)
 END SUBROUTINE compare_cplx
-! Level-scheduled ILU(0) solve and solver against the serial ones (bitwise)
+! Level-scheduled ILU(0) kernels and solver against the serial ones (bitwise)
 SUBROUTINE test_threaded()
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_native_matrix), POINTER :: A
@@ -865,11 +886,12 @@ TYPE(native_ilu_sched) :: sched
 TYPE(native_ilu_sched), POINTER :: psched
 TYPE(oft_ilusolver) :: ilu1,ilu2
 INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:) :: dloc
-REAL(r8), ALLOCATABLE :: av(:),b(:),fac0(:),sfac0(:),xt(:),x0(:)
+REAL(r8), ALLOCATABLE :: av(:),aev(:),b(:),fac0(:),sfac0(:),fact(:),xt(:),x0(:)
 REAL(r8), POINTER, DIMENSION(:) :: v1,v2
-COMPLEX(c8), ALLOCATABLE :: cav(:),cb(:)
-INTEGER(i4) :: i,j,k,nt,nthreads,nrep,ierr
+COMPLEX(c8), ALLOCATABLE :: cav(:),caev(:),cb(:)
+INTEGER(i4) :: i,j,k,nt,nthreads,nrep,nrept,ierr,ierrt,rlo,rhi,lev
 INTEGER(i4) :: minr(3)
+INTEGER(i4), ALLOCATABLE :: lvl(:)
 LOGICAL :: ok,in_par
 CHARACTER(LEN=40) :: tag
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
@@ -892,11 +914,14 @@ DO k=1,3
   WRITE(tag,'(A,I0)')'min_rows=',minr(k)
   CALL native_ilu_sched_build(A%nr,A%kr,A%lc,sched,min_rows=minr(k))
   CALL check('Schedule structure, '//TRIM(tag),sched_valid(A,sched,minr(k)))
-  !---Force the scheduled solve (the heuristic would not use it on small matrices)
+  !---Force the scheduled kernels (the heuristic would not use them on small matrices)
+  sched%use_factor=.TRUE.
   sched%use_solve=.TRUE.
+  CALL check('Scheduled factor used iff threads>1, '//TRIM(tag), &
+    native_ilu_sched_active(sched,A%nr,.TRUE.).EQV.(nthreads>1))
   CALL check('Scheduled solve used iff threads>1, '//TRIM(tag), &
     native_ilu_sched_active(sched,A%nr,.FALSE.).EQV.(nthreads>1))
-  CALL check('Schedule rejected for other sizes',.NOT.native_ilu_sched_active(sched,A%nr+1,.FALSE.))
+  CALL check('Schedule rejected for other sizes',.NOT.native_ilu_sched_active(sched,A%nr+1,.TRUE.))
   CALL compare_real(A,dloc,av,b,sched,1.d-12,0.d0,'Real '//TRIM(tag),nrep,ierr)
   CALL check('Real: no error or replaced pivots',(ierr==0).AND.(nrep==0))
   !---Large pivot threshold (many replaced pivots) and diagonal shift
@@ -915,34 +940,77 @@ DO nt=2,4
   CALL compare_cplx(A,dloc,cav,cb,sched,0.9d0,0.1d0,'Complex '//TRIM(tag),nrep,ierr)
 END DO
 CALL omp_set_num_threads(nthreads)
-!---Inside a parallel region (eg. block-Jacobi with several blocks) the solve runs serially
+!---Errors: zero rows in a low (rlo) and a high (rhi) row, where rhi is in an earlier
+! level than rlo, so threads may reach rhi first; the error must name rlo as in serial
+ALLOCATE(lvl(A%nr))
+CALL row_levels(A%nr,sched%lower,lvl)
+!---Pair maximizing lvl(rlo)-lvl(rhi) with rlo<rhi (rows of level 1 have no L part)
+rlo=0; rhi=0; j=0; k=0; lev=HUGE(1)
+DO i=A%nr,1,-1
+  IF(lvl(i)<2)CYCLE
+  IF(j>0)THEN
+    IF(lvl(i)-lev>k)THEN
+      rlo=i; rhi=j; k=lvl(i)-lev
+    END IF
+  END IF
+  IF(lvl(i)<lev)THEN
+    lev=lvl(i); j=i
+  END IF
+END DO
+CALL check('Error rows in reversed level order',(rlo>0).AND.(rlo<rhi).AND.(lvl(rlo)>lvl(rhi)+1))
+IF(oft_env%head_proc)WRITE(*,'(A,2I8,A,2I6)')'Error rows: ',rlo,rhi,', levels ',lvl(rlo),lvl(rhi)
+ALLOCATE(aev(A%nnz),caev(A%nnz))
+aev=av; caev=cav
+aev(A%kr(rlo):A%kr(rlo+1)-1)=0.d0
+aev(A%kr(rhi):A%kr(rhi+1)-1)=0.d0
+caev(A%kr(rlo):A%kr(rlo+1)-1)=(0.d0,0.d0)
+caev(A%kr(rhi):A%kr(rhi+1)-1)=(0.d0,0.d0)
+CALL compare_real(A,dloc,aev,b,sched,0.9d0,0.d0,'Real zero pivot',nrep,ierr)
+CALL check('Real zero pivot: lowest failing row',ierr==rlo)
+CALL compare_cplx(A,dloc,caev,cb,sched,0.9d0,0.d0,'Complex zero pivot',nrep,ierr)
+CALL check('Complex zero pivot: lowest failing row',ierr==rlo)
+!---Non-finite pivot
+aev=av; caev=cav
+aev(dloc(rhi))=ieee_value(1.d0,ieee_positive_inf)
+caev(dloc(rhi))=CMPLX(ieee_value(1.d0,ieee_positive_inf),0.d0,c8)
+CALL compare_real(A,dloc,aev,b,sched,1.d-12,0.d0,'Real non-finite pivot',nrep,ierr)
+CALL check('Real non-finite pivot: row',ierr==-rhi)
+CALL compare_cplx(A,dloc,caev,cb,sched,1.d-12,0.d0,'Complex non-finite pivot',nrep,ierr)
+CALL check('Complex non-finite pivot: row',ierr==-rhi)
+DEALLOCATE(aev,caev,lvl)
+!---Inside a parallel region (eg. block-Jacobi with several blocks) the kernels run serially
 ALLOCATE(fac0(A%nnz),sfac0(A%nnz),x0(A%nr))
 CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,av,0.9d0,0.1d0,fac0,nrep,ierr)
 CALL nk_ilu0_sched_values(A%nr,A%kr,dloc,fac0,sched,sfac0)
 x0=b
 CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac0,x0)
 ok=.TRUE.
-!$omp parallel num_threads(2) private(xt,in_par) reduction(.AND.:ok)
+!$omp parallel num_threads(2) private(fact,xt,nrept,ierrt,in_par) reduction(.AND.:ok)
 in_par=omp_in_parallel()
-ALLOCATE(xt(A%nr))
-ok=.NOT.(in_par.AND.native_ilu_sched_active(sched,A%nr,.FALSE.))
+ALLOCATE(fact(A%nnz),xt(A%nr))
+ok=.NOT.(in_par.AND.native_ilu_sched_active(sched,A%nr,.TRUE.))
+ok=ok.AND.(.NOT.(in_par.AND.native_ilu_sched_active(sched,A%nr,.FALSE.)))
+CALL nk_ilu0_factor(A%nr,A%kr,A%lc,dloc,av,0.9d0,0.1d0,fact,nrept,ierrt,sched)
 xt=b
-CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac0,xt,sched,sfac0)
-ok=ok.AND.same_r(xt,x0)
-DEALLOCATE(xt)
+CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fact,xt,sched,sfac0)
+ok=ok.AND.(nrept==nrep).AND.(ierrt==ierr).AND.same_r(fact,fac0).AND.same_r(xt,x0)
+DEALLOCATE(fact,xt)
 !$omp end parallel
 CALL check('Serial path inside parallel region',ok)
 DEALLOCATE(fac0,sfac0,x0)
 !---No threading for patterns without a diagonal entry in every row (3x3, none in row 2)
 CALL native_ilu_sched_build(3,[1,3,4,6],[1,3,1,2,3],sched,min_rows=1)
+sched%use_factor=.TRUE.
 sched%use_solve=.TRUE.
-CALL check('Schedule unused without diagonal',.NOT.native_ilu_sched_active(sched,3,.FALSE.))
+CALL check('Schedule unused without diagonal',.NOT.(native_ilu_sched_active(sched,3,.TRUE.) &
+  .OR.native_ilu_sched_active(sched,3,.FALSE.)))
 CALL native_ilu_sched_free(sched)
 !---Pattern schedules are built once and shared
 psched=>native_pattern_ilu_sched(A%pattern)
 CALL check('Pattern schedule shared',ASSOCIATED(psched,native_pattern_ilu_sched(A%pattern)))
 CALL check('Pattern schedule structure',sched_valid(A,psched,native_ilu_level_rows))
-!---Threaded solver against the serial one (scheduled solve forced on the pattern schedule)
+!---Threaded solver against the serial one (scheduled kernels forced on the pattern schedule)
+psched%use_factor=.TRUE.
 psched%use_solve=.TRUE.
 CALL ML_oft_lagrange%vec_create(u1)
 CALL ML_oft_lagrange%vec_create(u2)
@@ -972,6 +1040,7 @@ CALL u1%get_local(v1)
 CALL u2%get_local(v2)
 CALL check('Threaded solver: identical solution',same_r(v1,v2))
 DEALLOCATE(v1,v2)
+psched%use_factor=.FALSE.
 psched%use_solve=.FALSE.
 CALL ilu1%delete; CALL ilu2%delete
 CALL u1%delete; CALL u2%delete; CALL g%delete

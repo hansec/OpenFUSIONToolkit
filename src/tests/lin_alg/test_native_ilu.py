@@ -130,20 +130,21 @@ def test_ilu_direct_mpi2_abort():
 @pytest.mark.coverage
 @pytest.mark.parametrize("nthreads", (1, 2, 4))
 def test_ilu_threaded(nthreads):
-    '''Level-scheduled (OpenMP threaded) ILU(0) solve on a non-symmetric variant of the quadratic
-    Lagrange Laplacian, run with 1, 2 and 4 threads: the schedules group rows by dependency level
-    (checked against the matrix structure), the scheduled solve is used exactly when more than one
-    thread is available, and its solutions are bitwise identical to the serial solve for real and
-    complex values, with and without replaced pivots and a diagonal shift, and 2 to 4 threads.
-    Inside a parallel region the solve runs serially, patterns without a diagonal entry in every
-    row are never threaded, and the threaded ILU(0) solver matches the serial one bitwise.'''
+    '''Level-scheduled (OpenMP threaded) ILU(0) factorization and solve on a non-symmetric variant
+    of the quadratic Lagrange Laplacian, run with 1, 2 and 4 threads: the schedules group rows by
+    dependency level (checked against the matrix structure), the scheduled kernels are used exactly
+    when more than one thread is available, and factors, solutions, replaced pivot counts and error
+    rows (lowest zero pivot when threads meet a later row first, non-finite pivots) are bitwise
+    identical to the serial kernels for real and complex values and 2 to 4 threads. Inside a
+    parallel region the kernels run serially, and the threaded ILU(0) solver matches the serial one
+    bitwise.'''
     its = run_ilu(1, 5, nthreads)
     assert its is not None
 
 @pytest.mark.mpi
 def test_ilu_schwarz_mpi2():
     '''GMRES on the Poisson equation preconditioned by Schwarz (one subdomain per process, overlap 1)
-    with ILU(0) on 2 processes and 2 threads, with and without the threaded solve: iteration
+    with ILU(0) on 2 processes and 2 threads, with and without the threaded kernels: iteration
     counts and solutions must be identical. Also reports wall times (end-to-end timing harness;
     larger cases are run by hand by raising nlevels and order in oft.in).'''
     its = run_ilu(2, 6, 2)
@@ -154,8 +155,7 @@ def test_ilu_schwarz_mpi2():
 def test_ilu_timing():
     '''Timing harness for the ILU(0) factorization and solve (Laplacian, quadratic Lagrange
     elements, one process) on a small mesh; checks that it runs and reports the timings, including
-    the factorization and the serial and level-scheduled solves for 1, 2, 4, ... threads (up to
-    OMP_NUM_THREADS).
+    the serial and level-scheduled kernels for 1, 2, 4, ... threads (up to OMP_NUM_THREADS).
     Larger cases are run by hand by raising nlevels and nbase (equal, for one process) and order
     in oft.in.'''
     write_input(1, 4)

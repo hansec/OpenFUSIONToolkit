@@ -156,7 +156,7 @@ def test_gmres_schwarz(schwarz_type):
 # Native ILU(0) options from XML (restricted Schwarz sub-solver as above): a small-pivot threshold
 # leaves the factorization of this well-conditioned operator unchanged, while a diagonal shift
 # factors a perturbed operator and so weakens the preconditioner; the threaded (level-scheduled)
-# solve gives identical results, so disabling it changes nothing
+# kernels give identical results, so disabling them changes nothing
 @pytest.mark.parametrize("ilu_opts", ("pivot_tol", "diag_shift", "threaded"))
 def test_gmres_schwarz_ilu_options(ilu_opts):
     opts = {"pivot_tol": "<pivot_tol>1.E-8</pivot_tol>",
@@ -181,8 +181,8 @@ def test_gmres_schwarz_ilu_options(ilu_opts):
 
 #============================================================================
 # Native ILU(0) on the whole process-local subdomain (Schwarz with one block, applied from serial
-# code, where the level-scheduled solve may use all threads) with and without threading: the
-# threaded solve is bitwise identical to the serial one, so the iteration count is the same
+# code, where the level-scheduled kernels may use all threads) with and without threading: the
+# threaded kernels are bitwise identical to the serial ones, so the iteration count is the same
 @pytest.mark.parametrize("threaded", ("T", "F"))
 def test_gmres_schwarz_ilu_threaded(threaded):
     xml_file = """
