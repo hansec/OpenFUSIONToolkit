@@ -53,6 +53,64 @@ PETSc only options
 |------------|-------------|-----------|------|
 | `type`     | Inverse type {lu, ilu} | str | No |
 
+\subsection doc_solvers_basic_ilu Incomplete LU Factorization
+
+This method is supported through the native backend through \ref oft_lu::oft_ilusolver "oft_ilusolver"
+(with the PETSc backend the same XML selects PETSc's ILU instead, and the options below do not apply).
+Three native packages are available:
+- `native`: ILU(0) (no fill outside the non-zero pattern of the matrix) with native kernels, with an
+  OpenMP threaded (level-scheduled) solve; the default unless OFT is built with MKL.
+- `mkl`: ILU(0) from MKL; the default when OFT is built with MKL.
+- `super`: threshold-based ILU with partial pivoting (ILUTP) from SuperLU (`dgsitrf`, as used by its
+  `dgsisx` driver, without the driver's equilibration and MC64 row permutation). Requires OFT to be
+  built with SuperLU. Fill is controlled by a drop tolerance and a fill bound, so the factors are
+  more accurate (and more expensive) than ILU(0).
+
+The symbolic setup is redone automatically when the non-zero pattern or size of the matrix changes,
+and the factorization after the solver is updated. For `super`, a refactorization with an unchanged
+pattern reuses the column permutation and elimination tree, which gives the same factors as a new
+factorization.
+
+The `super` defaults keep a moderate amount of fill. On the Lagrange Laplacian (quadratic and cubic
+elements, 1-30k rows, one process) `drop_tol=1.E-3` gives factors with 3.5-5 times the non-zeros
+of the matrix and 4-7 times fewer GMRES iterations than ILU(0), while the factorization is 10-50
+times slower than ILU(0) and each application 3-5 times slower. Smaller drop tolerances need a
+larger `fill_factor`: once the fill bound is reached entries are dropped by size alone, which can
+weaken the preconditioner considerably (`drop_tol=1.E-4` with the default bound needed more
+iterations than ILU(0) on the larger cases). The MILU variants needed more iterations than standard
+ILU on these operators. ILUTP therefore pays off when a factorization is reused for many solves, or
+when ILU(0) converges slowly or not at all. The `native` options (`pivot_tol`, `diag_shift`,
+`threaded`) do not apply to `mkl` or `super`, and the `super` options do not apply to the ILU(0)
+packages.
+
+\warning The native solver currently only supports local solves (ie as a sub-solver to Block Jacobi or
+Additive Schwarz)
+
+**XML Spec:** `<pre type="ilu">`
+
+| Group      | Description | Type      | List |
+|------------|-------------|-----------|------|
+| `package`  | Solver package to use {native, mkl, super} | str | No |
+
+`native` only options
+
+| Group      | Description | Type      | List |
+|------------|-------------|-----------|------|
+| `pivot_tol`  | Relative small-pivot threshold: pivots smaller in magnitude than `pivot_tol` times the largest magnitude in their row are replaced (default: 1.E-12) | real | No |
+| `diag_shift` | Relative diagonal shift \f$ \alpha \f$: factor \f$ A + \alpha \mathrm{diag}(A) \f$ (default: 0) | real | No |
+| `threaded`   | Use the level-scheduled threaded solve (default: true) | bool | No |
+
+`super` only options
+
+| Group      | Description | Type      | List |
+|------------|-------------|-----------|------|
+| `drop_tol`     | Drop tolerance (SuperLU `ILU_DropTol`): factor entries smaller than this in relative magnitude are dropped (default: 1.E-3; SuperLU default: 1.E-4) | real | No |
+| `fill_factor`  | Bound on the fill of the factors relative to the matrix (SuperLU `ILU_FillFactor`, default: 10) | real | No |
+| `milu`         | Modified ILU variant (SuperLU `ILU_MILU`): 0 standard ILU, 1-3 SMILU_1-3 (dropped entries added to the diagonal; default: 0) | int | No |
+| `col_perm`     | Column permutation: -1 default (COLAMD), 0 natural, 1 minimum degree on \f$ A^T A \f$, 2 minimum degree on \f$ A^T + A \f$, 3 COLAMD (default: -1) | int | No |
+| `fill_tol`     | Zero pivot replacement threshold (SuperLU `ILU_FillTol`, default: 1.E-2) | real | No |
+| `pivot_thresh` | Diagonal pivoting threshold (SuperLU `DiagPivotThresh`): 0 always keeps the diagonal pivot when it is non-zero, 1 is partial pivoting (default: 0.1) | real | No |
+
 \subsection doc_solvers_basic_bjacobi Block Jacobi
 
 This method is supported through both the native and PETSc backends through
