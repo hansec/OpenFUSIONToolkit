@@ -5,21 +5,30 @@
 !---------------------------------------------------------------------------------
 !> @file oft_lu.F90
 !
-!> Native module for direct solves.
-!! Available interfaces:
-!! - LAPACK (dgetrf, dgetrs)
-!! - SuperLU
-!! - MUMPS
-!! - PARDISO (MKL interface)
+!> Native module for direct and incomplete LU solves.
 !!
-!! @note Currently supports local solves only.
+!! Direct solves (@ref oft_lusolver), available packages:
+!! - "lapack": LAPACK (dgetrf, dgetrs; dense)
+!! - "super": SuperLU (dgstrf, dgstrs)
+!! - "superd": SuperLU-DIST (local only)
+!! - "umfpack": UMFPACK
+!! - "mumps": MUMPS
+!! - "mkl": PARDISO (MKL interface)
+!!
+!! Incomplete LU solves (@ref oft_ilusolver), available packages:
+!! - "native": ILU(0) with the native kernels of @ref oft_native_kernels (default without MKL)
+!! - "mkl": ILU(0) from MKL (dcsrilu0; default with MKL)
+!! - "super": threshold-based incomplete LU (ILUTP) from SuperLU (dgsitrf, dgstrs)
+!!
+!! @note Currently supports local solves only (distributed matrices must be factored
+!! inside a "block_jacobi" or "add_schwarz" preconditioner).
 !!
 !! @authors Chris Hansen
 !! @date May 2014
 !! @ingroup doxy_oft_lin_alg
 !------------------------------------------------------------------------------
 MODULE oft_lu
-USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_double, c_ptr, c_null_ptr, c_f_pointer, c_loc, &
+USE, INTRINSIC :: iso_c_binding, ONLY: c_bool, c_int, c_int64_t, c_double, c_ptr, c_null_ptr, c_f_pointer, c_loc, &
   c_associated
 USE oft_local
 USE oft_base
@@ -126,6 +135,21 @@ TYPE :: superlu_struc
   INTEGER(i4), POINTER, DIMENSION(:) :: lc_orig => NULL() !< Unpermuted copy of `lc` (SuperLU-DIST only)
 END TYPE superlu_struc
 !------------------------------------------------------------------------------
+!> SuperLU incomplete LU (ILUTP) solver information ("super" package of @ref oft_ilusolver)
+!!
+!! The 0-based index copies are rebuilt with the symbolic setup. They are allocatable,
+!! so copies of a solver are independent. The factor handle cannot be copied: it is
+!! only used and freed by the structure that created it (identified by its address in
+!! `owner`), and a copy factors anew on its next application instead.
+!------------------------------------------------------------------------------
+TYPE :: superlu_ilu_struc
+  INTEGER(i4) :: col_perm = -2 !< Column permutation of the current symbolic setup (-2 if none)
+  TYPE(C_PTR) :: f_factors = C_NULL_PTR !< SuperLU factor handle
+  TYPE(C_PTR) :: owner = C_NULL_PTR !< Address of the structure that created `f_factors`
+  INTEGER(c_int), ALLOCATABLE, DIMENSION(:) :: kr !< Row pointer (0-based indices) [nr+1]
+  INTEGER(c_int), ALLOCATABLE, DIMENSION(:) :: lc !< Column indices (0-based indices) [nnz]
+END TYPE superlu_ilu_struc
+!------------------------------------------------------------------------------
 !> Pardiso solver information
 !------------------------------------------------------------------------------
 TYPE :: pardiso_struc
@@ -175,6 +199,26 @@ CONTAINS
 END TYPE oft_lusolver
 !------------------------------------------------------------------------------
 !> ILU solver class
+!!
+!! Packages (`package`):
+!! - "native": ILU(0) with the native kernels (no fill outside the matrix pattern).
+!!   Options: `pivot_tol`, `diag_shift` and `threaded`.
+!! - "mkl": ILU(0) from MKL. No options.
+!! - "super": threshold-based ILU with partial pivoting (ILUTP) from SuperLU
+!!   (`dgsitrf`, the factorization of the `dgsisx` driver, without its equilibration
+!!   and MC64 row permutation). Options: `drop_tol`, `fill_factor`, `milu`,
+!!   `col_perm`, `fill_tol` and `pivot_thresh`. Requires OFT to be built with
+!!   SuperLU. The factorization and solve are thread-safe for SuperLU 5 and later;
+!!   for older versions calls are serialized and @ref ilusolver_check_thread
+!!   "check_thread" returns `.FALSE.`.
+!!
+!! The symbolic setup (and for "super" the column ordering) is redone on first use,
+!! on `update(new_pattern=.TRUE.)` and whenever the non-zero pattern or size of the
+!! matrix changes; the numerical factorization is redone after any call to `update`.
+!! For "super" a numerical refactorization reuses the column permutation and
+!! elimination tree (`SamePattern`), which depend on the pattern only, so it gives
+!! the same factors as a full factorization of the new values (dropping is applied
+!! anew to the new values).
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
@@ -198,13 +242,38 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
   !! enabling at the next symbolic setup (eg. `update(new_pattern=.TRUE.)`), where the
   !! schedules are fetched (only when more than one thread is available).
   LOGICAL :: threaded = .TRUE.
-  INTEGER(i4) :: npivot_replaced = 0 !< Number of pivots replaced in the last factorization ("native" only)
+  !> Drop tolerance ("super" only, SuperLU `ILU_DropTol`): entries of the factors smaller
+  !! than `drop_tol` in relative magnitude (U: relative to the largest entry of the matrix
+  !! row; L: after division by the pivot) are dropped. With 0 only the fill bound of
+  !! `fill_factor` drops entries, so a large enough `fill_factor` gives a complete LU.
+  REAL(r8) :: drop_tol = 1.d-3
+  !> Fill factor ("super" only, SuperLU `ILU_FillFactor`): bound on the growth of the
+  !! number of non-zeros of the factors relative to the matrix (column-wise area rule)
+  REAL(r8) :: fill_factor = 10.d0
+  !> Modified ILU variant ("super" only, SuperLU `ILU_MILU`): 0 -> standard ILU,
+  !! 1/2/3 -> SMILU_1/2/3 (dropped entries are added to the diagonal: their sum,
+  !! the magnitude of their sum, or the sum of their magnitudes)
+  INTEGER(i4) :: milu = 0
+  !> Column permutation ("super" only, as for @ref oft_lusolver): -1 -> default (COLAMD),
+  !! 0 -> natural ordering, 1 -> minimum degree on A'*A, 2 -> minimum degree on A'+A,
+  !! 3 -> approximate minimum degree (COLAMD). Changes take effect at the next symbolic setup.
+  INTEGER(i4) :: col_perm = -1
+  !> Zero pivot replacement threshold ("super" only, SuperLU `ILU_FillTol`)
+  REAL(r8) :: fill_tol = 1.d-2
+  !> Diagonal pivoting threshold ("super" only, SuperLU `DiagPivotThresh`): 0 -> always
+  !! keep the diagonal pivot, 1 -> partial pivoting
+  REAL(r8) :: pivot_thresh = 0.1d0
+  !> Number of pivots replaced in the last factorization ("native": small pivots, see
+  !! `pivot_tol`; "super": zero pivots, see `fill_tol`)
+  INTEGER(i4) :: npivot_replaced = 0
+  !> Number of non-zeros of the factors (L+U, diagonal counted once) in the last factorization
+  INTEGER(i8) :: nnz_factor = 0
   REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL() !< Storage for additional RHS data
   CHARACTER(LEN=7) :: package = DEF_ILU_PACK !< Factorization package
   TYPE(lu_symbolic_key) :: sym_key !< Matrix structure the factor storage was set up for
   TYPE(native_ilu_struc) :: native_struct !< Data for native iLU solver
 #if defined( HAVE_SUPERLU )
-  TYPE(superlu_struc) :: superlu_struct !< SuperLU solver information
+  TYPE(superlu_ilu_struc) :: superlu_ilu !< SuperLU ILUTP solver information
 #endif
 #ifdef HAVE_MKL
   TYPE(pardiso_struc) :: pardiso_struct !< MKL/PARDISO solver information
@@ -248,28 +317,34 @@ INTERFACE
   INTEGER(c_int), INTENT(out) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_superlu_dgssv
 !------------------------------------------------------------------------------
-!> Interface to dgsisx (iLUT) from SuperLU
+!> Interface to the incomplete LU factorization (ILUTP, dgsitrf) and solve of SuperLU
 !------------------------------------------------------------------------------
-  SUBROUTINE oft_superlu_dgsisx(iopt,n,nnz,nrhs,values,colind, &
-    rowptr,b,ldb,f_factors,col_perm,fill_tol,info) BIND(C,NAME="oft_superlu_dgsisx_c")
-  IMPORT c_int, c_double, c_ptr
-  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> performs LU decomposition for the
-  !! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
-  !! same non-zero pattern, 4 -> free all the storage in the end)
+  SUBROUTINE oft_superlu_dgsisx(iopt,n,nnz,nrhs,values,colind,rowptr,b,ldb,f_factors, &
+    col_perm,drop_tol,fill_factor,fill_tol,pivot_thresh,milu,nnz_lu,info) BIND(C,NAME="oft_superlu_dgsisx_c")
+  IMPORT c_int, c_int64_t, c_double, c_ptr
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> factorization (an existing
+  !! one is freed first), 2 -> triangular solve, 3 -> refactor a matrix with the same non-zero
+  !! pattern, 4 -> free all the storage)
   INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of rows
   INTEGER(c_int), VALUE, INTENT(in) :: nnz !< Number of non-zeros
-  INTEGER(c_int), VALUE, INTENT(in) :: nrhs !< Number of RHS to solve (nrhs=1 only)
-  REAL(c_double), DIMENSION(nnz), INTENT(in) :: values !< Matrix values in CRS format [nnz]
-  INTEGER(c_int), DIMENSION(nnz), INTENT(in) :: colind !< Column indices in CRS format [nnz]
-  INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind [n+1]
-  REAL(c_double), DIMENSION(n), INTENT(inout) :: b !< Right hand side -> overwritten with solution [n]
-  INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Lowest dimension of vector `b` [n]
-  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to SuperLU internal data storage
-  INTEGER(c_int), VALUE, INTENT(in) :: col_perm !< Column permutation method (0 -> natural ordering,
-  !! 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> approx min degree
-  !! for unsymmetric matrices)
-  REAL(c_double), VALUE, INTENT(in) :: fill_tol !< Fill tolerance for tresholded iLU
-  INTEGER(c_int), INTENT(out) :: info !< Solver return status (not currently used)
+  INTEGER(c_int), VALUE, INTENT(in) :: nrhs !< Number of RHS to solve (iopt 2)
+  REAL(c_double), DIMENSION(*), INTENT(in) :: values !< Matrix values in CSR format [nnz] (iopt 1/3)
+  INTEGER(c_int), DIMENSION(*), INTENT(in) :: colind !< Column indices in CSR format, 0-based [nnz] (iopt 1/3)
+  INTEGER(c_int), DIMENSION(*), INTENT(in) :: rowptr !< Row pointer into colind, 0-based [n+1] (iopt 1/3)
+  REAL(c_double), DIMENSION(*), INTENT(inout) :: b !< Right hand sides -> overwritten with solutions [ldb,nrhs] (iopt 2)
+  INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Leading dimension of `b`
+  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to SuperLU internal data storage (C_NULL_PTR after
+  !! iopt 4 and after a failed factorization)
+  INTEGER(c_int), VALUE, INTENT(in) :: col_perm !< Column permutation method (iopt 1; -1 -> default,
+  !! 0 -> natural ordering, 1 -> min degree on A'*A, 2 -> min degree on A'+A, 3 -> COLAMD)
+  REAL(c_double), VALUE, INTENT(in) :: drop_tol !< Drop tolerance (`ILU_DropTol`)
+  REAL(c_double), VALUE, INTENT(in) :: fill_factor !< Fill factor bound (`ILU_FillFactor`)
+  REAL(c_double), VALUE, INTENT(in) :: fill_tol !< Zero pivot replacement threshold (`ILU_FillTol`)
+  REAL(c_double), VALUE, INTENT(in) :: pivot_thresh !< Diagonal pivoting threshold (`DiagPivotThresh`)
+  INTEGER(c_int), VALUE, INTENT(in) :: milu !< Modified ILU variant (`ILU_MILU`; 0 -> SILU, 1-3 -> SMILU_1-3)
+  INTEGER(c_int64_t), INTENT(out) :: nnz_lu !< Non-zeros of L+U (iopt 1/3)
+  INTEGER(c_int), INTENT(out) :: info !< Return status (0 -> success, <0 -> invalid argument,
+  !! 1..n -> number of zero pivots replaced (iopt 1/3), >n -> memory allocation failure (iopt 1/3))
   END SUBROUTINE oft_superlu_dgsisx
 #endif
 #ifdef HAVE_SUPERLU_DIST
@@ -940,11 +1015,13 @@ DO i=1,A_native%nr
 END DO
 END SUBROUTINE ilu_check_structure
 !------------------------------------------------------------------------------
-!> Apply ILU(0) preconditioner (approximate solve of the linear system)
+!> Apply ILU preconditioner (approximate solve of the linear system)
 !!
 !! The factor storage is set up (symbolic setup) on first use, on
 !! `update(new_pattern=.TRUE.)` and whenever the non-zero pattern or size of the
-!! matrix changes; the factorization is redone after any call to `update`.
+!! matrix changes; the factorization is redone after any call to `update`. For
+!! "super" the symbolic setup is also redone when `col_perm` changes, and a copy of
+!! a factored solver factors anew (the SuperLU factors cannot be shared).
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE ilusolver_apply(self,u,g)
 CLASS(oft_ilusolver), INTENT(inout) :: self
@@ -971,14 +1048,35 @@ IF(.NOT.self%initialized)THEN
 #if !defined(HAVE_MKL)
       CALL oft_abort('OFT not compiled with MKL-PARDISO','ilusolver_apply',__FILE__)
 #endif
+    CASE("super")
+#if !defined(HAVE_SUPERLU)
+      CALL oft_abort('OFT not compiled with SuperLU (required by ILU package "super")', &
+        'ilusolver_apply',__FILE__)
+#endif
     CASE DEFAULT
       CALL oft_abort('Unknown ILU package','ilusolver_apply', __FILE__)
   END SELECT
   self%initialized=.TRUE.
 END IF
+#ifdef HAVE_SUPERLU
+IF(TRIM(self%package)=='super')THEN
+  !---Factors created by another solver (this one is a copy): factor anew
+  IF(.NOT.ilu_superlu_owned(self%superlu_ilu))THEN
+    self%superlu_ilu%f_factors=C_NULL_PTR
+    self%superlu_ilu%owner=C_NULL_PTR
+    self%refactor=.TRUE.
+  END IF
+  !---Column ordering is part of the symbolic setup
+  IF(self%col_perm/=self%superlu_ilu%col_perm)self%update_graph=.TRUE.
+END IF
+#endif
 !---Symbolic setup for a new matrix structure
 IF(self%update_graph.OR.(.NOT.lu_key_matches(self%sym_key,A_native)))THEN
-  CALL ilu_check_structure(A_native)
+  IF(TRIM(self%package)=='super')THEN
+    IF(A_native%nr/=A_native%nc)CALL oft_abort('ILU requires a square matrix','ilusolver_apply',__FILE__)
+  ELSE
+    CALL ilu_check_structure(A_native)
+  END IF
   SELECT CASE(TRIM(self%package))
     CASE("native")
       CALL ilu_native_free(self%native_struct)
@@ -1015,6 +1113,16 @@ IF(self%update_graph.OR.(.NOT.lu_key_matches(self%sym_key,A_native)))THEN
       !---Factor storage is sized for the previous matrix
       CALL ilusolver_mkl_free(self)
 #endif
+    CASE("super")
+#ifdef HAVE_SUPERLU
+      !---Full factorization (new column ordering) with new 0-based index copies
+      CALL ilu_superlu_free(self%superlu_ilu)
+      ALLOCATE(self%superlu_ilu%kr(A_native%nr+1))
+      ALLOCATE(self%superlu_ilu%lc(A_native%nnz))
+      self%superlu_ilu%kr=A_native%kr-1
+      self%superlu_ilu%lc=A_native%lc-1
+      self%superlu_ilu%col_perm=self%col_perm
+#endif
   END SELECT
   CALL lu_key_set(self%sym_key,A_native)
   self%update_graph=.FALSE.
@@ -1042,7 +1150,9 @@ IF(self%refactor)THEN
         END IF
         CALL oft_abort(msg,'ilusolver_apply',__FILE__)
       END IF
-      IF(self%npivot_replaced>0)CALL ilu_pivot_warning(self%npivot_replaced,A_native%nr)
+      IF(self%npivot_replaced>0)CALL ilu_pivot_warning('ILU(0): replaced ',' small pivot(s) of ', &
+        self%npivot_replaced,A_native%nr)
+      self%nnz_factor=A_native%nnz
     CASE("mkl")
 #ifdef HAVE_MKL
       ALLOCATE(vtmp(A_native%nr)) ! RHS argument (not used by the factorization)
@@ -1053,6 +1163,11 @@ IF(self%refactor)THEN
         WRITE(msg,'(A,I0,A)')'Factorization failed (MKL error ',ierr,')'
         CALL oft_abort(msg,'ilusolver_apply',__FILE__)
       END IF
+      self%nnz_factor=A_native%nnz
+#endif
+    CASE("super")
+#ifdef HAVE_SUPERLU
+      CALL ilu_superlu_factor(self,A_native,mat_vals)
 #endif
   END SELECT
   self%refactor=.FALSE.
@@ -1088,10 +1203,11 @@ END IF
 DEBUG_STACK_POP
 END SUBROUTINE ilusolver_apply
 !------------------------------------------------------------------------------
-!> Approximate solve with existing ILU(0) factors (in place)
+!> Approximate solve with existing ILU factors (in place)
 !!
 !! The factors must be current for `A_native` (checked by the caller with the
-!! symbolic key). Multiple right hand sides are solved one at a time.
+!! symbolic key). Multiple right hand sides are solved one at a time, except for
+!! "super", which solves them together.
 !------------------------------------------------------------------------------
 SUBROUTINE ilusolver_solve(self,A_native,nrhs,x)
 CLASS(oft_ilusolver), INTENT(inout) :: self
@@ -1119,6 +1235,10 @@ SELECT CASE(TRIM(self%package))
         A_native%kr,x(:,i),self%pardiso_struct%f_factors,ierr)
       IF(ierr/=0)CALL oft_abort('Solve failed (MKL)','ilusolver_solve',__FILE__)
     END DO
+#endif
+  CASE("super")
+#ifdef HAVE_SUPERLU
+    CALL ilu_superlu_solve(self%superlu_ilu,A_native%nr,nrhs,x)
 #endif
   CASE DEFAULT
     CALL oft_abort('Unknown factorization package','ilusolver_solve',__FILE__)
@@ -1208,10 +1328,143 @@ CALL oft_mkl_ilu(3,1,1,rvals,ivals,ivals,rvals,self%pardiso_struct%f_factors,ier
 self%pardiso_struct%f_factors=C_NULL_PTR
 END SUBROUTINE ilusolver_mkl_free
 #endif
+#ifdef HAVE_SUPERLU
 !------------------------------------------------------------------------------
-!> Report replaced ILU(0) pivots (once per process)
+!> Check the options of the "super" ILU package (before each factorization)
 !------------------------------------------------------------------------------
-SUBROUTINE ilu_pivot_warning(nreplaced,nr)
+SUBROUTINE ilu_superlu_check_options(self)
+CLASS(oft_ilusolver), INTENT(in) :: self
+IF(self%drop_tol<0.d0)CALL oft_abort('"drop_tol" must be non-negative','ilu_superlu_check_options',__FILE__)
+IF(self%fill_factor<=0.d0)CALL oft_abort('"fill_factor" must be positive','ilu_superlu_check_options',__FILE__)
+IF(self%fill_tol<0.d0)CALL oft_abort('"fill_tol" must be non-negative','ilu_superlu_check_options',__FILE__)
+IF((self%pivot_thresh<0.d0).OR.(self%pivot_thresh>1.d0))CALL oft_abort('"pivot_thresh" must be in [0,1]', &
+  'ilu_superlu_check_options',__FILE__)
+IF((self%milu<0).OR.(self%milu>3))CALL oft_abort('"milu" must be 0, 1, 2 or 3','ilu_superlu_check_options',__FILE__)
+IF((self%col_perm<-1).OR.(self%col_perm>3))CALL oft_abort('"col_perm" must be -1, 0, 1, 2 or 3', &
+  'ilu_superlu_check_options',__FILE__)
+END SUBROUTINE ilu_superlu_check_options
+!------------------------------------------------------------------------------
+!> Check if the SuperLU factors of a structure were created by it (or there are none)
+!!
+!! A copy of a structure (eg. by `ALLOCATE(..., source=)` or intrinsic assignment)
+!! holds the factor handle of the original, which it must neither use nor free.
+!!
+!! @result Factors owned (or none)?
+!------------------------------------------------------------------------------
+FUNCTION ilu_superlu_owned(sstruct) RESULT(owned)
+TYPE(superlu_ilu_struc), TARGET, INTENT(in) :: sstruct !< SuperLU ILU information
+LOGICAL :: owned
+owned=.TRUE.
+IF(.NOT.c_associated(sstruct%f_factors))RETURN
+owned=c_associated(sstruct%owner,C_LOC(sstruct))
+END FUNCTION ilu_superlu_owned
+!------------------------------------------------------------------------------
+!> Record a structure as the owner of its SuperLU factors (if any)
+!------------------------------------------------------------------------------
+SUBROUTINE ilu_superlu_claim(sstruct)
+TYPE(superlu_ilu_struc), TARGET, INTENT(inout) :: sstruct !< SuperLU ILU information
+IF(c_associated(sstruct%f_factors))THEN
+  sstruct%owner=C_LOC(sstruct)
+ELSE
+  sstruct%owner=C_NULL_PTR
+END IF
+END SUBROUTINE ilu_superlu_claim
+!------------------------------------------------------------------------------
+!> SuperLU ILUTP factorization: full factorization if there are no factors, otherwise
+!! a refactorization reusing the column permutation and elimination tree
+!!
+!! Aborts on invalid options or a failed factorization, and warns (once per process)
+!! when zero pivots were replaced.
+!------------------------------------------------------------------------------
+SUBROUTINE ilu_superlu_factor(self,A_native,mat_vals)
+CLASS(oft_ilusolver), INTENT(inout) :: self !< Solver
+CLASS(oft_native_matrix), INTENT(in) :: A_native !< Matrix to factor
+REAL(r8), CONTIGUOUS, INTENT(in) :: mat_vals(:) !< Values to factor [nnz]
+INTEGER(c_int) :: mode,ierr
+INTEGER(c_int64_t) :: nnz_lu
+REAL(c_double) :: rdum(1)
+CHARACTER(LEN=OFT_ERROR_SLEN) :: msg
+CALL ilu_superlu_check_options(self)
+mode=3
+IF(.NOT.c_associated(self%superlu_ilu%f_factors))mode=1
+rdum=0.d0
+#if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+!$omp critical (superlu_solve)
+#endif
+CALL oft_superlu_dgsisx(mode,A_native%nr,A_native%nnz,0,mat_vals,self%superlu_ilu%lc, &
+  self%superlu_ilu%kr,rdum,1,self%superlu_ilu%f_factors,self%superlu_ilu%col_perm,self%drop_tol, &
+  self%fill_factor,self%fill_tol,self%pivot_thresh,self%milu,nnz_lu,ierr)
+#if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+!$omp end critical (superlu_solve)
+#endif
+CALL ilu_superlu_claim(self%superlu_ilu)
+IF(ierr<0)THEN
+  CALL oft_abort('Invalid arguments to the SuperLU ILU factorization','ilu_superlu_factor',__FILE__)
+ELSE IF(ierr>A_native%nr)THEN
+  WRITE(msg,'(A,I0,A)')'SuperLU ILU factorization failed (memory allocation, ',ierr-A_native%nr,' bytes)'
+  CALL oft_abort(msg,'ilu_superlu_factor',__FILE__)
+END IF
+self%npivot_replaced=ierr
+self%nnz_factor=nnz_lu
+IF(ierr>0)CALL ilu_pivot_warning('ILUT (SuperLU): replaced ',' zero pivot(s) of ',ierr,A_native%nr)
+IF(oft_debug_print(2))WRITE(*,'(2X,A,I0,A,I0,A,F8.3)')'SuperLU ILU factors: nnz(L+U) = ',nnz_lu, &
+  ' (nnz(A) = ',A_native%nnz,'), fill ratio = ',REAL(nnz_lu,r8)/REAL(MAX(A_native%nnz,1),r8)
+END SUBROUTINE ilu_superlu_factor
+!------------------------------------------------------------------------------
+!> Approximate solve with existing SuperLU ILUTP factors (in place)
+!------------------------------------------------------------------------------
+SUBROUTINE ilu_superlu_solve(sstruct,nr,nrhs,x)
+TYPE(superlu_ilu_struc), INTENT(inout) :: sstruct !< SuperLU ILU information
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+INTEGER(i4), INTENT(in) :: nrhs !< Number of right hand sides
+REAL(r8), INTENT(inout) :: x(nr,nrhs) !< Input: RHS, Output: Solution
+INTEGER(c_int) :: ierr,idum(1)
+INTEGER(c_int64_t) :: nnz_lu
+REAL(c_double) :: rdum(1)
+IF(.NOT.c_associated(sstruct%f_factors))CALL oft_abort('No SuperLU ILU factors','ilu_superlu_solve',__FILE__)
+idum=0; rdum=0.d0
+#if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+!$omp critical (superlu_solve)
+#endif
+CALL oft_superlu_dgsisx(2,nr,0,nrhs,rdum,idum,idum,x,nr,sstruct%f_factors,0,0.d0,1.d0,0.d0, &
+  0.d0,0,nnz_lu,ierr)
+#if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+!$omp end critical (superlu_solve)
+#endif
+IF(ierr/=0)CALL oft_abort('Solve failed (SuperLU ILU)','ilu_superlu_solve',__FILE__)
+END SUBROUTINE ilu_superlu_solve
+!------------------------------------------------------------------------------
+!> Free SuperLU ILUTP factors (if created by this structure) and index copies
+!------------------------------------------------------------------------------
+SUBROUTINE ilu_superlu_free(sstruct)
+TYPE(superlu_ilu_struc), INTENT(inout) :: sstruct !< SuperLU ILU information
+INTEGER(c_int) :: ierr,idum(1)
+INTEGER(c_int64_t) :: nnz_lu
+REAL(c_double) :: rdum(1)
+IF(c_associated(sstruct%f_factors).AND.ilu_superlu_owned(sstruct))THEN
+  idum=0; rdum=0.d0
+#if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+  !$omp critical (superlu_solve)
+#endif
+  CALL oft_superlu_dgsisx(4,0,0,0,rdum,idum,idum,rdum,1,sstruct%f_factors,0,0.d0,1.d0,0.d0, &
+    0.d0,0,nnz_lu,ierr)
+#if !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5
+  !$omp end critical (superlu_solve)
+#endif
+END IF
+sstruct%f_factors=C_NULL_PTR
+sstruct%owner=C_NULL_PTR
+sstruct%col_perm=-2
+IF(ALLOCATED(sstruct%kr))DEALLOCATE(sstruct%kr)
+IF(ALLOCATED(sstruct%lc))DEALLOCATE(sstruct%lc)
+END SUBROUTINE ilu_superlu_free
+#endif
+!------------------------------------------------------------------------------
+!> Report replaced ILU pivots (once per process, for all ILU solvers)
+!------------------------------------------------------------------------------
+SUBROUTINE ilu_pivot_warning(prefix,what,nreplaced,nr)
+CHARACTER(LEN=*), INTENT(in) :: prefix !< Message start (before the count)
+CHARACTER(LEN=*), INTENT(in) :: what !< Message text between the count and the number of rows
 INTEGER(i4), INTENT(in) :: nreplaced !< Number of replaced pivots
 INTEGER(i4), INTENT(in) :: nr !< Number of rows
 LOGICAL, SAVE :: warned = .FALSE.
@@ -1225,8 +1478,7 @@ IF(.NOT.warned)THEN
 END IF
 !$omp end critical (oft_ilu_pivot_warning)
 IF(do_warn)THEN
-  WRITE(msg,'(A,I0,A,I0,A)')'ILU(0): replaced ',nreplaced,' small pivot(s) of ',nr, &
-    ' rows (further replacements are not reported)'
+  WRITE(msg,'(A,I0,A,I0,A)')prefix,nreplaced,what,nr,' rows (further replacements are not reported)'
   CALL oft_warn(msg)
 END IF
 END SUBROUTINE ilu_pivot_warning
@@ -1248,10 +1500,13 @@ end subroutine ilusolver_update
 !------------------------------------------------------------------------------
 !> Setup solver from XML definition
 !!
-!! Options: `package` (factorization package), `pivot_tol` (relative small-pivot
-!! threshold), `diag_shift` (relative diagonal shift) and `threaded` (use the
-!! level-scheduled threaded solve, default `T`); the last three are used by the
-!! "native" package only.
+!! Options: `package` (factorization package: "native", "mkl" or "super");
+!! for "native" only: `pivot_tol` (relative small-pivot threshold), `diag_shift`
+!! (relative diagonal shift) and `threaded` (use the level-scheduled threaded solve,
+!! default `T`); for "super" only: `drop_tol` (drop tolerance), `fill_factor` (fill
+!! bound), `milu` (modified ILU variant, 0-3), `col_perm` (column permutation, -1-3),
+!! `fill_tol` (zero pivot replacement threshold) and `pivot_thresh` (diagonal pivoting
+!! threshold). See @ref oft_ilusolver for their meaning and defaults.
 !------------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
@@ -1260,7 +1515,7 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 TYPE(xml_node) :: current_node
 CHARACTER(LEN=:), ALLOCATABLE :: factor_package
-INTEGER(i4) :: ierr
+INTEGER(i4) :: ierr,itmp
 REAL(r8) :: rtmp
 DEBUG_STACK_PUSH
 !---
@@ -1291,22 +1546,82 @@ IF(ierr==0)THEN
   CALL xml_read_content(current_node,self%threaded,iostat=ierr)
   IF(ierr/=0)CALL oft_xml_abort("Error reading `threaded` node","ilusolver_setup_xml",__FILE__)
 END IF
+!---SuperLU ("super") options
+CALL xml_get_element(solver_node,"drop_tol",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,rtmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `drop_tol` node","ilusolver_setup_xml",__FILE__)
+  IF(rtmp<0.d0)CALL oft_abort('"drop_tol" must be non-negative','ilusolver_setup_xml',__FILE__)
+  self%drop_tol=rtmp
+END IF
+CALL xml_get_element(solver_node,"fill_factor",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,rtmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `fill_factor` node","ilusolver_setup_xml",__FILE__)
+  IF(rtmp<=0.d0)CALL oft_abort('"fill_factor" must be positive','ilusolver_setup_xml',__FILE__)
+  self%fill_factor=rtmp
+END IF
+CALL xml_get_element(solver_node,"milu",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,itmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `milu` node","ilusolver_setup_xml",__FILE__)
+  IF((itmp<0).OR.(itmp>3))CALL oft_abort('"milu" must be 0, 1, 2 or 3','ilusolver_setup_xml',__FILE__)
+  self%milu=itmp
+END IF
+CALL xml_get_element(solver_node,"col_perm",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,itmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `col_perm` node","ilusolver_setup_xml",__FILE__)
+  IF((itmp<-1).OR.(itmp>3))CALL oft_abort('"col_perm" must be -1, 0, 1, 2 or 3','ilusolver_setup_xml',__FILE__)
+  self%col_perm=itmp
+END IF
+CALL xml_get_element(solver_node,"fill_tol",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,rtmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `fill_tol` node","ilusolver_setup_xml",__FILE__)
+  IF(rtmp<0.d0)CALL oft_abort('"fill_tol" must be non-negative','ilusolver_setup_xml',__FILE__)
+  self%fill_tol=rtmp
+END IF
+CALL xml_get_element(solver_node,"pivot_thresh",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,rtmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `pivot_thresh` node","ilusolver_setup_xml",__FILE__)
+  IF((rtmp<0.d0).OR.(rtmp>1.d0))CALL oft_abort('"pivot_thresh" must be in [0,1]','ilusolver_setup_xml',__FILE__)
+  self%pivot_thresh=rtmp
+END IF
 IF(oft_debug_print(1))THEN
   WRITE(*,'(A)')'ILU solver setup:'
-  WRITE(*,'(2X,2A)')'- Package:    ',self%package
-  WRITE(*,'(2X,A,ES11.3)')'- Pivot tol:  ',self%pivot_tol
-  WRITE(*,'(2X,A,ES11.3)')'- Diag shift: ',self%diag_shift
-  WRITE(*,'(2X,A,L1)')'- Threaded:   ',self%threaded
+  WRITE(*,'(2X,2A)')'- Package:      ',self%package
+  WRITE(*,'(2X,A,ES11.3)')'- Pivot tol:    ',self%pivot_tol
+  WRITE(*,'(2X,A,ES11.3)')'- Diag shift:   ',self%diag_shift
+  WRITE(*,'(2X,A,L1)')'- Threaded:     ',self%threaded
+  WRITE(*,'(2X,A,ES11.3)')'- Drop tol:     ',self%drop_tol
+  WRITE(*,'(2X,A,ES11.3)')'- Fill factor:  ',self%fill_factor
+  WRITE(*,'(2X,A,I0)')'- MILU:         ',self%milu
+  WRITE(*,'(2X,A,I0)')'- Col perm:     ',self%col_perm
+  WRITE(*,'(2X,A,ES11.3)')'- Fill tol:     ',self%fill_tol
+  WRITE(*,'(2X,A,ES11.3)')'- Pivot thresh: ',self%pivot_thresh
 END IF
 DEBUG_STACK_POP
 end subroutine ilusolver_setup_xml
 !------------------------------------------------------------------------------
 !> Check for thread safety
+!!
+!! Different solvers may be applied concurrently from different threads. SuperLU 5
+!! and later keep no global state in the factorization and solve ("super" package;
+!! checked for 5.2.1 and 6.0.1). Older versions use global storage, so their calls
+!! are serialized (`superlu_solve` critical section, shared with @ref oft_lusolver)
+!! and the solver reports itself as not thread safe.
+!!
+!! @result Thread safe?
 !------------------------------------------------------------------------------
 recursive function ilusolver_check_thread(self) result(thread_safe)
 class(oft_ilusolver), intent(inout) :: self
 logical :: thread_safe
 thread_safe=.TRUE.
+#if defined( HAVE_SUPERLU ) && ( !defined( SUPERLU_VER_MAJOR ) || SUPERLU_VER_MAJOR < 5 )
+IF(TRIM(self%package)=='super')thread_safe=.FALSE.
+#endif
 end function ilusolver_check_thread
 !------------------------------------------------------------------------------
 !> Destroy ILU solver and deallocate all internal storage
@@ -1329,7 +1644,12 @@ SELECT CASE(TRIM(self%package))
 #endif
   CASE("native")
     CALL ilu_native_free(self%native_struct)
+#ifdef HAVE_SUPERLU
+  CASE("super")
+    CALL ilu_superlu_free(self%superlu_ilu)
+#endif
 END SELECT
+self%nnz_factor=0
 NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine ilusolver_delete
