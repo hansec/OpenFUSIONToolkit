@@ -33,8 +33,9 @@ CONTAINS
 !---------------------------------------------------------------------------------
 !> Incomplete LU factorization with no fill (ILU(0)) in the CSR layout of the matrix
 !!
-!! Row-wise (IKJ) elimination restricted to the non-zero pattern, derived from the
-!! `ilu0` routine of SPARSKIT (Y. Saad). The factors are written to `fac`, which is
+!! Row-wise (IKJ) elimination restricted to the non-zero pattern, following
+!! Y. Saad, "Iterative Methods for Sparse Linear Systems", 2nd ed., SIAM (2003),
+!! Sec. 10.3. The factors are written to `fac`, which is
 !! aligned with `kr`/`lc`: entries left of the diagonal hold L (unit diagonal not
 !! stored), entries right of it hold U, and the diagonal entry `fac(dloc(i))` holds
 !! the inverse of the pivot of row `i`.
