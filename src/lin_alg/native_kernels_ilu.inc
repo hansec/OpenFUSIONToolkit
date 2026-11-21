@@ -19,19 +19,20 @@
 ! the L entry for j < dloc(i) (unit diagonal not stored), the U entry for j > dloc(i),
 ! and fac(dloc(i)) holds the inverse of the (possibly replaced) pivot of row i.
 !
-! Threading: the factorization is serial. The solve takes an optional level schedule
-! (native_ilu_sched, built by native_ilu_sched_build). Without it, or when
-! native_ilu_sched_active is false (single thread, already inside an active parallel
-! region, or a schedule that is not expected to pay off), it runs serially and may
-! be called from inside a parallel region. With it, it opens one parallel region and
-! processes the rows of each level concurrently, with exactly the per-row arithmetic
-! of the serial path, so results are bitwise identical for any number of threads.
-! The threaded solve reads a copy of the factors reordered to follow the schedules
+! Threading: both kernels take an optional level schedule (native_ilu_sched, built by
+! native_ilu_sched_build). Without it, or when native_ilu_sched_active is false
+! (single thread, already inside an active parallel region, or a schedule that is
+! not expected to pay off), they run serially and may be called from inside a
+! parallel region. With it, they open one parallel region and process the rows of
+! each level concurrently, with exactly the per-row arithmetic of the serial path,
+! so results are bitwise identical for any number of threads. The threaded solve
+! reads a copy of the factors reordered to follow the schedules
 ! (nk_ilu0_sched_values).
 !---------------------------------------------------------------------------------
 USE omp_lib
 USE oft_local
-USE oft_native_kernels_base, ONLY: native_ilu_sched, native_ilu_sched_active, native_level_segment
+USE oft_native_kernels_base, ONLY: native_ilu_sched, native_level_sched, native_ilu_sched_active, &
+  native_level_segment
 IMPLICIT NONE
 PRIVATE
 PUBLIC :: nk_ilu0_factor, nk_ilu0_solve, nk_ilu0_sched_values
@@ -64,13 +65,23 @@ CONTAINS
 !! non-finite pivot with `ierr=-i`. With `diag_shift` \f$ = \alpha \f$ the factored
 !! matrix is \f$ A + \alpha \mathrm{diag}(A) \f$.
 !!
+!! Threading: with `sched` (see @ref oft_native_kernels_base::native_ilu_sched_active
+!! "native_ilu_sched_active" for when it is used), the rows of each level of the
+!! forward schedule are factored concurrently, each thread with its own column
+!! index workspace. Row `i` only reads the finished rows referenced by its L part,
+!! which are in earlier levels, and every row is computed by the same code as in the
+!! serial path, so the factors and `nreplaced` are bitwise identical. On a failed
+!! pivot the threads skip all rows not yet started, and the factorization is rerun
+!! serially, so `ierr` (the lowest failing row), `nreplaced` (pivots replaced before
+!! that row) and the factors of the rows before the failing one are exactly those of the serial path.
+!!
 !! @note Requires a square CSR pattern with strictly increasing column indices in
 !! each row and a diagonal entry in every row; this is not checked here.
-!! @note Serial (no OpenMP directives), unlike most kernels, so it may be called from
-!! inside a parallel region (eg. block-Jacobi with several local blocks per process
-!! factors its blocks in a parallel loop).
+!! @note Without `sched` the kernel is serial (no OpenMP directives), unlike most
+!! kernels, so it may be called from inside a parallel region (eg. block-Jacobi with
+!! several local blocks per process factors its blocks in a parallel loop).
 !---------------------------------------------------------------------------------
-SUBROUTINE k_ilu0_factor(nr,kr,lc,dloc,a,pivot_tol,diag_shift,fac,nreplaced,ierr)
+SUBROUTINE k_ilu0_factor(nr,kr,lc,dloc,a,pivot_tol,diag_shift,fac,nreplaced,ierr,sched)
 INTEGER(i4), INTENT(in) :: nr !< Number of rows
 INTEGER(i4), INTENT(in) :: kr(nr+1) !< CSR row pointer [nr+1]
 INTEGER(i4), CONTIGUOUS, INTENT(in) :: lc(:) !< CSR column indices [nnz]
@@ -81,59 +92,164 @@ REAL(r8), INTENT(in) :: diag_shift !< Relative diagonal shift \f$ \alpha \f$
 KT, CONTIGUOUS, INTENT(out) :: fac(:) !< Factor values in the layout of `a` [nnz]
 INTEGER(i4), INTENT(out) :: nreplaced !< Number of pivots replaced
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0: success, i>0: zero pivot in row i, i<0: non-finite pivot in row -i)
-INTEGER(i4) :: i,j,jj,jd,jrow,jw
+TYPE(native_ilu_sched), OPTIONAL, INTENT(in) :: sched !< Level schedules for threaded execution (optional)
+INTEGER(i4) :: i,stat,nerr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: iw
-REAL(r8) :: rowmax,pthresh
-KT :: tl,piv
 ierr=0
 nreplaced=0
+IF(PRESENT(sched))THEN
+  IF(native_ilu_sched_active(sched,nr,.TRUE.))THEN
+    CALL ilu0_factor_sched(nr,kr,lc,dloc,a,pivot_tol,diag_shift,fac,sched%lower,nreplaced,nerr)
+    IF(nerr==0)RETURN
+    nreplaced=0 ! Rerun serially to report the error exactly
+  END IF
+END IF
 !---Location of each column of the current row in fac (0 if not in the row)
 ALLOCATE(iw(nr))
 iw=0
 DO i=1,nr
-  jd=dloc(i)
-  rowmax=0.d0
-  DO j=kr(i),kr(i+1)-1
-    rowmax=MAX(rowmax,ABS(a(j)))
-    fac(j)=a(j)
-    iw(lc(j))=j
-  END DO
-  fac(jd)=a(jd)*(1.d0+diag_shift)
-  !---Eliminate the L part of the row, in increasing column order
-  DO j=kr(i),jd-1
-    jrow=lc(j)
-    tl=fac(j)*fac(dloc(jrow))
-    fac(j)=tl
-    DO jj=dloc(jrow)+1,kr(jrow+1)-1
-      jw=iw(lc(jj))
-      IF(jw/=0)fac(jw)=fac(jw)-tl*fac(jj)
-    END DO
-  END DO
-  !---Check and invert pivot
-  piv=fac(jd)
-  IF(.NOT.(ABS(piv)<=HUGE(rowmax)))THEN
-    ierr=-i
-    EXIT
-  END IF
-  pthresh=pivot_tol*rowmax
-  IF(ABS(piv)<pthresh)THEN
-    IF(piv==KZERO)THEN
-      piv=pthresh
-    ELSE
-      piv=(piv/ABS(piv))*pthresh
-    END IF
+  CALL ilu0_factor_row(nr,i,kr,lc,dloc,a,pivot_tol,diag_shift,fac,iw,stat)
+  IF(stat==1)THEN
     nreplaced=nreplaced+1
-  ELSE IF(piv==KZERO)THEN
+  ELSE IF(stat<0)THEN
     ierr=i
+    IF(stat==-2)ierr=-i
     EXIT
   END IF
-  fac(jd)=KONE/piv
-  DO j=kr(i),kr(i+1)-1
-    iw(lc(j))=0
-  END DO
 END DO
 DEALLOCATE(iw)
 END SUBROUTINE k_ilu0_factor
+!---------------------------------------------------------------------------------
+!> Factor one row of ILU(0) (see @ref k_ilu0_factor), given finished rows for its L part
+!!
+!! `iw` must be zero on entry and is zero on return.
+!---------------------------------------------------------------------------------
+SUBROUTINE ilu0_factor_row(nr,i,kr,lc,dloc,a,pivot_tol,diag_shift,fac,iw,stat)
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+INTEGER(i4), INTENT(in) :: i !< Row to factor
+INTEGER(i4), INTENT(in) :: kr(nr+1) !< CSR row pointer [nr+1]
+INTEGER(i4), CONTIGUOUS, INTENT(in) :: lc(:) !< CSR column indices [nnz]
+INTEGER(i4), INTENT(in) :: dloc(nr) !< Location of the diagonal entry in each row [nr]
+KT, CONTIGUOUS, INTENT(in) :: a(:) !< Matrix values [nnz]
+REAL(r8), INTENT(in) :: pivot_tol !< Relative small-pivot threshold
+REAL(r8), INTENT(in) :: diag_shift !< Relative diagonal shift
+KT, CONTIGUOUS, INTENT(inout) :: fac(:) !< Factor values [nnz]
+INTEGER(i4), INTENT(inout) :: iw(nr) !< Column workspace [nr]
+INTEGER(i4), INTENT(out) :: stat !< 0: pivot kept, 1: pivot replaced, -1: zero pivot, -2: non-finite pivot
+INTEGER(i4) :: j,jj,jd,jrow,jw
+REAL(r8) :: rowmax,pthresh
+KT :: tl,piv
+stat=0
+jd=dloc(i)
+rowmax=0.d0
+DO j=kr(i),kr(i+1)-1
+  rowmax=MAX(rowmax,ABS(a(j)))
+  fac(j)=a(j)
+  iw(lc(j))=j
+END DO
+fac(jd)=a(jd)*(1.d0+diag_shift)
+!---Eliminate the L part of the row, in increasing column order
+DO j=kr(i),jd-1
+  jrow=lc(j)
+  tl=fac(j)*fac(dloc(jrow))
+  fac(j)=tl
+  DO jj=dloc(jrow)+1,kr(jrow+1)-1
+    jw=iw(lc(jj))
+    IF(jw/=0)fac(jw)=fac(jw)-tl*fac(jj)
+  END DO
+END DO
+!---Check and invert pivot
+piv=fac(jd)
+pthresh=pivot_tol*rowmax
+IF(.NOT.(ABS(piv)<=HUGE(rowmax)))THEN
+  stat=-2
+ELSE IF(ABS(piv)<pthresh)THEN
+  IF(piv==KZERO)THEN
+    piv=pthresh
+  ELSE
+    piv=(piv/ABS(piv))*pthresh
+  END IF
+  stat=1
+ELSE IF(piv==KZERO)THEN
+  stat=-1
+END IF
+IF(stat>=0)fac(jd)=KONE/piv
+DO j=kr(i),kr(i+1)-1
+  iw(lc(j))=0
+END DO
+END SUBROUTINE ilu0_factor_row
+!---------------------------------------------------------------------------------
+!> Level-scheduled ILU(0) factorization (see @ref k_ilu0_factor)
+!!
+!! Must be called from serial code. `nerr` is the number of rows with a failed pivot
+!! (rows after the first failure may be skipped, so only `nerr>0` is meaningful).
+!---------------------------------------------------------------------------------
+SUBROUTINE ilu0_factor_sched(nr,kr,lc,dloc,a,pivot_tol,diag_shift,fac,ls,nreplaced,nerr)
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+INTEGER(i4), INTENT(in) :: kr(nr+1) !< CSR row pointer [nr+1]
+INTEGER(i4), CONTIGUOUS, INTENT(in) :: lc(:) !< CSR column indices [nnz]
+INTEGER(i4), INTENT(in) :: dloc(nr) !< Location of the diagonal entry in each row [nr]
+KT, CONTIGUOUS, INTENT(in) :: a(:) !< Matrix values [nnz]
+REAL(r8), INTENT(in) :: pivot_tol !< Relative small-pivot threshold
+REAL(r8), INTENT(in) :: diag_shift !< Relative diagonal shift
+KT, CONTIGUOUS, INTENT(inout) :: fac(:) !< Factor values [nnz]
+TYPE(native_level_sched), INTENT(in) :: ls !< Forward level schedule
+INTEGER(i4), INTENT(out) :: nreplaced !< Number of pivots replaced
+INTEGER(i4), INTENT(out) :: nerr !< Number of failed pivots found
+INTEGER(i4) :: s,k1,k2,nrep,nfail
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: iw
+nrep=0
+nfail=0
+!$omp parallel private(s,k1,k2,iw) reduction(+:nrep)
+ALLOCATE(iw(nr))
+iw=0
+DO s=1,ls%nseg
+  CALL native_level_segment(ls,s,k1,k2)
+  CALL factor_rows(nr,ls%perm,k1,k2,kr,lc,dloc,a,pivot_tol,diag_shift,fac,iw,nrep,nfail)
+  IF(s<ls%nseg)THEN
+    !$omp barrier
+  END IF
+END DO
+DEALLOCATE(iw)
+!$omp end parallel
+nreplaced=nrep
+nerr=nfail
+END SUBROUTINE ilu0_factor_sched
+!---------------------------------------------------------------------------------
+!> Factor rows `perm(k1:k2)` in order (part of @ref ilu0_factor_sched)
+!!
+!! Rows are skipped once any thread has recorded a failed pivot in `nfail` (shared).
+!---------------------------------------------------------------------------------
+SUBROUTINE factor_rows(nr,perm,k1,k2,kr,lc,dloc,a,pivot_tol,diag_shift,fac,iw,nrep,nfail)
+INTEGER(i4), INTENT(in) :: nr !< Number of rows
+INTEGER(i4), INTENT(in) :: perm(nr) !< Rows grouped by level [nr]
+INTEGER(i4), INTENT(in) :: k1 !< First position in `perm`
+INTEGER(i4), INTENT(in) :: k2 !< Last position in `perm`
+INTEGER(i4), INTENT(in) :: kr(nr+1) !< CSR row pointer [nr+1]
+INTEGER(i4), CONTIGUOUS, INTENT(in) :: lc(:) !< CSR column indices [nnz]
+INTEGER(i4), INTENT(in) :: dloc(nr) !< Location of the diagonal entry in each row [nr]
+KT, CONTIGUOUS, INTENT(in) :: a(:) !< Matrix values [nnz]
+REAL(r8), INTENT(in) :: pivot_tol !< Relative small-pivot threshold
+REAL(r8), INTENT(in) :: diag_shift !< Relative diagonal shift
+KT, CONTIGUOUS, INTENT(inout) :: fac(:) !< Factor values [nnz]
+INTEGER(i4), INTENT(inout) :: iw(nr) !< Column workspace of this thread [nr]
+INTEGER(i4), INTENT(inout) :: nrep !< Pivots replaced by this thread
+INTEGER(i4), INTENT(inout) :: nfail !< Failed pivots (shared between threads)
+INTEGER(i4) :: k,stat,nf
+DO k=k1,k2
+  !$omp atomic read
+  nf=nfail
+  IF(nf/=0)RETURN
+  CALL ilu0_factor_row(nr,perm(k),kr,lc,dloc,a,pivot_tol,diag_shift,fac,iw,stat)
+  IF(stat==1)THEN
+    nrep=nrep+1
+  ELSE IF(stat<0)THEN
+    !$omp atomic update
+    nfail=nfail+1
+    RETURN
+  END IF
+END DO
+END SUBROUTINE factor_rows
 !---------------------------------------------------------------------------------
 !> Approximate solve with ILU(0) factors from @ref k_ilu0_factor, \f$ x = (LU)^{-1} x \f$
 !!
@@ -163,7 +279,7 @@ KT, CONTIGUOUS, OPTIONAL, INTENT(in) :: sfac(:) !< Factor values reordered by @r
 INTEGER(i4) :: i,j
 KT :: tmp
 IF(PRESENT(sched).AND.PRESENT(sfac))THEN
-  IF(native_ilu_sched_active(sched,nr))THEN
+  IF(native_ilu_sched_active(sched,nr,.FALSE.))THEN
     CALL ilu0_solve_sched(nr,sfac,x,sched)
     RETURN
   END IF

@@ -895,8 +895,8 @@ DO k=1,3
   !---Force the scheduled solve (the heuristic would not use it on small matrices)
   sched%use_solve=.TRUE.
   CALL check('Scheduled solve used iff threads>1, '//TRIM(tag), &
-    native_ilu_sched_active(sched,A%nr).EQV.(nthreads>1))
-  CALL check('Schedule rejected for other sizes',.NOT.native_ilu_sched_active(sched,A%nr+1))
+    native_ilu_sched_active(sched,A%nr,.FALSE.).EQV.(nthreads>1))
+  CALL check('Schedule rejected for other sizes',.NOT.native_ilu_sched_active(sched,A%nr+1,.FALSE.))
   CALL compare_real(A,dloc,av,b,sched,1.d-12,0.d0,'Real '//TRIM(tag),nrep,ierr)
   CALL check('Real: no error or replaced pivots',(ierr==0).AND.(nrep==0))
   !---Large pivot threshold (many replaced pivots) and diagonal shift
@@ -925,7 +925,7 @@ ok=.TRUE.
 !$omp parallel num_threads(2) private(xt,in_par) reduction(.AND.:ok)
 in_par=omp_in_parallel()
 ALLOCATE(xt(A%nr))
-ok=.NOT.(in_par.AND.native_ilu_sched_active(sched,A%nr))
+ok=.NOT.(in_par.AND.native_ilu_sched_active(sched,A%nr,.FALSE.))
 xt=b
 CALL nk_ilu0_solve(A%nr,A%kr,A%lc,dloc,fac0,xt,sched,sfac0)
 ok=ok.AND.same_r(xt,x0)
@@ -936,7 +936,7 @@ DEALLOCATE(fac0,sfac0,x0)
 !---No threading for patterns without a diagonal entry in every row (3x3, none in row 2)
 CALL native_ilu_sched_build(3,[1,3,4,6],[1,3,1,2,3],sched,min_rows=1)
 sched%use_solve=.TRUE.
-CALL check('Schedule unused without diagonal',.NOT.native_ilu_sched_active(sched,3))
+CALL check('Schedule unused without diagonal',.NOT.native_ilu_sched_active(sched,3,.FALSE.))
 CALL native_ilu_sched_free(sched)
 !---Pattern schedules are built once and shared
 psched=>native_pattern_ilu_sched(A%pattern)

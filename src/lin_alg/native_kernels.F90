@@ -34,17 +34,17 @@
 !! generic names are public, and the generics of each instantiation merge in
 !! @ref oft_native_kernels, which is the module to use. Kernels that only exist for
 !! real values (Jacobi smoother sweeps) and the type-independent helpers (including
-!! the level schedules of the threaded incomplete LU solve) are in
+!! the level schedules of the threaded incomplete LU kernels) are in
 !! @ref oft_native_kernels_base.
 !!
 !! Threading follows the rest of the native backend: each kernel opens its own
 !! OpenMP parallel region, conditional on the problem size exceeding
 !! `OFT_OMP_VTHRESH`, so kernels must be called from serial code. The exception is
-!! the incomplete LU kernels: the factorization is serial, and the solve is serial
-!! unless given a level schedule (@ref oft_native_kernels_base::native_ilu_sched
-!! "native_ilu_sched"), and then only opens a parallel region when called from serial
-!! code, so both may be called from inside a parallel region (block-Jacobi factors
-!! and applies several local blocks per process in a parallel loop).
+!! the incomplete LU kernels, which are serial unless given a level schedule
+!! (@ref oft_native_kernels_base::native_ilu_sched "native_ilu_sched"), and then only
+!! open a parallel region when called from serial code, so they may be called from
+!! inside a parallel region (block-Jacobi factors and applies several local blocks
+!! per process in a parallel loop).
 !!
 !! @authors Chris Hansen
 !! @date November 2026
@@ -77,12 +77,15 @@ TYPE, PUBLIC :: native_cvals_ptr
   COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: v => NULL() !< Values
 END TYPE native_cvals_ptr
 !> Default minimum number of rows for a level of a triangular sweep to be executed by
-!! all threads of the level-scheduled ILU(0) solve; runs of consecutive smaller levels
+!! all threads of a level-scheduled ILU(0) kernel; runs of consecutive smaller levels
 !! are executed by one thread (see @ref native_ilu_sched_build)
 INTEGER(i4), PUBLIC, PARAMETER :: native_ilu_level_rows = 64
 !> Minimum average number of non-zeros per synchronization (barrier) for the
 !! level-scheduled ILU(0) solve (see @ref native_ilu_sched_build)
 INTEGER(i4), PUBLIC, PARAMETER :: native_ilu_solve_nnz = 4096
+!> Minimum average number of rows per synchronization (barrier) for the level-scheduled
+!! ILU(0) factorization (see @ref native_ilu_sched_build)
+INTEGER(i4), PUBLIC, PARAMETER :: native_ilu_factor_rows = 32
 !---------------------------------------------------------------------------------
 !> Execution schedule for one triangular sweep, rows grouped by dependency level
 !!
@@ -111,11 +114,14 @@ TYPE, PUBLIC :: native_level_sched
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ipos !< Position of each row in `perm` [nr]
 END TYPE native_level_sched
 !---------------------------------------------------------------------------------
-!> Level schedules for threaded ILU(0) solves on a square CSR pattern
+!> Level schedules for threaded ILU(0) factorization and solves on a square CSR pattern
 !!
-!! Built from the structure alone by @ref native_ilu_sched_build. `use_solve` records
-!! whether the threaded solve is expected to be faster than the serial one; the solve
-!! only takes the scheduled path when it is set (see @ref native_ilu_sched_active).
+!! Built from the structure alone by @ref native_ilu_sched_build. The forward (L)
+!! schedule also orders the factorization, since row `i` of ILU(0) only depends on
+!! the rows referenced by its L part. `use_factor` and `use_solve` record whether the
+!! threaded kernels are expected to be faster than the serial ones; the kernels only
+!! take the scheduled path when the corresponding flag is set (see
+!! @ref native_ilu_sched_active).
 !!
 !! The threaded solve works in the execution order of the schedules, so that each
 !! thread reads and writes contiguous blocks of memory:
@@ -138,8 +144,9 @@ TYPE, PUBLIC :: native_ilu_sched
   INTEGER(i4) :: nnz = 0 !< Number of non-zeros
   INTEGER(i4) :: nnzl = 0 !< Number of non-zeros left of the diagonal
   INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: col !< Schedule positions for the reordered factor values [nnz]
+  LOGICAL :: use_factor = .FALSE. !< Use the scheduled factorization
   LOGICAL :: use_solve = .FALSE. !< Use the scheduled solve
-  TYPE(native_level_sched) :: lower !< Forward (L) sweep
+  TYPE(native_level_sched) :: lower !< Forward (L) sweep and factorization
   TYPE(native_level_sched) :: upper !< Backward (U) sweep
 END TYPE native_ilu_sched
 PUBLIC native_row_split, native_thread_rows, nk_jacobi_start, nk_jacobi_sweep, nk_jacobi_restart
@@ -284,29 +291,35 @@ DO i=1,n
 END DO
 END SUBROUTINE nk_jacobi_restart
 !---------------------------------------------------------------------------------
-!> Build the level schedules of the ILU(0) solve for a CSR pattern
+!> Build the level schedules of the ILU(0) factorization and solve for a CSR pattern
 !!
 !! The dependencies of row `i` are the columns `lc(j)<i` of its entries for the
-!! forward sweep, and the columns `lc(j)>i` for the backward sweep, so only `kr` and
-!! `lc` are needed. Levels are found in one pass over the
+!! forward sweep and the factorization, and the columns `lc(j)>i` for the backward
+!! sweep, so only `kr` and `lc` are needed. Levels are found in one pass over the
 !! entries (in increasing row order for the forward sweep, decreasing for the
 !! backward one), and rows are sorted into levels with a stable counting sort.
 !!
 !! Execution segments (see @ref native_level_sched): a level with at least
 !! `min_rows` rows is a parallel segment; runs of consecutive smaller levels form
 !! serial segments. Each segment costs one barrier, and only rows in parallel levels
-!! are shared between threads, so the schedules are only used (`use_solve`) when
-!! `nr>OFT_OMP_VTHRESH`, most rows are in parallel levels (at least half, in each
-!! sweep) and the two sweeps together average at least @ref native_ilu_solve_nnz
-!! non-zeros per segment.
+!! are shared between threads, so the schedules are only used when most rows are in
+!! parallel levels (at least half, in each schedule used) and segments are large on
+!! average:
+!! - Solve: `use_solve` when `nr>OFT_OMP_VTHRESH` and the two sweeps together
+!!   average at least @ref native_ilu_solve_nnz non-zeros per segment.
+!! - Factorization: `use_factor` when `nr>OFT_OMP_VTHRESH/4` and the forward
+!!   schedule averages at least @ref native_ilu_factor_rows rows per segment (a row of
+!!   the factorization costs far more than a row of a sweep).
 !!
 !! These thresholds come from timings of Lagrange Laplacians (orders 1-3, 559 to
 !! 68705 rows, natural ordering) on 2 and 4 threads: the threaded solve was 1.3-1.4x
 !! (2 threads) and 1.7-2.0x (4 threads) faster at 5700 or more non-zeros per segment
-!! and no faster at 2100 or fewer.
+!! and no faster at 2100 or fewer, and the threaded factorization 1.4-1.7x (2 threads)
+!! and 2.4-2.5x (4 threads) faster at 9009 rows or more (over 90% of rows in parallel
+!! levels), with no gain for matrices with 5-40% of rows in parallel levels.
 !!
-!! The flag may be changed after the build (eg. to force the scheduled solve in
-!! tests); results do not depend on it.
+!! The flags may be changed after the build (eg. to force the scheduled kernels in
+!! tests); results do not depend on them.
 !!
 !! @note The layout of the reordered factor values assumes the pattern requirements
 !! of the ILU(0) kernels (sorted columns and a diagonal entry in every row). Without
@@ -387,6 +400,8 @@ sched%upper%kp(nr+1)=jp
 sched%use_solve=(nr>OFT_OMP_VTHRESH) &
   .AND.(2*sched%lower%npar>=nr).AND.(2*sched%upper%npar>=nr) &
   .AND.(INT(sched%nnz,i8)>=INT(native_ilu_solve_nnz,i8)*INT(sched%lower%nseg+sched%upper%nseg,i8))
+sched%use_factor=(nr>OFT_OMP_VTHRESH/4).AND.(2*sched%lower%npar>=nr) &
+  .AND.(nr>=native_ilu_factor_rows*sched%lower%nseg)
 CONTAINS
 ! Group rows by level (stable) and split levels into execution segments
 SUBROUTINE level_sort(level,minr,ls)
@@ -458,6 +473,7 @@ IF(ALLOCATED(sched%col))DEALLOCATE(sched%col)
 sched%nr=0
 sched%nnz=0
 sched%nnzl=0
+sched%use_factor=.FALSE.
 sched%use_solve=.FALSE.
 CONTAINS
 SUBROUTINE free_level(ls)
@@ -475,22 +491,27 @@ ls%npar=0
 END SUBROUTINE free_level
 END SUBROUTINE native_ilu_sched_free
 !---------------------------------------------------------------------------------
-!> Check whether the level-scheduled ILU(0) solve would run threaded
+!> Check whether a level-scheduled ILU(0) kernel would run threaded
 !!
-!! True when the schedule is built for `nr` rows, the profitability flag `use_solve`
-!! is set, more than one thread is available, and the caller is not already
+!! True when the schedule is built for `nr` rows, the corresponding profitability
+!! flag is set, more than one thread is available, and the caller is not already
 !! inside an active parallel region (eg. block-Jacobi with several local blocks per
 !! process, which factors and applies its blocks in a parallel loop).
 !!
 !! @result Use the scheduled path
 !---------------------------------------------------------------------------------
-FUNCTION native_ilu_sched_active(sched,nr) RESULT(active)
+FUNCTION native_ilu_sched_active(sched,nr,factor) RESULT(active)
 TYPE(native_ilu_sched), INTENT(in) :: sched !< Schedules
 INTEGER(i4), INTENT(in) :: nr !< Number of rows of the factored matrix
+LOGICAL, INTENT(in) :: factor !< Check the factorization (otherwise the solve)
 LOGICAL :: active
 active=.FALSE.
 IF(sched%nr/=nr.OR.(.NOT.ALLOCATED(sched%col)))RETURN
-IF(.NOT.sched%use_solve)RETURN
+IF(factor)THEN
+  IF(.NOT.sched%use_factor)RETURN
+ELSE
+  IF(.NOT.sched%use_solve)RETURN
+END IF
 IF(omp_in_parallel())RETURN
 active=(omp_get_max_threads()>1)
 END FUNCTION native_ilu_sched_active
@@ -502,7 +523,7 @@ TYPE(native_ilu_sched), INTENT(in) :: sched !< Schedules
 CHARACTER(LEN=*), INTENT(in) :: prefix !< Leading text of each line
 CALL level_stats('L',sched%lower)
 CALL level_stats('U',sched%upper)
-WRITE(*,'(2A,L1)')prefix,'threaded solve = ',sched%use_solve
+WRITE(*,'(2A,L1,A,L1)')prefix,'threaded factor = ',sched%use_factor,', threaded solve = ',sched%use_solve
 CONTAINS
 SUBROUTINE level_stats(name,ls)
 CHARACTER(LEN=*), INTENT(in) :: name
@@ -735,9 +756,8 @@ END MODULE oft_native_kernels_prod_cc
 !! - Products: `nk_owned_dot`, `nk_owned_mdot`, `nk_csr_matvec` (4- and 2-byte
 !!   column indices), `nk_csc_matvec`, `nk_dense_matvec`, `nk_dense_matvect`
 !!   (all real/complex combinations; the left operand of dot products is conjugated)
-!! - Incomplete LU: `nk_ilu0_factor` (serial), `nk_ilu0_solve` (serial, or
+!! - Incomplete LU: `nk_ilu0_factor`, `nk_ilu0_solve` (real and complex; serial, or
 !!   level-scheduled with OpenMP when given schedules from `native_ilu_sched_build`)
-!!   (real and complex)
 !! - Real only: `nk_jacobi_start`, `nk_jacobi_sweep`, `nk_jacobi_restart`
 !---------------------------------------------------------------------------------
 MODULE oft_native_kernels
