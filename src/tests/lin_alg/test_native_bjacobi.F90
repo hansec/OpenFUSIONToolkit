@@ -14,6 +14,10 @@
 !!   then check refactorization against a fresh factorization after small and large changes
 !!   in matrix values (same pattern) and, for distributed runs, after changing the sparsity pattern
 !!
+!! The LU solver settings can also be read from the `<lu>` element of an XML input file
+!! (`use_xml`), and the time for the first solve (including factorization) is written to
+!! `bjacobi.results`, which is used by `benchmarks/blas` to benchmark sparse LU packages.
+!!
 !! @authors Chris Hansen
 !! @date May 2014
 !! @ingroup testing
@@ -44,7 +48,8 @@ INTEGER(i4) :: nlocal = 1
 INTEGER(i4) :: sol_type = 1
 LOGICAL :: use_ilu = .FALSE.
 LOGICAL :: dist_lu = .FALSE.
-NAMELIST/test_bj_options/nlocal,sol_type,use_ilu,dist_lu
+LOGICAL :: use_xml = .FALSE.
+NAMELIST/test_bj_options/nlocal,sol_type,use_ilu,dist_lu,use_xml
 IF(use_petsc)THEN
   WRITE(*,*)'SKIP TEST'
   STOP
@@ -128,7 +133,9 @@ TYPE(oft_lusolver), TARGET :: linv_pre_lu
 TYPE(oft_ilusolver), TARGET :: linv_pre_ilu
 !---Local variables
 INTEGER(i4) :: i,j,ierr
-REAL(r8) :: uu
+REAL(r8) :: uu,solve_time
+TYPE(oft_timer) :: solve_timer
+TYPE(xml_node) :: lu_node
 CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_native_matrix), POINTER :: lop_native
 CLASS(oft_matrix), POINTER :: lop => NULL()
@@ -205,12 +212,21 @@ ELSE
       CALL oft_abort("Unknown LU solver package","test_lap",__FILE__)
   END SELECT
 END IF
+!---Override LU solver settings from XML
+IF(use_xml)THEN
+  IF(.NOT.ASSOCIATED(oft_env%xml))CALL oft_abort("No XML input file","test_lap",__FILE__)
+  CALL xml_get_element(oft_env%xml,"lu",lu_node,ierr)
+  IF(ierr/=0)CALL oft_abort("Could not find `lu` XML node","test_lap",__FILE__)
+  CALL linv_pre_lu%setup_from_xml(lu_node)
+END IF
 !---Solve
 CALL u%set(1.d0)
 CALL mop%apply(u,v)
 CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
+CALL solve_timer%tick()
 CALL linv%apply(u,v)
+solve_time=solve_timer%tock()
 uu=SQRT(u%dot(u))
 !---Check refactorization against a fresh factorization of the same matrix
 IF(dist_lu)THEN
@@ -240,6 +256,7 @@ IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='bjacobi.results')
   WRITE(io_unit,*)linv%cits
   WRITE(io_unit,*)uu
+  WRITE(io_unit,*)solve_time
   CLOSE(io_unit)
 END IF
 !---Destroy vectors
