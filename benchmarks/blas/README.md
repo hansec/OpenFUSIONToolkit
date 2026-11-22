@@ -122,9 +122,12 @@ cd builds/GCC/MPI_openblas/build_release   && OMP_NUM_THREADS=2 make test > test
 tail -3 */build_release/test.log      # pytest summary line
 ```
 
-Expected: identical pass/skip counts in both trees and **no failures** in the
-Accelerate tree beyond any that also fail with OpenBLAS. Without PETSc, about
-349 tests skip (`Not compiled with PETSc`). For any failure that appears only
+Expected: **no failures** in the Accelerate tree beyond any that also fail with
+OpenBLAS. The Accelerate tree also builds the `accelerate` sparse LU package, so it
+runs 27 more tests: `lin_alg/test_accelerate.py` (18) and the `[7]` cases of
+`lin_alg/test_native_bjacobi.py` (9). These are skipped in the OpenBLAS tree.
+Without PETSc, about 349 other tests are skipped (`Not compiled with PETSc`).
+For any failure that appears only
 with Accelerate, rerun it alone (`cd tests && ./run_test.sh <file> -k <name>`)
 and record the output.
 
@@ -198,7 +201,9 @@ git push origin build-accelerate
 - ThinCurr direct frequency response: 19.2 s → 2.1 s. Direct eigenvalues:
   44 s → 33 s.
 - The HODLR path shows no meaningful difference.
-- `make test`: 1148 passed and 349 skipped in both trees, with no failures.
+- `make test`: 1148 passed and 349 skipped in both trees, with no failures. That run was
+  before the sparse LU package was added; the Accelerate tree now gives 1175 passed and
+  349 skipped.
 
 ## Interpreting results on other machines
 
