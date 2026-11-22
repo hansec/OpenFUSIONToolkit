@@ -1,0 +1,19 @@
+date: 2026-11-22T22:02Z
+host_model: Mac17,7
+cpu: Apple M5 Max
+arch: arm64
+ncpu: 18
+perf_cores: 6
+eff_cores: 12
+mem_GB: 128
+macos: 26.7.3
+sdk: 26.5
+fc: /opt/homebrew/bin/gfortran-16 (GNU Fortran (Homebrew GCC 16.2.0) 16.2.0)
+python: Python 3.14.8
+oft_rev: f6f1287e (build-accelerate)
+openblas_lib: /Users/hansec/Claude/Repos/OpenFUSIONToolkit/builds/GCC/MPI_openblas/OpenBLAS-0_3_33/lib/libopenblas.a
+omp_openblas_lib: none
+nthreads: 6
+--- Accelerate liboftpy BLAS linkage (expect liboftaccelerate) ---
+	/Users/hansec/Claude/Repos/OpenFUSIONToolkit/builds/GCC/MPI_accelerate/accelerate_shim/lib/liboftaccelerate.dylib (compatibility version 0.0.0, current version 0.0.0)
+	/System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate (compatibility version 1.0.0, current version 4.0.0)
