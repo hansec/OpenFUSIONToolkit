@@ -30,7 +30,7 @@
 !--------------------------------------------------------------------------------
 PROGRAM oft_trace
 !---Base
-USE ISO_FORTRAN_ENV, ONLY: IOSTAT_END
+USE, INTRINSIC :: ISO_FORTRAN_ENV, ONLY: IOSTAT_END
 USE oft_base
 !--Grid
 USE multigrid, ONLY: multigrid_mesh

@@ -1440,8 +1440,8 @@ outer: do i=0,its
   if((oft_env%pm.AND.oft_env%head_proc))WRITE(*,'(I6,3ES14.6)')i,SQRT(uu),SQRT(res),SQRT(res/uu)
   IF(i==its)self%cits=-1
   !---If residual has reached an acceptable value exit
-  IF(SQRT(res)<self%atol.AND.i>0)EXIT
-  IF(SQRT(res/uu)<self%rtol.AND.i>0)EXIT
+  IF(SQRT(res)<self%atol.AND.i>0)EXIT outer
+  IF(SQRT(res/uu)<self%rtol.AND.i>0)EXIT outer
   !---Update jacobian
   IF(MOD(i,self%up_freq)==0.AND.ASSOCIATED(self%J_update))THEN
     if(oft_env%head_proc)CALL mytimer%tick
@@ -1451,12 +1451,12 @@ outer: do i=0,its
   !---Solve jacobian for new search direction
   if(oft_env%head_proc)CALL mytimer%tick
   call self%du%set(0.d0)
-  pm_save=oft_env%pm; oft_env%pm=self%J_inv%pm;
+  pm_save=oft_env%pm; oft_env%pm=self%J_inv%pm
   call self%J_inv%apply(self%du,v)
   oft_env%pm=pm_save
   IF(self%J_inv%cits<0)THEN
     self%cits=-1
-    EXIT
+    EXIT outer
   END IF
   self%lits=self%lits+self%J_inv%cits
   !---Update solution

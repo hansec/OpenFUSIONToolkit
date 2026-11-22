@@ -10,7 +10,7 @@
 !! @ingroup doxy_oft_python
 !---------------------------------------------------------------------------------
 MODULE mugtok_f
-USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_ptr, &
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_ptr, &
   c_f_pointer, c_bool, c_associated
 USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh
@@ -143,7 +143,7 @@ END SUBROUTINE mugtok_get_field
 !---------------------------------------------------------------------------------
 SUBROUTINE mugtok_get_gradf(mugtok_ptr,gr,gz,error_str) BIND(C,NAME="mugtok_get_gradf")
 TYPE(c_ptr), VALUE, INTENT(in) :: mugtok_ptr !< Pointer to MUG/TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: gr !< Output dF/dR array 
+TYPE(c_ptr), VALUE, INTENT(in) :: gr !< Output dF/dR array
 TYPE(c_ptr), VALUE, INTENT(in) :: gz !< Output dF/dZ array
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(mugtok_instance), POINTER :: sim_obj

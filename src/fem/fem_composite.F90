@@ -306,7 +306,7 @@ DEBUG_STACK_POP
 end subroutine fem_vec_load
 
 !------------------------------------------------------------------------------
-!> Generate graph structure for composite FE representation 
+!> Generate graph structure for composite FE representation
 !------------------------------------------------------------------------------
 subroutine fem_graph_create(self, graphs, known_graphs, nknown_graphs, mask)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self

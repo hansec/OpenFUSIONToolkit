@@ -39,7 +39,7 @@ self%order = -1
 self%np = 0
 if(associated(self%pts))deallocate(self%pts)
 if(associated(self%wts))deallocate(self%wts)
-end subroutine delete_quad    
+end subroutine delete_quad
 end module oft_quadrature
 !------------------------------------------------------------------------------
 !> Definition of 1D, 2D, and 3D Gauss-Legendre quadrature rules
@@ -394,7 +394,7 @@ end function quad_1d_p7
 function quad_p11() result(b)
 real(r8) :: b(2) !< Evaluation points
 b=1.d0/2.d0
-end function
+end function quad_p11
 !------------------------------------------------------------------------------
 !> Permute 1D points of the form (a,1-a)
 !------------------------------------------------------------------------------
@@ -403,7 +403,7 @@ real(r8), intent(in) :: a !< Parameter 1
 real(r8) :: b(2,2) !< Evaluation points from permutation [2,2]
 b(:,1)=(/a,1.d0-a/)
 b(:,2)=(/1.d0-a,a/)
-end function
+end function quad_p12
 !------------------------------------------------------------------------------
 !> Get 2D quadrature rule for specified order (max = 11)
 !------------------------------------------------------------------------------

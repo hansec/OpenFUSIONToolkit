@@ -2353,7 +2353,7 @@ do ii=1,n
   end do
 end do
 DEALLOCATE(iw)
-END SUBROUTINE
+END SUBROUTINE ilu0
 !---------------------------------------------------------------------------------
 !> Approximate solve using ILU(0) factorization produced by ilu0
 !---------------------------------------------------------------------------------
@@ -2378,5 +2378,5 @@ do i=n,1,-1
   end do
   x(i,:) = alu(i)*x(i,:)
 end do
-end subroutine
+end subroutine lusol
 END MODULE oft_lu

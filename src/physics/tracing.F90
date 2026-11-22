@@ -47,9 +47,9 @@ type, abstract :: oft_tracer
 #endif
   real(r8) :: tol = 1.d-4 !< Tolerance for ODE solver
   real(r8) :: dt = 0.d0 !< Time step for ODE solver
-  real(r8), pointer, dimension(:) :: y !< Possition of current trace point
-  real(r8), pointer, dimension(:) :: dy !< Change from previous trace point
-  real(r8), pointer, dimension(:) :: dyp !< Previous derivative
+  real(r8), pointer, dimension(:) :: y => NULL() !< Possition of current trace point
+  real(r8), pointer, dimension(:) :: dy => NULL() !< Change from previous trace point
+  real(r8), pointer, dimension(:) :: dyp => NULL() !< Previous derivative
   real(r8) :: f(4) = 0.d0 !< Logical cell position of last/current trace point
   type(multigrid_mesh), pointer :: ml_mesh => NULL() !< Muli-grid mesh
   class(fem_interp), pointer :: B => NULL() !< Interpolation operator for trace field
@@ -81,7 +81,7 @@ end type oft_tracer_ptr
 !---------------------------------------------------------------------------------
 type, extends(oft_tracer) :: oft_tracer_euler
   integer(i4) :: isend(2) = 0 !< Integer MPI transfer array
-  real(r8), pointer, dimension(:) :: rsend !< Real MPI transfer array
+  real(r8), pointer, dimension(:) :: rsend => NULL() !< Real MPI transfer array
 contains
   !> Initialize tracer at a given point
   procedure :: setup => tracer_euler_setup

@@ -643,9 +643,9 @@ outer1:do i=1,cad_rep%ngme
     ep(j)=cad_rep%lgme(j,i)
   enddo
   ind=abs(mesh_local_findedge(mesh,ep)) ! Find edge on mesh
-  if(ind==0)cycle ! Not on my domain
+  if(ind==0)cycle outer1 ! Not on my domain
   !if(emap(ind)==0)call oft_abort('mesh_t3d_cadlink','Bad edge link')
-  if(emap(ind)==0)cycle
+  if(emap(ind)==0)cycle outer1
   k=cad_tmp%ctmp(cad_rep%lgme(4,i)) ! Get CAD curve index
   cad_link%lbeg(emap(ind))%wo=>cad_rep%curve(k) ! Link edge to CAD curve
 enddo outer1
@@ -665,8 +665,8 @@ outer2:do i=1,cad_rep%ngmf
       fp(j)=cad_rep%lgmf(j,i)
     enddo
     ind=abs(mesh_local_findface(mesh,(/fp(1),fp(2),fp(3)/))) ! Find face on mesh
-    if(ind==0)cycle ! Not on my domain
-    if(fmap(ind)==0)cycle!call oft_abort('Bad face link','mesh_t3d_cadlink',__FILE__)
+    if(ind==0)cycle outer2 ! Not on my domain
+    if(fmap(ind)==0)cycle outer2 !call oft_abort('Bad face link','mesh_t3d_cadlink',__FILE__)
   if(cad_rep%lgmf(4,i)==3)then
     k=cad_tmp%stmp(cad_rep%lgmf(5,i)) ! Get CAD surface index
     cad_link%lbfg(fmap(ind))%wo=>cad_rep%surf(k) ! Link face to CAD surface
@@ -684,8 +684,8 @@ outer2:do i=1,cad_rep%ngmf
       fp(j)=cad_rep%lgmf(j,k)
     enddo
     ind_par=abs(mesh_local_findface(mesh,(/fp(1),fp(2),fp(3)/))) ! Find face on mesh
-    if(ind_par==0)cycle ! Not on my domain
-    if(fmap(ind_par)==0)cycle
+    if(ind_par==0)cycle outer2 ! Not on my domain
+    if(fmap(ind_par)==0)cycle outer2
     mesh%periodic%lf(ind)=ind_par
   END IF
 enddo outer2
@@ -751,9 +751,9 @@ if(cad_tmp%lgws(1,si)>0)then
   ccheck=cad_tmp%lgwc(1:2,cad_tmp%lgws(1,si))
   ind=2
   !---If endpoint of first curve is not on second curve flip first curve
-  flip=(cad_tmp%lgwv(1,ctemp(2)).NE.p(1,1,m)).OR.(cad_tmp%lgwv(2,ctemp(2)).NE.p(2,1,m)).OR.(cad_tmp%lgwv(3,ctemp(2)).NE.p(3,1,m))
-  flip=flip.AND.((cad_tmp%lgwv(1,ctemp(1)).NE.p(1,1,m)) .OR. &
-  (cad_tmp%lgwv(2,ctemp(1)).NE.p(2,1,m)).OR.(cad_tmp%lgwv(3,ctemp(1)).NE.p(3,1,m)))
+  flip=(cad_tmp%lgwv(1,ctemp(2))/=p(1,1,m)).OR.(cad_tmp%lgwv(2,ctemp(2))/=p(2,1,m)).OR.(cad_tmp%lgwv(3,ctemp(2))/=p(3,1,m))
+  flip=flip.AND.((cad_tmp%lgwv(1,ctemp(1))/=p(1,1,m)) .OR. &
+  (cad_tmp%lgwv(2,ctemp(1))/=p(2,1,m)).OR.(cad_tmp%lgwv(3,ctemp(1))/=p(3,1,m)))
   if(flip)then
     tmp=p(:,1,1)
     p(:,1,1)=p(:,1,m)

@@ -928,6 +928,8 @@ REAL(8) :: yp1,f0
 INTEGER(4) :: i
 self%plasma_bounds=gseq%plasma_bounds
 RETURN
+! Spline renormalization below is currently disabled
+! allow(unreachable-statement)
 CALL spline_eval(self%func,self%xmin,1)
 f0=self%func%f(1)
 yp1=self%func%f1(1)

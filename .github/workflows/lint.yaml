@@ -40,3 +40,10 @@ jobs:
         run: |
           source ${{ github.workspace }}/setup_env.sh
           python -m ruff check
+
+      - name: Check Fortran with fortitude
+        if: ${{ !cancelled() }}
+        working-directory: src
+        run: |
+          source ${{ github.workspace }}/setup_env.sh
+          python utilities/fortitude_lint.py -- --output-format github

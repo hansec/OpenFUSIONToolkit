@@ -12,7 +12,7 @@
 !! @ingroup doxy_oft_python
 !---------------------------------------------------------------------------------
 MODULE tokamaker_f
-USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
   c_f_pointer, c_bool, c_null_ptr, c_associated
 USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell

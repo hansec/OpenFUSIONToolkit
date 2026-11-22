@@ -599,7 +599,7 @@ TYPE, PRIVATE :: opt_targets
   type(oft_lag_bg2interp), pointer :: psi_g2eval => NULL()
   TYPE(gs_factory), POINTER :: device => NULL()
   ! TYPE(gs_equil), POINTER :: equil => NULL()
-END TYPE
+END TYPE opt_targets
 TYPE(opt_targets) :: active_targets !< Active target values/ptrs for external function calls
 !$omp threadprivate(active_targets)
 real(r8), PARAMETER :: gs_epsilon = 1.d-12 !< Epsilon used for radial coordinate

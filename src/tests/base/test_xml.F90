@@ -46,7 +46,7 @@ CASE(1)
     IF(ierr/=0)CALL oft_abort('Error finding XML element "test1"','test_xml',__FILE__)
     !---Read content
     CALL xml_read_content(current_node,content,iostat=ierr)
-    IF(ierr/=0)CALL oft_abort('Error extracting string content from XML node','test_xml',__FILE__) 
+    IF(ierr/=0)CALL oft_abort('Error extracting string content from XML node','test_xml',__FILE__)
     !---Read attribute
     success=xml_hasAttribute(current_node,'attr1')
     IF(.NOT.success)CALL oft_abort('Error finding "attr1" in XML node "test1"','test_xml',__FILE__)

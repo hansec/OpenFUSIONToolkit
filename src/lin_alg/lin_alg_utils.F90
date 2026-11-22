@@ -308,7 +308,7 @@ stitcher%proc_split=stitch_info(1)%s%proc_split
 stitcher%proc_con=>stitch_info(1)%s%proc_con
 stitcher%send_reqs=>stitch_info(1)%s%send_reqs
 stitcher%recv_reqs=>stitch_info(1)%s%recv_reqs
-!---Condense stitching 
+!---Condense stitching
 stitcher%full=.TRUE.
 stitcher%skip=.TRUE.
 stitcher%nbe=0

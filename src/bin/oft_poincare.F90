@@ -28,7 +28,7 @@
 !--------------------------------------------------------------------------------
 PROGRAM poincare_trace
 !---Base
-USE ISO_FORTRAN_ENV, ONLY: IOSTAT_END
+USE, INTRINSIC :: ISO_FORTRAN_ENV, ONLY: IOSTAT_END
 USE oft_base
 !--Grid
 USE oft_mesh_type, ONLY: mesh_findcell

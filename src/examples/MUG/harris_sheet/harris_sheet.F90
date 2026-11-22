@@ -31,7 +31,7 @@ REAL(r8) :: L_x = 2.d0 !< Box length in x
 REAL(r8) :: L_z = 2.d0 !< Box length in z
 CONTAINS
 !! To set the initial conditions we define a set of functions
-!! 
+!!
 !! The non-uniform initial conditions for this case is given by
 !! \f[ n_0 = (cosh(z / \lambda))^{-2} + n_{\infty} \f]
 !! \f[ B_0 = tanh(z / \lambda) \hat{x} \f]

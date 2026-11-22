@@ -50,7 +50,7 @@ PROGRAM test_taylor_green_2d
 !     p(t) = (rho/4)*[cos(4*pi*x) + cos(4*pi*y)] * exp(-16*pi^2*nu*t)
 !
 ! NOTE: the incompressible solver defaults to a direct LU preconditioner, which
-! cannot factorize the periodic Jacobian . This test must therefore be run 
+! cannot factorize the periodic Jacobian . This test must therefore be run
 !  with an XML preconditioner definition wrapping the LU in block-Jacobi
 !---------------------------------------------------------------------------
 !---Runtime

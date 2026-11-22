@@ -15,7 +15,7 @@
 !! @ingroup doxy_oft_python
 !---------------------------------------------------------------------------------
 MODULE oft_base_f
-USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr, c_funptr, c_associated, c_f_procpointer
 USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh, oft_mesh, bmesh_findcell, mesh_findcell

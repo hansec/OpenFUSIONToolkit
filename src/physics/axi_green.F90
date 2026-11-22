@@ -46,7 +46,7 @@ REAL(r8), PARAMETER :: C1=1.d0/24.d0
 REAL(r8), PARAMETER :: C2=.1d0
 REAL(r8), PARAMETER :: C3=3.d0/44.d0
 REAL(r8), PARAMETER :: C4=1.d0/14.d0
-IF((MIN(x,y,z).LT.0.d0).OR.(MIN(x+y,x+z,y+z).LT.loc_tiny).OR.(MAX(x,y,z).GT.loc_big))THEN
+IF((MIN(x,y,z)<0.d0).OR.(MIN(x+y,x+z,y+z)<loc_tiny).OR.(MAX(x,y,z)>loc_big))THEN
   CALL oft_abort('invalid arguments','rf',__FILE__)
 END IF
 xt=x
@@ -65,7 +65,7 @@ DO
   delx=(ave-xt)/ave
   dely=(ave-yt)/ave
   delz=(ave-zt)/ave
-  IF(MAX(ABS(delx),ABS(dely),ABS(delz)).LE.ERRTOL)EXIT
+  IF(MAX(ABS(delx),ABS(dely),ABS(delz))<=ERRTOL)EXIT
 END DO
 e2=delx*dely-delz**2
 e3=delx*dely*delz
@@ -92,7 +92,7 @@ REAL(r8), PARAMETER :: C3=9.d0/22.d0
 REAL(r8), PARAMETER :: C4=3.d0/26.d0
 REAL(r8), PARAMETER :: C5=0.25d0*C3
 REAL(r8), PARAMETER :: C6=1.5d0*C4
-IF((MIN(x,y).LT.0.d0).OR.(MIN(x+y,z).LT.loc_tiny).OR.(MAX(x,y,z).GT.loc_big))THEN
+IF((MIN(x,y)<0.d0).OR.(MIN(x+y,z)<loc_tiny).OR.(MAX(x,y,z)>loc_big))THEN
   CALL oft_abort('invalid arguments','rd',__FILE__)
 END IF
 xt=x
@@ -115,7 +115,7 @@ DO
   delx=(ave-xt)/ave
   dely=(ave-yt)/ave
   delz=(ave-zt)/ave
-  IF(MAX(ABS(delx),ABS(dely),ABS(delz)).LE.ERRTOL)EXIT
+  IF(MAX(ABS(delx),ABS(dely),ABS(delz))<=ERRTOL)EXIT
 END DO
 ea=delx*dely
 eb=delz*delz
@@ -171,8 +171,8 @@ IF(k2 > (1.d0 - ROFF))THEN
   k2 = 1.d0 - ROFF
 END IF
 k=SQRT(k2)
-ellipk = ellf(pi/2.d0,k);
-ellipe = elle(pi/2.d0,k);
+ellipk = ellf(pi/2.d0,k)
+ellipe = elle(pi/2.d0,k)
 green = -SQRT(r*rc/k2)*((2.d0 - k2)*ellipk-2.d0*ellipe)/(2.d0*pi)
 IF(kextrap>0.d0)green=green*LOG(kextrap)/LOG(1.d0-k2)
 END FUNCTION green

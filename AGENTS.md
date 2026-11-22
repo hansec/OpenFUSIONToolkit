@@ -117,12 +117,26 @@ cd src && python utilities/generate_stack.py -l
 
 This checks that no generated debug stack markers (`#define DEBUG_STACK_*` / `#undef DEBUG_STACK_*` lines added by `generate_stack.py` for debug builds) have been committed to the Fortran sources, and exits non-zero if any are found. Run from the `src/` directory.
 
+### Fortran linting
+
+Fortran code is linted with **fortitude** (`pip install "fortitude-lint<0.11.0"`). Configuration is in `src/fortitude.toml`. Run it through the wrapper script, not `fortitude check` directly:
+
+```bash
+cd src && python utilities/fortitude_lint.py [paths ...] [-- extra fortitude args]
+```
+
+Fortitude does not run the C preprocessor, so the wrapper lints line-preserving copies of the sources in which the `DEBUG_STACK_PUSH`/`DEBUG_STACK_POP` macros are blanked and macros used in `FORMAT` statements are replaced (line numbers in the output still match the original files). Running `fortitude check` directly reports spurious syntax errors and silently drops most other diagnostics in affected files. Automatic fixes are not supported by the wrapper; for fixable rules run `fortitude check --fix --select <rule> <file>` directly on files that do not use those macros, or fix by hand.
+
+Only stable rules are used, selected explicitly: syntax/character errors (`E`), allow-comment hygiene (`FORT`), obsolescent features (`OB`), non-portable kinds and tabs (`PORT012`, `PORT021`, `PORT031`), a set of correctness checks (eg. missing `IMPLICIT NONE`, pointer components without `=> NULL()`, `USE, INTRINSIC ::` for intrinsic modules, labels on `EXIT`/`CYCLE`/`END` in named constructs, non-portable short-circuiting, unreachable code), and style checks consistent with OFT conventions and `.editorconfig` (named `END` statements, trailing whitespace, `==` instead of `.EQ.`, superfluous semicolons). Rules that conflict with OFT style (eg. keyword case, indentation, line length, `1.d0` literals, `USE` without `ONLY`) are not enabled. `src/ext_libs/` is excluded.
+
+To suppress a diagnostic where the code is intentional, add an allow comment on the line before the statement, with a brief reason, eg. `! allow(unreachable-statement)`. Use `per-file-ignores` in `fortitude.toml` only for false positives caused by preprocessing (eg. `IMPLICIT NONE` inside an `#ifdef` block). CI pins fortitude to a tested version range in `lint.yaml`; raise it deliberately when upgrading.
+
 ## CI Workflows (utilizing GitHub actions)
 
 | Workflow | File | Trigger | Purpose |
 |---|---|---|---|
 | **CI Build** | `ci_build.yaml` | push to main, ci_debug; PRs — only when `src/**` (excluding `src/docs/**`) or the workflow file changes | Full matrix build (GCC, Intel, macOS) x (OpenMP, MPICH, OpenMPI) |
-| **Lint** | `lint.yaml` | push to main, PRs | ruff check + Fortran stack check |
+| **Lint** | `lint.yaml` | push to main, PRs | ruff check + Fortran stack check + non-ASCII check + fortitude (Fortran) |
 | **Coverage** | `cov_build.yaml` | push to main, cov_debug; PRs — only when `src/**` (excluding `src/docs/**`) or the codecov/workflow files change | Build with `--coverage`, upload to Codecov |
 | **CD Build and Deployment** | `cd_combined.yaml` | push to main, pypi_release; manual | Release and nightly package/PyPI builds (deploy from `pypi_release`) |
 | **Container CD Build and Deployment** | `container_cd.yaml` | push to container_release; manual | Container release builds (deploy from `container_release`) |

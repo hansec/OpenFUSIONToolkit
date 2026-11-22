@@ -304,7 +304,7 @@ CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
 REAL(r8), intent(inout) :: alam !< Eigenvalue
 INTEGER(i4) :: i,j,ind,nslice,neigs,comm
 INTEGER(i4) :: ido,ldv,lworkl,info
-INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(14)
+INTEGER(i4) :: iparam(11),ipntr(14)
 INTEGER(i4), POINTER, DIMENSION(:) :: emap
 REAL(r8) :: sigmar,sigmai
 REAL(r8), POINTER, DIMENSION(:) :: vslice
@@ -525,7 +525,7 @@ CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
 REAL(r8), intent(inout) :: alam !< Eigenvalue
 INTEGER(i4) :: i,j,comm
 INTEGER(i4) :: ido,nslice,nev,ncv,ldv,lworkl,info
-INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(14)
+INTEGER(i4) :: iparam(11),ipntr(14)
 REAL(r8) :: sigmar,sigmai
 REAL(r8), POINTER, DIMENSION(:) :: vslice
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:) :: workd,workl
@@ -702,7 +702,7 @@ CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
 REAL(r8), intent(inout) :: alam !< Eigenvalue
 INTEGER(i4) :: i,j,comm
 INTEGER(i4) :: ido,nslice,ldv,lworkl,info
-INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(11)
+INTEGER(i4) :: iparam(11),ipntr(11)
 REAL(r8) :: sigma
 REAL(r8), POINTER, DIMENSION(:) :: vslice
 REAL(r8), ALLOCATABLE, TARGET, DIMENSION(:) :: workd,workl
@@ -914,7 +914,7 @@ CLASS(oft_vector), intent(inout) :: u !< Guess field/Eigenvector
 REAL(r8), intent(inout) :: alam !< Eigenvalue
 INTEGER(i4) :: i,j,comm
 INTEGER(i4) :: ido,nslice,nev,ncv,ldv,lworkl,info
-INTEGER(i4), DIMENSION(:) :: iparam(11),ipntr(11)
+INTEGER(i4) :: iparam(11),ipntr(11)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: emap
 REAL(r8) :: sigma
 REAL(r8), POINTER, DIMENSION(:) :: vslice

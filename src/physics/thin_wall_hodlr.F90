@@ -104,7 +104,7 @@ end type oft_tw_hodlr_op
 TYPE :: cmat_container
   COMPLEX(c8), POINTER, DIMENSION(:,:) :: M => NULL() !< Double precision matrix
   COMPLEX(c4), POINTER, DIMENSION(:,:) :: M4 => NULL() !< Single precision matrix
-END TYPE
+END TYPE cmat_container
 !------------------------------------------------------------------------------
 !> Complex block-Jacobi preconditioner for ThinCurr HODLR matrices
 !------------------------------------------------------------------------------
@@ -128,7 +128,7 @@ END TYPE oft_tw_hodlr_bjpre
 TYPE :: rmat_container
   REAL(r8), POINTER, DIMENSION(:,:) :: M => NULL() !< Double precision matrix
   REAL(r4), POINTER, DIMENSION(:,:) :: M4 => NULL() !< Single precision matrix
-END TYPE
+END TYPE rmat_container
 !------------------------------------------------------------------------------
 !> Real block-Jacobi preconditioner for ThinCurr HODLR matrices
 !------------------------------------------------------------------------------

@@ -1,0 +1,58 @@
+#------------------------------------------------------------------------------
+# Configuration for the fortitude Fortran linter
+#
+# Run with "python utilities/fortitude_lint.py" (from "src"), which handles
+# OFT's preprocessor macros before calling fortitude. See the "Linting"
+# section of AGENTS.md for the rationale behind the rules selected here.
+#------------------------------------------------------------------------------
+[check]
+# Only stable rules are used, to keep results consistent between versions
+preview = false
+# Rules are selected explicitly (by category or code) instead of using the
+# fortitude defaults, as many default style rules conflict with OFT conventions
+select = [
+  # Parse errors and invalid characters (E), and correct use of allow comments (FORT)
+  "E",
+  "FORT",
+  # Obsolescent and deleted language features (eg. COMMON, labelled DO, arithmetic IF)
+  "OB",
+  # Non-portable kind specifications (eg. "REAL*8", "1.0_8") and tabs
+  "PORT012",
+  "PORT021",
+  "PORT031",
+  # Correctness checks
+  "C001",  # implicit-typing: missing "IMPLICIT NONE" in modules/programs
+  "C051",  # trailing-backslash
+  "C091",  # external-procedure: use of the "EXTERNAL" statement
+  "C092",  # procedure-not-in-module
+  "C101",  # missing-default-pointer-initalisation: pointer components without "=> NULL()"
+  "C122",  # missing-intrinsic: "USE, INTRINSIC ::" for intrinsic modules
+  "C141",  # missing-exit-or-cycle-label: EXIT/CYCLE in named loops must name the loop
+  "C143",  # missing-end-label: END DO/IF/... for named constructs must name the construct
+  "C151",  # misleading-inline-if-semicolon
+  "C161",  # nonportable-shortcircuit-inquiry: eg. "IF(PRESENT(x).AND.x)"
+  "C182",  # multiple-allocations-with-stat
+  "C191",  # unreachable-statement
+  # Modernization checks
+  "MOD021",  # deprecated-relational-operator: ".EQ." -> "=="
+  "MOD041",  # out-of-line-attribute
+  # Style checks consistent with OFT conventions and .editorconfig
+  "S061",  # unnamed-end-statement: END SUBROUTINE/FUNCTION/MODULE/... should be named
+  "S071",  # missing-double-colon
+  "S081",  # superfluous-semicolon
+  "S091",  # non-standard-file-extension
+  "S101",  # trailing-whitespace
+  "S232",  # keyword-has-whitespace: eg. "IN OUT", "GO TO"
+  "S261",  # inconsistent-array-declaration
+]
+# Bundled third-party sources are not modified (see AGENTS.md)
+exclude = ["ext_libs"]
+# Apply exclusions even to paths passed explicitly on the command line
+force-exclude = true
+
+[check.per-file-ignores]
+# "IMPLICIT NONE" is inside an "#ifdef" block, which fortitude does not recognize
+"lin_alg/oft_arpack.F90" = ["C001"]
+"lin_alg/petsc_la.F90" = ["C001"]
+"lin_alg/petsc_solvers.F90" = ["C001"]
+"tests/lin_alg/test_arpack.F90" = ["C001"]

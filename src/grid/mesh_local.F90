@@ -72,7 +72,7 @@ integer(i4) :: i,j
 real(r8) :: vol,f(4),gop(3,4)
 DEBUG_STACK_PUSH
 if(associated(self%cv))then
-  if(size(self%cv).NE.self%nc)allocate(self%cv(self%nc),self%vv(self%np))
+  if(size(self%cv)/=self%nc)allocate(self%cv(self%nc),self%vv(self%np))
 else
   allocate(self%cv(self%nc),self%vv(self%np))
 endif
@@ -923,7 +923,7 @@ real(r8) :: area,f(3),gop(3,4),norm(3)
 IF(self%nc==0)RETURN
 DEBUG_STACK_PUSH
 if(ASSOCIATED(self%ca))then
-  if(SIZE(self%ca).NE.self%nc)ALLOCATE(self%ca(self%nc),self%va(self%np))
+  if(SIZE(self%ca)/=self%nc)ALLOCATE(self%ca(self%nc),self%va(self%np))
 else
   allocate(self%ca(self%nc),self%va(self%np))
 endif

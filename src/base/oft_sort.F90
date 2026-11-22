@@ -95,25 +95,25 @@ INTERFACE
     IMPLICIT NONE
     INTEGER(c_int), INTENT(in) :: n
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: list
-  END SUBROUTINE
+  END SUBROUTINE int_sort44
   SUBROUTINE int_sort48(list,n) BIND(C)
     IMPORT c_int, c_long
     IMPLICIT NONE
     INTEGER(c_long), INTENT(in) :: n
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: list
-  END SUBROUTINE
+  END SUBROUTINE int_sort48
   SUBROUTINE int_sort84(list,n) BIND(C)
     IMPORT c_int, c_long
     IMPLICIT NONE
     INTEGER(c_int), INTENT(in) :: n
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: list
-  END SUBROUTINE
+  END SUBROUTINE int_sort84
   SUBROUTINE int_sort88(list,n) BIND(C)
     IMPORT c_long
     IMPLICIT NONE
     INTEGER(c_long), INTENT(in) :: n
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: list
-  END SUBROUTINE
+  END SUBROUTINE int_sort88
   PURE SUBROUTINE int_search44(list,n,item,result) BIND(C)
     IMPORT c_int
     IMPLICIT NONE
@@ -121,7 +121,7 @@ INTERFACE
     INTEGER(c_int), DIMENSION(n), INTENT(in) :: list
     INTEGER(c_int), INTENT(in) :: item
     INTEGER(c_int), INTENT(in) :: result
-  END SUBROUTINE
+  END SUBROUTINE int_search44
   PURE SUBROUTINE int_search48(list,n,item,result) BIND(C)
     IMPORT c_int, c_long
     IMPLICIT NONE
@@ -129,7 +129,7 @@ INTERFACE
     INTEGER(c_int), DIMENSION(n), INTENT(in) :: list
     INTEGER(c_int), INTENT(in) :: item
     INTEGER(c_long), INTENT(in) :: result
-  END SUBROUTINE
+  END SUBROUTINE int_search48
   PURE SUBROUTINE int_search84(list,n,item,result) BIND(C)
     IMPORT c_int, c_long
     IMPLICIT NONE
@@ -137,7 +137,7 @@ INTERFACE
     INTEGER(c_long), DIMENSION(n), INTENT(in) :: list
     INTEGER(c_long), INTENT(in) :: item
     INTEGER(c_int), INTENT(in) :: result
-  END SUBROUTINE
+  END SUBROUTINE int_search84
   PURE SUBROUTINE int_search88(list,n,item,result) BIND(C)
     IMPORT c_long
     IMPLICIT NONE
@@ -145,7 +145,7 @@ INTERFACE
     INTEGER(c_long), DIMENSION(n), INTENT(in) :: list
     INTEGER(c_long), INTENT(in) :: item
     INTEGER(c_long), INTENT(in) :: result
-  END SUBROUTINE
+  END SUBROUTINE int_search88
   !> @endcond
 #endif
 END INTERFACE
@@ -163,7 +163,7 @@ INTERFACE sort_matrix
     INTEGER(c_int), INTENT(in) :: n !< Number of rows in matrix
     INTEGER(c_int), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
-  END SUBROUTINE
+  END SUBROUTINE int_sort_matrix44
   !---------------------------------------------------------------------------------
   !> Integer(4)/Integer(8) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
@@ -173,7 +173,7 @@ INTERFACE sort_matrix
     INTEGER(c_long), INTENT(in) :: n !< Number of rows in matrix
     INTEGER(c_int), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
-  END SUBROUTINE
+  END SUBROUTINE int_sort_matrix48
   !---------------------------------------------------------------------------------
   !> Integer(8)/Integer(4) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
@@ -183,7 +183,7 @@ INTERFACE sort_matrix
     INTEGER(c_int), INTENT(in) :: n !< Number of rows in matrix
     INTEGER(c_long), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
-  END SUBROUTINE
+  END SUBROUTINE int_sort_matrix84
   !---------------------------------------------------------------------------------
   !> Integer(8)/Integer(8) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
@@ -193,7 +193,7 @@ INTERFACE sort_matrix
     INTEGER(c_long), INTENT(in) :: n !< Number of rows in matrix
     INTEGER(c_long), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
-  END SUBROUTINE
+  END SUBROUTINE int_sort_matrix88
   !---------------------------------------------------------------------------------
   !> Real(4)/Integer(4) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
@@ -203,7 +203,7 @@ INTERFACE sort_matrix
     INTEGER(c_int), INTENT(in) :: n !< Number of rows in matrix
     REAL(c_double), DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
     INTEGER(c_int), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
-  END SUBROUTINE
+  END SUBROUTINE real_sort_matrix4
   !---------------------------------------------------------------------------------
   !> Real(8)/Integer(8) implementation of @ref sort_matrix
   !---------------------------------------------------------------------------------
@@ -213,7 +213,7 @@ INTERFACE sort_matrix
     INTEGER(c_long), INTENT(in) :: n !< Number of rows in matrix
     REAL(c_double),  DIMENSION(n,2), INTENT(inout) :: matrix !< Matrix to sort [2,n]
     INTEGER(c_long), DIMENSION(n), INTENT(inout) :: ind !< Index vector [n]
-  END SUBROUTINE
+  END SUBROUTINE real_sort_matrix8
 END INTERFACE sort_matrix
 PUBLIC sort_matrix
 CONTAINS

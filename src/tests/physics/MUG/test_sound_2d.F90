@@ -43,7 +43,7 @@ REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
 val=(1.d0+delta*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam))**(2.d0/5.d0)
 END SUBROUTINE temp_sound
-END MODULE sound_2d_helpers 
+END MODULE sound_2d_helpers
 
 PROGRAM test_sound_2d
 !---Runtime

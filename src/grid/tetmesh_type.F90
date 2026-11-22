@@ -66,7 +66,7 @@ TYPE, PRIVATE :: opt_targets
   integer(i4) :: cell = 0
   real(r8) :: pt(3) = [0.d0,0.d0,0.d0]
   CLASS(oft_tetmesh), PRIVATE, POINTER :: mesh => NULL() !< Active mesh for high order find_cell
-END TYPE
+END TYPE opt_targets
 TYPE(opt_targets) :: active_targets !< Active target values/ptrs for external function calls
 !$omp threadprivate(active_targets)
 !---

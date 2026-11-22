@@ -522,7 +522,7 @@ nfg=nloc(2)
 !---Loop over processors to determine output index counts
 IF(.NOT.self%fullmesh)THEN
 #ifdef HAVE_MPI
-  do while(l.NE.oft_env%rank)
+  do while(l/=oft_env%rank)
     call MPI_SEND(nloc,6,OFT_MPI_I8,j,1,oft_env%COMM,ierr)
     call MPI_RECV(nloc,6,OFT_MPI_I8,k,1,oft_env%COMM,stat,ierr)
 
@@ -549,9 +549,9 @@ self%save%nel = self%save%nel + self%save%neb ! Set last edge index
 SELECT TYPE(self)
 CLASS IS(oft_mesh)
   self%save%nfmax = nfmax
-  self%save%nfb = nfb       
+  self%save%nfb = nfb
   self%save%nfl = nfl + nfb ! Set last face index
-  self%global%nf = nfg  
+  self%global%nf = nfg
 END SELECT
 DEBUG_STACK_POP
 end subroutine mesh_global_save
@@ -619,7 +619,7 @@ CALL oft_mpi_barrier(ierr) ! Wait for all processes
 !---Loop over processors to find global igrnd
 c=r2min
 #ifdef HAVE_MPI
-DO WHILE(l.NE.oft_env%rank)
+DO WHILE(l/=oft_env%rank)
   CALL MPI_SEND(c,1,OFT_MPI_R8,j,1,oft_env%COMM,ierr)
   CALL MPI_RECV(c,1,OFT_MPI_R8,k,1,oft_env%COMM,stat,ierr)
   !---Test if igrnd is on local mesh and update

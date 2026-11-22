@@ -552,7 +552,7 @@ a=lptmp
 CALL oft_mpi_barrier(ierr) ! Wait for all processes
 !---Loop over processors to find shared points
 #ifdef HAVE_MPI
-do while(l.NE.oft_env%rank)
+do while(l/=oft_env%rank)
   CALL MPI_ISEND(a,np,OFT_MPI_I4,j,1,oft_env%COMM,req,ierr)
   IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','mesh_global_proccon',__FILE__)
   CALL MPI_RECV(c,np,OFT_MPI_I4,k,1,oft_env%COMM,stat,ierr)
@@ -1090,7 +1090,7 @@ IF(self%periodic%nper>0)THEN
           !$omp end critical
           neel=neel+2
           IF(set_gbe)THEN ! Edge is not on global boundary
-            self%global%gbe(self%lbe(m))=.FALSE. 
+            self%global%gbe(self%lbe(m))=.FALSE.
             self%global%gbe(self%lbe(mm))=.FALSE.
           END IF
           self%estitch%leo(mm) = .FALSE.

@@ -214,7 +214,7 @@ eflag=0.d0
 fflag=0.d0
 nbad=0
 cell_loop: DO cell=1,mesh%nc
-  IF(.NOT.cell_is_curved(mesh,cell))CYCLE
+  IF(.NOT.cell_is_curved(mesh,cell))CYCLE cell_loop
   vol_min=1.d99
   vol_max=-1.d99
   DO i=1,nx

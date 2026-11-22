@@ -4384,7 +4384,7 @@ IF(tloc%cell/=cell)THEN
   tloc%cell=cell
 END IF
 !---
-lf0=0.d0; dlf0=0.d0; b0=0.d0; j0=0.d0;
+lf0=0.d0; dlf0=0.d0; b0=0.d0; j0=0.d0
 Te=0.d0; dTe=0.d0
 N2=0.d0; dN2=0.d0
 J2=0.d0; J2c=0.d0

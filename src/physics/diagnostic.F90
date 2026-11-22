@@ -401,7 +401,7 @@ l=k
 CALL oft_mpi_barrier(ierr) ! Wait for all processes
 !---Loop over processors to find global igrnd
 #ifdef HAVE_MPI
-DO WHILE(l.NE.oft_env%rank)
+DO WHILE(l/=oft_env%rank)
   CALL MPI_SEND(distout,npts,OFT_MPI_R8,j,1,oft_env%COMM,ierr)
   CALL MPI_RECV(distin,npts,OFT_MPI_R8,k,1,oft_env%COMM,stat,ierr)
   distout=distin

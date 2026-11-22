@@ -42,7 +42,7 @@ IMPLICIT NONE
 !> Interpolate a surface Lagrange field
 !------------------------------------------------------------------------------
 type, extends(bfem_interp) :: oft_lag_brinterp
-  logical :: own_vals = .TRUE. !< 
+  logical :: own_vals = .TRUE. !<
   class(oft_vector), pointer :: u => NULL() !< Field for interpolation
   real(r8), pointer, dimension(:) :: vals => NULL() !< Local values
   class(oft_scalar_bfem), pointer :: lag_rep => NULL() !< Lagrange FE representation
@@ -118,7 +118,7 @@ end type oft_blag_zerogrnd
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(oft_blag_zerob) :: oft_blag_zeroe
-  INTEGER(i4), POINTER, DIMENSION(:) :: parent_geom_flag
+  INTEGER(i4), POINTER, DIMENSION(:) :: parent_geom_flag => NULL()
 contains
   procedure :: apply => zeroe_apply
 end type oft_blag_zeroe
@@ -517,7 +517,7 @@ do i=1,lag_rep%mesh%nc
   !---Add local values to global matrix (atomically)
   !$omp ordered
   call mat%atomic_add_values(j,j,mop,lag_rep%nce,lag_rep%nce)
-  !$omp end ordered 
+  !$omp end ordered
 end do
 deallocate(j,rop,mop)
 !$omp end parallel
@@ -762,7 +762,7 @@ CLASS(oft_vector), INTENT(inout) :: z !< Field projected onto boundary Lagrange 
 INTEGER(i4) :: i,m,k,jc,cell,ptmap(3)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j
 REAL(r8) :: vol,det,etmp(3),sgop(3,3),rop
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vloc 
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 REAL(r8), POINTER, DIMENSION(:) :: xloc,yloc,zloc
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
