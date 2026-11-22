@@ -502,6 +502,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DBLA_VENDOR:STRING={0}".format(mydict["BLAS_VENDOR"]))
     elif mydict.get("BLAS_ACCELERATE",False):
         cmake_lines.append("-DOFT_LAPACK_LIBRARIES:STRING={0}".format(mydict["LAPACK_LIB_PATH"]))
+        cmake_lines.append("-DOFT_USE_ACCELERATE_SPARSE:BOOL=TRUE")
     if "ARPACK_ROOT" in mydict:
         cmake_lines.append("-DOFT_ARPACK_ROOT:PATH={0}".format(mydict["ARPACK_ROOT"]))
     if "LIBXML2_ROOT" in mydict:
@@ -2356,7 +2357,7 @@ group.add_argument("--ref_blas", action="store_true", default=False, help="Use r
 group.add_argument("--blas_lapack_wrapper", action="store_true", default=False, help="BLAS/LAPACK included in compilers")
 group.add_argument("--use_mkl", action="store_true", default=False, help="Use MKL BLAS/LAPACK instead of OpenBLAS")
 group.add_argument("--mkl_root", default=None, type=str, help="MKL root directory path (required for MKL)")
-group.add_argument("--use_accelerate", action="store_true", default=False, help="Use macOS Accelerate BLAS/LAPACK instead of OpenBLAS (macOS >= 13.3)")
+group.add_argument("--use_accelerate", action="store_true", default=False, help="Use macOS Accelerate BLAS/LAPACK instead of OpenBLAS (macOS >= 13.3), also enables the Accelerate sparse LU solver interface (macOS >= 15.5)")
 group.add_argument("--blas_lib_path", default=None, type=str, help="Path to pre-built BLAS library")
 group.add_argument("--lapack_lib_path", default=None, type=str, help="Path to pre-built LAPACK library")
 #

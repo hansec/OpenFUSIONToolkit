@@ -50,7 +50,7 @@ with `build_libs.py`), in which case the STRUMPACK options below also apply.
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
-| `package`  | Solver package to use: native {super, superd, umfpack, mumps, mkl, lapack, strumpack}, PETSc {petsc, super, superd, umfpack, mumps} | str | No |
+| `package`  | Solver package to use: native {super, superd, umfpack, mumps, mkl, lapack, strumpack, accelerate}, PETSc {petsc, super, superd, umfpack, mumps} | str | No |
 
 Native only options
 
@@ -76,6 +76,21 @@ refactorization with an unchanged non-zero pattern reuses the reordering and MC6
 last full factorization (local and distributed solves). STRUMPACK only pivots within each front, so after large
 changes in matrix values the solution can be inaccurate unless a full factorization is requested
 (`update(.TRUE.)`, as for a change in the non-zero pattern), even though the pattern has not changed.
+
+Native Apple Accelerate options, in an `<accelerate>` group (omitted values use the Accelerate defaults)
+
+| Group           | Description | Type      | List |
+|-----------------|-------------|-----------|------|
+| `factorization` | LU variant {lu, lu_unpivoted, lu_spp, lu_tpp} (default: lu, currently threshold partial pivoting) | str | No |
+| `ordering`      | Fill-reducing ordering {default, amd, metis, mtmetis} (default: MT-METIS) | str | No |
+| `scaling`       | Matrix scaling {default, equilibrate, hungarian} (default: none) | str | No |
+
+\note The `accelerate` package uses the sparse LU factorization in Apple's Accelerate framework and is
+only available on macOS. It is enabled when OFT is built with `build_libs.py --use_accelerate`
+(`OFT_USE_ACCELERATE_SPARSE` in CMake) and requires macOS 15.5 or later at runtime. The `mtmetis` ordering
+and `hungarian` scaling require macOS 26 or later. A refactorization with an unchanged non-zero pattern
+reuses the ordering from the last full factorization (a change in the pattern is detected automatically).
+Iterative refinement is not supported.
 
 PETSc only options
 

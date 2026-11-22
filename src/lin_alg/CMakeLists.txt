@@ -21,6 +21,24 @@ set( MGMT_OBJS
   solver_utils.F90
 )
 
+# Accelerate sparse interface is compiled with Apple clang, and pre-linked with the
+# clang runtime (availability checks), as the Accelerate headers require clang extensions
+if( OFT_ACCELERATE_SPARSE_FOUND )
+  set( ACC_BRIDGE_OBJ ${CMAKE_CURRENT_BINARY_DIR}/accelerate_bridge.o )
+  add_custom_command(
+    OUTPUT ${ACC_BRIDGE_OBJ}
+    COMMAND ${OFT_APPLE_CLANG} ${OFT_APPLE_CLANG_FLAGS} -O2 -Wall -DHAVE_ACCELERATE_SPARSE
+      -c ${CMAKE_CURRENT_SOURCE_DIR}/accelerate_bridge.c -o accelerate_bridge_c.o
+    COMMAND ${OFT_APPLE_LD} -r accelerate_bridge_c.o ${OFT_APPLE_CLANG_RT} -o ${ACC_BRIDGE_OBJ}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/accelerate_bridge.c
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Building Accelerate sparse interface with Apple clang"
+    VERBATIM
+  )
+  set_source_files_properties( ${ACC_BRIDGE_OBJ} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE )
+  set( SOLVER_OBJS ${SOLVER_OBJS} ${ACC_BRIDGE_OBJ} )
+endif()
+
 add_library( oftla
   ${LA_OBJS}
   ${SOLVER_OBJS}

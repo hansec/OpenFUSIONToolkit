@@ -97,6 +97,12 @@ IF((sol_type==6).AND.dist_lu.AND.(oft_env%nprocs>1))THEN
   CALL oft_finalize
 END IF
 #endif
+#if !defined( HAVE_ACCELERATE_SPARSE )
+IF(sol_type==7)THEN
+  WRITE(*,*)'SKIP TEST: 7'
+  CALL oft_finalize
+END IF
+#endif
 !---Setup grid
 CALL multigrid_construct(mg_mesh)
 IF(mg_mesh%mesh%cad_type/=mesh_cube_id)CALL oft_abort('Wrong mesh type, test for CUBE only.','main',__FILE__)
@@ -193,6 +199,8 @@ ELSE
       linv_pre_lu%package='mkl'
     CASE(6)
       linv_pre_lu%package='strumpack'
+    CASE(7)
+      linv_pre_lu%package='accelerate'
     CASE DEFAULT
       CALL oft_abort("Unknown LU solver package","test_lap",__FILE__)
   END SELECT

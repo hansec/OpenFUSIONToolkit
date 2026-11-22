@@ -12,6 +12,7 @@
 !! - MUMPS
 !! - PARDISO (MKL interface)
 !! - STRUMPACK
+!! - Apple Accelerate (macOS >= 15.5)
 !!
 !! @note Local solves are supported by all packages. Solves of the full distributed
 !! system are supported by SuperLU-DIST, MUMPS, and STRUMPACK (if built with MPI support)
@@ -121,6 +122,27 @@ TYPE :: strumpack_struc
   INTEGER(i4), POINTER, DIMENSION(:) :: lc => NULL() !< Column indices (0-based indices)
 END TYPE strumpack_struc
 !------------------------------------------------------------------------------
+!> Apple Accelerate sparse LU solver information
+!!
+!! Options left at their default values (`-1`) use the Accelerate defaults.
+!!
+!! @note A refactorization with the same non-zero pattern (`update(.FALSE.)`) reuses the
+!! symbolic factorization (ordering) and recomputes the numeric factors, including pivoting.
+!! A full factorization is performed automatically if the non-zero pattern has changed.
+!!
+!! @note Factorizations are thread-safe, but the symbolic (ordering) phase is serialized
+!! across threads to avoid crashes in Accelerate (observed on macOS 27.2).
+!------------------------------------------------------------------------------
+TYPE :: accelerate_struc
+  INTEGER(i4) :: fact_type = -1 !< Factorization type (0 -> LU [default, currently TPP], 1 -> unpivoted LU,
+  !! 2 -> LU with supernodal partial pivoting, 3 -> LU with threshold partial pivoting)
+  INTEGER(i4) :: order = -1 !< Fill-reducing ordering (0 -> default [MT-METIS on macOS >= 26], 2 -> AMD,
+  !! 3 -> METIS, 5 -> MT-METIS [macOS >= 26])
+  INTEGER(i4) :: scaling = -1 !< Matrix scaling (0 -> default [none], 2 -> inf-norm equilibration,
+  !! 3 -> Hungarian scaling [macOS >= 26])
+  TYPE(C_PTR) :: f_factors = C_NULL_PTR !< Accelerate factorization pointer
+END TYPE accelerate_struc
+!------------------------------------------------------------------------------
 !> Pardiso solver information
 !------------------------------------------------------------------------------
 TYPE :: pardiso_struc
@@ -190,12 +212,15 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   INTEGER(i4), POINTER, DIMENSION(:) :: ipiv => NULL() !< Row pivot array ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: atmp => NULL() !< Local dense matrix ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL() !< Storage for additional RHS data
-  CHARACTER(LEN=9) :: package = DEF_LU_PACK !< Factorization package
+  CHARACTER(LEN=10) :: package = DEF_LU_PACK !< Factorization package
 #if defined( HAVE_SUPERLU ) || defined( HAVE_SUPERLU_DIST ) || defined( HAVE_UMFPACK )
   TYPE(superlu_struc) :: superlu_struct !< SuperLU solver information
 #endif
 #ifdef HAVE_STRUMPACK
   TYPE(strumpack_struc) :: strumpack_struct !< STRUMPACK solver information
+#endif
+#ifdef HAVE_ACCELERATE_SPARSE
+  TYPE(accelerate_struc) :: accelerate_struct !< Apple Accelerate solver information
 #endif
 #ifdef HAVE_MKL
   TYPE(pardiso_struc) :: pardiso_struct !< MKL/PARDISO solver information
@@ -454,6 +479,31 @@ INTERFACE
   INTEGER(c_int), INTENT(inout) :: info !< Solver return status (not currently used)
   END SUBROUTINE oft_umfpack_dgssv
 #endif
+#ifdef HAVE_ACCELERATE_SPARSE
+!------------------------------------------------------------------------------
+!> Interface to Apple Accelerate sparse LU solver
+!------------------------------------------------------------------------------
+  SUBROUTINE oft_accelerate_dgssv(iopt,n,nnz,nrhs,values,colind, &
+    rowptr,b,ldb,f_factors,fact_type,order,scaling,info) BIND(C,NAME="oft_accelerate_dgssv_c")
+  IMPORT c_int, c_double, c_ptr
+  INTEGER(c_int), VALUE, INTENT(in) :: iopt !< Operation control (1 -> performs LU decomposition for the
+  !! first time, 2 -> performs triangular solve, 3 -> refactor matrix with the
+  !! same non-zero pattern, 4 -> free all the storage in the end)
+  INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of rows
+  INTEGER(c_int), VALUE, INTENT(in) :: nnz !< Number of non-zeros
+  INTEGER(c_int), VALUE, INTENT(in) :: nrhs !< Number of RHS to solve
+  REAL(c_double), DIMENSION(nnz), INTENT(in) :: values !< Matrix values in CRS format [nnz]
+  INTEGER(c_int), DIMENSION(nnz), INTENT(in) :: colind !< Column indices in CRS format (1-based) [nnz]
+  INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind (1-based) [n+1]
+  REAL(c_double), DIMENSION(ldb,nrhs), INTENT(inout) :: b !< Right hand side -> overwritten with solution [ldb,nrhs]
+  INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Lowest dimension of `b`
+  TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to Accelerate internal data storage
+  INTEGER(c_int), VALUE, INTENT(in) :: fact_type !< Factorization type (see @ref accelerate_struc)
+  INTEGER(c_int), VALUE, INTENT(in) :: order !< Fill-reducing ordering (see @ref accelerate_struc)
+  INTEGER(c_int), VALUE, INTENT(in) :: scaling !< Matrix scaling (see @ref accelerate_struc)
+  INTEGER(c_int), INTENT(inout) :: info !< Solver return status (0 -> success)
+  END SUBROUTINE oft_accelerate_dgssv
+#endif
 #ifdef HAVE_MKL
 !------------------------------------------------------------------------------
 !> Interface to MKL iLU0 solver
@@ -614,6 +664,10 @@ IF(.NOT.self%initialized)THEN
     CASE("strumpack")
 #if !defined(HAVE_STRUMPACK)
       CALL oft_abort('OFT not compiled with STRUMPACK','lusolver_apply',__FILE__)
+#endif
+    CASE("accelerate")
+#if !defined(HAVE_ACCELERATE_SPARSE)
+      CALL oft_abort('OFT not compiled with Accelerate sparse solvers','lusolver_apply',__FILE__)
 #endif
     CASE("mkl")
 #ifdef HAVE_MKL
@@ -793,6 +847,27 @@ CASE("superd")
 #else
     CALL oft_abort('OFT not compiled with STRUMPACK','lusolver_apply',__FILE__)
 #endif
+  CASE("accelerate")
+#ifdef HAVE_ACCELERATE_SPARSE
+    IF(self%iter_refine)CALL oft_abort('Iterative refinement not supported (Accelerate)','lusolver_apply',__FILE__)
+    IF(self%refactor)THEN
+      mode=3
+      IF(self%update_graph)mode=1
+      CALL oft_accelerate_dgssv(mode,A_native%nr,A_native%nnz,nrhs,mat_vals,A_native%lc,A_native%kr, &
+        vals,ldb,self%accelerate_struct%f_factors,self%accelerate_struct%fact_type, &
+        self%accelerate_struct%order,self%accelerate_struct%scaling,ierr)
+      IF(ierr/=0)CALL oft_abort('Factorization failed (Accelerate)','lusolver_apply',__FILE__)
+      self%refactor=.FALSE.
+      self%update_graph=.FALSE.
+    END IF
+    mode=2
+    CALL oft_accelerate_dgssv(mode,A_native%nr,A_native%nnz,nrhs,mat_vals,A_native%lc,A_native%kr, &
+      vals,ldb,self%accelerate_struct%f_factors,self%accelerate_struct%fact_type, &
+      self%accelerate_struct%order,self%accelerate_struct%scaling,ierr)
+    IF(ierr/=0)CALL oft_abort('Solve failed (Accelerate)','lusolver_apply',__FILE__)
+#else
+    CALL oft_abort('OFT not compiled with Accelerate sparse solvers','lusolver_apply',__FILE__)
+#endif
   CASE("mkl")
 #ifdef HAVE_MKL
     ALLOCATE(b(A_native%nr,self%nrhs))
@@ -919,6 +994,11 @@ END IF
 CALL xml_get_element(solver_node,"strumpack",current_node,ierr)
 IF(ierr==0)CALL strumpack_setup_xml(self%strumpack_struct,current_node)
 #endif
+#ifdef HAVE_ACCELERATE_SPARSE
+!---Accelerate options
+CALL xml_get_element(solver_node,"accelerate",current_node,ierr)
+IF(ierr==0)CALL accelerate_setup_xml(self%accelerate_struct,current_node)
+#endif
 IF(oft_debug_print(1))THEN
   WRITE(*,'(A)')'LU solver setup:'
   WRITE(*,'(2X,2A)')'- Package:  ',self%package
@@ -933,9 +1013,86 @@ IF(oft_debug_print(1))THEN
     WRITE(*,'(2X,A,I6)')     '- Min sep size:',self%strumpack_struct%min_sep_size
   END IF
 #endif
+#ifdef HAVE_ACCELERATE_SPARSE
+  IF(TRIM(self%package)=='accelerate')THEN
+    WRITE(*,'(2X,A,I4)')     '- Fact type:   ',self%accelerate_struct%fact_type
+    WRITE(*,'(2X,A,I4)')     '- Ordering:    ',self%accelerate_struct%order
+    WRITE(*,'(2X,A,I4)')     '- Scaling:     ',self%accelerate_struct%scaling
+  END IF
+#endif
 END IF
 DEBUG_STACK_POP
 end subroutine lusolver_setup_xml
+#ifdef HAVE_ACCELERATE_SPARSE
+!------------------------------------------------------------------------------
+!> Read Apple Accelerate solver options from XML definition
+!!
+!! Supported elements: `factorization` {lu, lu_unpivoted, lu_spp, lu_tpp},
+!! `ordering` {default, amd, metis, mtmetis}, `scaling` {default, equilibrate, hungarian}
+!------------------------------------------------------------------------------
+subroutine accelerate_setup_xml(self,accelerate_node)
+TYPE(accelerate_struc), INTENT(inout) :: self
+TYPE(xml_node), INTENT(in) :: accelerate_node !< XML node containing Accelerate options
+!---
+TYPE(xml_node) :: current_node
+CHARACTER(LEN=:), ALLOCATABLE :: option_str
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+CALL xml_get_element(accelerate_node,"factorization",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,option_str,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `factorization` node","accelerate_setup_xml",__FILE__)
+  SELECT CASE(TRIM(option_str))
+    CASE("lu")
+      self%fact_type=0
+    CASE("lu_unpivoted")
+      self%fact_type=1
+    CASE("lu_spp")
+      self%fact_type=2
+    CASE("lu_tpp")
+      self%fact_type=3
+    CASE DEFAULT
+      CALL oft_abort('Unknown factorization, must be one of {lu, lu_unpivoted, lu_spp, lu_tpp}', &
+        'accelerate_setup_xml',__FILE__)
+  END SELECT
+END IF
+CALL xml_get_element(accelerate_node,"ordering",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,option_str,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `ordering` node","accelerate_setup_xml",__FILE__)
+  SELECT CASE(TRIM(option_str))
+    CASE("default")
+      self%order=0
+    CASE("amd")
+      self%order=2
+    CASE("metis")
+      self%order=3
+    CASE("mtmetis")
+      self%order=5
+    CASE DEFAULT
+      CALL oft_abort('Unknown ordering, must be one of {default, amd, metis, mtmetis}', &
+        'accelerate_setup_xml',__FILE__)
+  END SELECT
+END IF
+CALL xml_get_element(accelerate_node,"scaling",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,option_str,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `scaling` node","accelerate_setup_xml",__FILE__)
+  SELECT CASE(TRIM(option_str))
+    CASE("default")
+      self%scaling=0
+    CASE("equilibrate")
+      self%scaling=2
+    CASE("hungarian")
+      self%scaling=3
+    CASE DEFAULT
+      CALL oft_abort('Unknown scaling, must be one of {default, equilibrate, hungarian}', &
+        'accelerate_setup_xml',__FILE__)
+  END SELECT
+END IF
+DEBUG_STACK_POP
+end subroutine accelerate_setup_xml
+#endif
 #ifdef HAVE_STRUMPACK
 !------------------------------------------------------------------------------
 !> Read STRUMPACK solver options from XML definition
@@ -1125,6 +1282,13 @@ SELECT CASE(TRIM(self%package))
     CALL strumpack_sparse_call(self%strumpack_struct,mode,nrhs,nrhs,nrhs,rvals,rvals,1,ierr)
     IF(ASSOCIATED(self%strumpack_struct%kr))DEALLOCATE(self%strumpack_struct%kr,self%strumpack_struct%lc)
     self%strumpack_struct%f_factors=C_NULL_PTR
+#endif
+#ifdef HAVE_ACCELERATE_SPARSE
+  CASE("accelerate")
+    mode=4
+    CALL oft_accelerate_dgssv(mode,nrhs,nrhs,nrhs,rvals,ivals,ivals,rvals,1, &
+      self%accelerate_struct%f_factors,-1,-1,-1,ierr)
+    self%accelerate_struct%f_factors=C_NULL_PTR
 #endif
 #ifdef HAVE_MUMPS
   CASE("mumps")
