@@ -1,0 +1,212 @@
+Base release:        v26.9
+Development branch:  build-accelerate
+Revision id:         57ecdfa
+#----------------------------------------------
+             ____  ____________
+            / __ \/ ____/_  __/
+           / / / / /_    / /
+          / /_/ / __/   / /
+          \____/_/     /_/
+
+
+Parallelization Info:
+  # of MPI tasks      =    1
+  # of NUMA nodes     =    1
+  # of OpenMP threads =    8
+
+Fortran input file     = oft.in
+XML input file         = none
+
+Linear Algebra backend: native
+
+#----------------------------------------------
+
+
+**** Loading OFT mesh
+  Cube volume mesh:
+    Mesh Type   =    1
+    nx, ny, nz  =    1   1   1
+    Scale facs  =   1.000E+00  1.000E+00  1.000E+00
+    Periodicity =  F F F
+    Packing     =   1.000E+00  1.000E+00  1.000E+00
+  Syncing mesh
+  Setting Cube periodicity
+
+**** Generating grid level  1
+  Generating domain linkage
+    Point linkage
+    Edge linkage
+    Face linkage
+  Constructing global boundary
+  Setting I/O information
+  Generating boundary domain linkage
+    Point linkage
+    Edge linkage
+  Orienting geometry
+  Copying orientation to surface
+  Locating corner features
+  Mesh statistics:
+    Volume          =  1.000E+00
+    Surface area    =  6.000E+00
+    # of points     =       9
+    # of edges      =      26
+    # of faces      =      30
+    # of cells      =      12
+    # of boundary points =       8
+    # of boundary edges  =      18
+    # of boundary faces  =      12
+    # of boundary cells  =      12
+  Resolution statistics:
+    hmin =  8.660E-01
+    hrms =  1.021E+00
+    hmax =  1.414E+00
+  Surface grounded at vertex       6
+
+**** Generating grid level  2
+  Generating domain linkage
+    Point linkage
+    Edge linkage
+    Face linkage
+  Constructing global boundary
+  Generating boundary domain linkage
+    Point linkage
+    Edge linkage
+  Setting I/O information
+  Orienting geometry
+  Copying orientation to surface
+  Locating corner features
+  Mesh statistics:
+    Volume          =  1.000E+00
+    Surface area    =  6.000E+00
+    # of points     =      35
+    # of edges      =     154
+    # of faces      =     216
+    # of cells      =      96
+    # of boundary points =      26
+    # of boundary edges  =      72
+    # of boundary faces  =      48
+    # of boundary cells  =      48
+  Resolution statistics:
+    hmin =  4.330E-01
+    hrms =  4.974E-01
+    hmax =  7.071E-01
+  Surface grounded at vertex       6
+
+**** Generating grid level  3
+  Generating domain linkage
+    Point linkage
+    Edge linkage
+    Face linkage
+  Constructing global boundary
+  Generating boundary domain linkage
+    Point linkage
+    Edge linkage
+  Setting I/O information
+  Orienting geometry
+  Copying orientation to surface
+  Locating corner features
+  Mesh statistics:
+    Volume          =  1.000E+00
+    Surface area    =  6.000E+00
+    # of points     =     189
+    # of edges      =    1052
+    # of faces      =    1632
+    # of cells      =     768
+    # of boundary points =      98
+    # of boundary edges  =     288
+    # of boundary faces  =     192
+    # of boundary cells  =     192
+  Resolution statistics:
+    hmin =  2.165E-01
+    hrms =  2.437E-01
+    hmax =  3.536E-01
+  Surface grounded at vertex       6
+
+**** Generating grid level  4
+  Generating domain linkage
+    Point linkage
+    Edge linkage
+    Face linkage
+  Constructing global boundary
+  Generating boundary domain linkage
+    Point linkage
+    Edge linkage
+  Setting I/O information
+  Orienting geometry
+  Copying orientation to surface
+  Locating corner features
+  Mesh statistics:
+    Volume          =  1.000E+00
+    Surface area    =  6.000E+00
+    # of points     =    1241
+    # of edges      =    7768
+    # of faces      =   12672
+    # of cells      =    6144
+    # of boundary points =     386
+    # of boundary edges  =    1152
+    # of boundary faces  =     768
+    # of boundary cells  =     768
+  Resolution statistics:
+    hmin =  1.083E-01
+    hrms =  1.200E-01
+    hmax =  1.768E-01
+  Surface grounded at vertex       6
+
+**** Generating grid level  5
+  Generating domain linkage
+    Point linkage
+    Edge linkage
+    Face linkage
+  Constructing global boundary
+  Generating boundary domain linkage
+    Point linkage
+    Edge linkage
+Note: The following floating-point exceptions are signalling: IEEE_OVERFLOW_FLAG
+  Setting I/O information
+  Orienting geometry
+  Copying orientation to surface
+  Locating corner features
+  Mesh statistics:
+    Volume          =  1.000E+00
+    Surface area    =  6.000E+00
+    # of points     =    9009
+    # of edges      =   59696
+    # of faces      =   99840
+    # of cells      =   49152
+    # of boundary points =    1538
+    # of boundary edges  =    4608
+    # of boundary faces  =    3072
+    # of boundary cells  =    3072
+  Resolution statistics:
+    hmin =  5.413E-02
+    hrms =  5.927E-02
+    hmax =  8.839E-02
+  Surface grounded at vertex       6
+
+
+**** Creating Lagrange FE space
+  Order  =    3
+  Minlev =   -1
+  Creating 3D Lagrange FE space
+    Order  =    1
+  Creating 3D Lagrange FE space
+    Order  =    3
+
+  Constructing LAG::LOP
+    Assembly time =  2.1842E-01
+  Constructing LAG::MOP
+    Assembly time =  1.1384E-01
+Starting GMRES solver
+     0  0.000000E+00  3.034355E-03
+     1  1.175150E+01  1.069677E-15  9.102472E-17
+
+#----------------------------------------------
+Run Complete
+Run Duration =   5.581E+00
+
+====== MPI Times (Avg, Min, Max) ======
+Barrier   =   6.000E-06  6.000E-06  6.000E-06
+WaitAny   =   0.000E+00  0.000E+00  0.000E+00
+WaitAll   =   0.000E+00  0.000E+00  0.000E+00
+AllReduce =   1.000E-06  1.000E-06  1.000E-06
+#----------------------------------------------

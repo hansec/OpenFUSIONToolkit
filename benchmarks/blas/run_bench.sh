@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Benchmark an Accelerate-based OFT build against an OpenBLAS-based one.
+# Benchmark an Accelerate-based OFT build against an OpenBLAS-based one, including
+# the sparse direct (LU) solver packages (UMFPACK, STRUMPACK, SuperLU, Accelerate).
 #
 # Usage: run_bench.sh <accelerate_config_dir> <openblas_config_dir> <results_dir>
 #
@@ -14,12 +15,14 @@
 #   OMP_OPENBLAS_LIB Threaded (OpenMP) libopenblas.a for an extra micro-benchmark column
 #   SKIP_MICRO=1     Skip the BLAS/LAPACK kernel micro-benchmark
 #   SKIP_THINCURR=1  Skip the ThinCurr benchmarks
-#   SKIP_LARGE=1     Skip the large (18k unknown) HODLR case
+#   SKIP_SPARSE=1    Skip the sparse direct (LU) solver benchmarks
+#   SKIP_LARGE=1     Skip the large cases (18k unknown HODLR, 228k unknown sparse LU)
+#   SPARSE_TIMEOUT   Time limit in seconds for each sparse LU run (default: 900)
 #   WORK_DIR         Scratch directory (default: a new temporary directory)
 set -euo pipefail
 
 if [ $# -ne 3 ]; then
-    sed -n '2,20p' "$0"
+    sed -n '2,23p' "$0"
     exit 1
 fi
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -47,6 +50,9 @@ echo "Scratch:         $WORK"
 echo "Threads:         $NT"
 
 # ---- System and build information ----
+# Keep an existing sysinfo.txt (eg. when adding results with SKIP_* to an existing directory)
+SYSINFO="$OUT/sysinfo.txt"
+[ -f "$SYSINFO" ] && SYSINFO="$OUT/sysinfo_$(date -u +%Y%m%dT%H%MZ).txt"
 {
     echo "date: $(date -u +%Y-%m-%dT%H:%MZ)"
     echo "host_model: $(sysctl -n hw.model 2>/dev/null)"
@@ -66,8 +72,8 @@ echo "Threads:         $NT"
     echo "nthreads: $NT"
     echo "--- Accelerate liboftpy BLAS linkage (expect liboftaccelerate) ---"
     otool -L "$ACC"/build_release/bin/liboftpy.dylib 2>/dev/null | grep -E 'liboftaccelerate|openblas|Accelerate\.framework|vecLib' || echo "(no dynamic BLAS reference found)"
-} > "$OUT/sysinfo.txt"
-cat "$OUT/sysinfo.txt"
+} > "$SYSINFO"
+cat "$SYSINFO"
 
 # ---- BLAS/LAPACK kernel micro-benchmark ----
 if [ "${SKIP_MICRO:-0}" != "1" ]; then
@@ -113,6 +119,89 @@ if [ "${SKIP_THINCURR:-0}" != "1" ]; then
         run_tc oblas_tN_hodlrL "$OBL" "$NT" "$NT" 96 192 hodlr
         run_tc acc_tN_hodlrL   "$ACC" "$NT" "$NT" 96 192 hodlr
     fi
+fi
+
+# ---- Sparse direct (LU) solvers ----
+# Order-3 Lagrange Laplacian on a unit cube, solved with GMRES preconditioned by a full LU
+# (lin_alg/test_native_bjacobi). The time of the first solve (factorization + GMRES, usually
+# 1 iteration) is recorded, along with total wall time. Results go to sparse.txt:
+#   <tag> <nlevels> <unknowns> <status> <wall_s> <solve_s> <iterations> <solution_norm>
+# run_sparse <tag> <config_dir> <nlevels> <sol_type> [<factorization> <ordering>]
+run_sparse() {
+    local tag=$1 tree=$2 nl=$3 st=$4 fact=${5:-} ord=${6:-}
+    local exe="$tree/build_release/tests/lin_alg/test_native_bjacobi"
+    local dir="$WORK/sparse_${tag}_nl$nl" use_xml=F args="oft.in"
+    echo "== Sparse LU: $tag, nlevels=$nl"
+    [ -x "$exe" ] || { echo "   Missing $exe (build with --oft_build_tests=1)"; return 0; }
+    mkdir -p "$dir"
+    if [ -n "$fact" ]; then
+        use_xml=T
+        args="oft.in oft_in.xml"
+        printf '<oft><lu><package>accelerate</package><accelerate><factorization>%s</factorization><ordering>%s</ordering></accelerate></lu></oft>\n' \
+            "$fact" "$ord" > "$dir/oft_in.xml"
+    fi
+    cat > "$dir/oft.in" <<EOF
+&runtime_options
+ ppn=1
+ debug=1
+ test_run=T
+/
+&mesh_options
+ meshname='cube'
+ cad_type=92
+ nlevels=$nl
+ nbase=$nl
+ grid_order=1
+/
+&cube_options
+ mesh_type=1
+/
+&test_bj_options
+ nlocal=1
+ sol_type=$st
+ use_xml=$use_xml
+/
+EOF
+    local log="$OUT/sparse_${tag}_nl$nl.log" status=ok rc=0 t0 t1
+    rm -f "$dir/bjacobi.results"
+    t0=$("$PY" -c 'import time; print(time.time())')
+    (cd "$dir" && OMP_NUM_THREADS=$NT VECLIB_MAXIMUM_THREADS=$NT ${TIMEOUT_CMD:+$TIMEOUT_CMD "${SPARSE_TIMEOUT:-900}"} "$exe" $args > "$log" 2>&1) || rc=$?
+    t1=$("$PY" -c 'import time; print(time.time())')
+    if grep -q 'SKIP TEST' "$log"; then
+        status=skipped
+    elif [ $rc -eq 124 ]; then
+        status=timeout
+    elif [ $rc -ne 0 ] || [ ! -f "$dir/bjacobi.results" ]; then
+        status=failed
+    fi
+    # Order-3 Lagrange unknowns = points + 2*edges + faces on the finest mesh level
+    local ndofs
+    ndofs=$(awk '/# of points  /{p=$NF} /# of edges  /{e=$NF} /# of faces  /{f=$NF} END{print p+2*e+f}' "$log")
+    local res="- - -"
+    [ "$status" = ok ] && res=$(awk 'NR==1{c=$1} NR==2{u=$1} NR==3{t=$1} END{print t, c, u}' "$dir/bjacobi.results")
+    local wall
+    wall=$("$PY" -c "print('{0:.2f}'.format($t1-$t0))")
+    echo "$tag $nl $ndofs $status $wall $res" >> "$OUT/sparse.txt"
+    echo "   $status: wall=${wall} s, solve/iterations/norm = $res"
+}
+if [ "${SKIP_SPARSE:-0}" != "1" ]; then
+    # macOS has no timeout command; use GNU coreutils (Homebrew) if available
+    TIMEOUT_CMD=$(command -v timeout || command -v gtimeout || true)
+    [ -n "$TIMEOUT_CMD" ] || echo "Warning: no timeout/gtimeout command found, sparse LU runs are not time limited"
+    rm -f "$OUT/sparse.txt"
+    SPARSE_LEVELS="4"
+    [ "${SKIP_LARGE:-0}" != "1" ] && SPARSE_LEVELS="4 5"
+    for nl in $SPARSE_LEVELS; do
+        run_sparse acc_accelerate           "$ACC" "$nl" 7
+        run_sparse acc_accelerate_metis     "$ACC" "$nl" 7 lu metis
+        run_sparse acc_accelerate_spp_metis "$ACC" "$nl" 7 lu_spp metis
+        run_sparse acc_strumpack            "$ACC" "$nl" 6
+        run_sparse oblas_strumpack          "$OBL" "$nl" 6
+        run_sparse acc_umfpack              "$ACC" "$nl" 4
+        run_sparse oblas_umfpack            "$OBL" "$nl" 4
+        # SuperLU takes more than 30 minutes at nlevels=5
+        [ "$nl" = 4 ] && run_sparse acc_superlu "$ACC" "$nl" 1
+    done
 fi
 
 "$PY" "$HERE/summarize.py" "$OUT" > "$OUT/summary.md"

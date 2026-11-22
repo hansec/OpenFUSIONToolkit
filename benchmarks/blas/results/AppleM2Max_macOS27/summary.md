@@ -80,3 +80,32 @@ Agreement with OpenBLAS (max relative difference):
 | 4609 | 1.809 | 1.831 | 0.090 | 0.073 | 4.6e-05 |
 | 18433 | 8.925 | 9.026 | 0.447 | 0.307 | 2.0e-04 |
 
+## Sparse direct (LU) solvers, OFT N threads
+
+Order-3 Lagrange Laplacian on a unit cube (`lin_alg/test_native_bjacobi`, GMRES with a full LU preconditioner). "solve" is the first solve including factorization, in seconds; "wall" also includes mesh and matrix setup. "norm diff" is the relative difference of the solution norm from the first successful case.
+
+### 29449 unknowns (nlevels=4)
+
+| package | status | solve | wall | GMRES its | norm diff |
+|---|---|---|---|---|---|
+| Accelerate sparse LU (default options) | ok | 0.54 | 0.80 | 1 | 0.0e+00 |
+| Accelerate sparse LU, METIS ordering | ok | 0.57 | 0.83 | 1 | 4.3e-16 |
+| Accelerate sparse LU, supernodal pivoting + METIS | ok | 0.55 | 0.80 | 1 | 4.3e-16 |
+| STRUMPACK (Accelerate BLAS) | ok | 0.33 | 0.59 | 1 | 4.7e-15 |
+| STRUMPACK (OpenBLAS) | ok | 0.36 | 0.62 | 1 | 6.0e-15 |
+| UMFPACK (Accelerate BLAS) | ok | 0.96 | 1.22 | 1 | 4.6e-14 |
+| UMFPACK (OpenBLAS) | ok | 1.72 | 1.98 | 1 | 4.1e-15 |
+| SuperLU (Accelerate BLAS) | ok | 18.53 | 18.79 | 1 | 1.2e-14 |
+
+### 228241 unknowns (nlevels=5)
+
+| package | status | solve | wall | GMRES its | norm diff |
+|---|---|---|---|---|---|
+| Accelerate sparse LU (default options) | ok | 9.36 | 10.38 | 1 | 0.0e+00 |
+| Accelerate sparse LU, METIS ordering | ok | 10.37 | 11.39 | 1 | 7.9e-15 |
+| Accelerate sparse LU, supernodal pivoting + METIS | ok | 8.72 | 9.74 | 1 | 1.1e-14 |
+| STRUMPACK (Accelerate BLAS) | ok | 4.67 | 5.71 | 1 | 1.1e-13 |
+| STRUMPACK (OpenBLAS) | ok | 6.60 | 7.65 | 1 | 1.5e-13 |
+| UMFPACK (Accelerate BLAS) | failed | — | 6.33 | — | — |
+| UMFPACK (OpenBLAS) | failed | — | 14.64 | — | — |
+

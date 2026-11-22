@@ -2,14 +2,16 @@
 
 This directory holds a repeatable procedure for comparing an OFT build linked to
 Apple's Accelerate BLAS/LAPACK (`build_libs.py --use_accelerate`) with the
-default OpenBLAS build, on any Mac. It is written so that a coding agent can run
-it start to finish on a new machine and commit the results here.
+default OpenBLAS build, on any Mac. It also benchmarks Accelerate's sparse direct
+(LU) solver, which the Accelerate build makes available to OFT as the `accelerate`
+LU package, against UMFPACK, STRUMPACK and SuperLU. It is written so that a coding
+agent can run it start to finish on a new machine and commit the results here.
 
 Contents:
 
 | File | Purpose |
 |---|---|
-| `run_bench.sh` | Driver: builds and runs the kernel micro-benchmark, runs the ThinCurr cases, writes `summary.md` |
+| `run_bench.sh` | Driver: builds and runs the kernel micro-benchmark, runs the ThinCurr and sparse LU cases, writes `summary.md` |
 | `micro.f90` | Kernel micro-benchmark (dgemm, dgetrf, dgetri, dsyevd, dgeev, zgemm, dgemv) with accuracy checks |
 | `bench_thincurr.py` | ThinCurr benchmark on a generated torus mesh (dense direct and HODLR paths) |
 | `summarize.py` | Turns a results directory into Markdown tables (called by `run_bench.sh`) |
@@ -30,6 +32,17 @@ Contents:
   and controlled by `VECLIB_MAXIMUM_THREADS` (default: all cores). The benchmark
   pins both explicitly. For a fair threaded comparison, also build a threaded
   OpenBLAS (step 4, optional).
+- `--use_accelerate` also enables the `accelerate` sparse LU package in `oft_lu`
+  (CMake option `OFT_USE_ACCELERATE_SPARSE`). It needs a macOS SDK ≥ 15.5 at build
+  time and macOS ≥ 15.5 at run time (some options need macOS 26). Apple's sparse
+  headers only compile with clang, so `src/lin_alg/accelerate_bridge.c` is always
+  compiled with Apple clang (`xcrun clang`), with clang's runtime library pre-linked
+  into it. If the SDK is too old, CMake prints a warning, the package is disabled
+  and its tests are skipped. The rest of the Accelerate build still works.
+- The bridge works around two Accelerate bugs seen on macOS 27.2, so watch for them on
+  other macOS versions: multi-RHS solves of a transposed matrix give wrong results
+  (it solves one RHS at a time), and concurrent symbolic factorizations on different
+  threads crash with the default (MT-METIS) ordering (it serializes them).
 
 ## Procedure
 
@@ -89,6 +102,7 @@ Check the Accelerate tree before going further:
 ```bash
 grep OFT_LAPACK_LIBRARIES builds/GCC/MPI_accelerate/config_cmake.sh          # points at liboftaccelerate.dylib
 grep 'Using specified BLAS/LAPACK' builds/GCC/MPI_accelerate/cmake_config.log
+grep 'Using Accelerate sparse solvers' builds/GCC/MPI_accelerate/cmake_config.log   # sparse LU package enabled
 otool -L builds/GCC/MPI_accelerate/build_release/bin/liboftpy.dylib | grep liboftaccelerate
 ```
 
@@ -148,9 +162,17 @@ PY=$(which python) NTHREADS=<perf cores> OMP_OPENBLAS_LIB=<path>/libopenblas.a \
 - `NTHREADS` defaults to the number of performance cores
   (`sysctl hw.perflevel0.physicalcpu`), which is usually the right choice.
 - Omit `OMP_OPENBLAS_LIB` if you skipped step 4.
-- Set `SKIP_LARGE=1` on machines with less than 16 GB of memory.
-- The run takes about 5 minutes on an M2 Max. Expect longer on slower machines,
-  mostly from the serial OpenBLAS cases.
+- Set `SKIP_LARGE=1` on machines with less than 16 GB of memory. This skips the
+  18k-unknown HODLR case and the 228k-unknown sparse LU cases.
+- The run takes about 10 minutes on an M2 Max: about 5 for BLAS and ThinCurr, and
+  about 5 for sparse LU. Expect longer on slower machines, mostly from the serial
+  OpenBLAS cases and SuperLU.
+- `SKIP_MICRO=1`, `SKIP_THINCURR=1` and `SKIP_SPARSE=1` skip each part. To add only
+  the sparse LU results to an existing results directory, run with
+  `SKIP_MICRO=1 SKIP_THINCURR=1`. `summary.md` is then rebuilt from all of the
+  files present. If `sysinfo.txt` already exists, the new system information is
+  written to `sysinfo_<UTC time>.txt` instead.
+- Each sparse LU run is limited to `SPARSE_TIMEOUT` seconds (default 900).
 
 What it runs:
 
@@ -159,10 +181,13 @@ What it runs:
 | `sysinfo.txt` | Machine, OS, SDK, compiler, OFT revision, and the Accelerate tree's BLAS linkage |
 | `micro_*.txt` | Kernels at N = 500 to 4000, best of 3 (1 run at N=4000). Columns: time, GFLOP/s, accuracy check |
 | `tc_<case>.json/.log` | ThinCurr on a 48x96 torus (4609 unknowns): `Lmat` (no BLAS), `eigs_direct` (dgemm + dgeev), `freq_resp_direct` (complex LU/inverse), `td_direct` (200 time steps). Also the HODLR path at 4609 and 18433 unknowns |
+| `sparse.txt`, `sparse_<case>_nl<N>.log` | Sparse LU: an order-3 Lagrange Laplacian on a unit cube, via `tests/lin_alg/test_native_bjacobi` (GMRES preconditioned with a full LU). Sizes: 29,449 unknowns (`nl4`) and 228,241 (`nl5`). Packages: Accelerate (default options, METIS ordering, and supernodal pivoting with METIS), STRUMPACK and UMFPACK from both trees, and SuperLU at the small size only. Columns: case, nlevels, unknowns, status, wall time, first-solve time (factorization + GMRES), GMRES iterations, solution norm |
 | `summary.md` | Tables produced by `summarize.py` |
 
 Cases: `*_tN` use NTHREADS OpenMP threads in OFT. `acc_tN_veclib1` keeps OFT
-threaded but limits Accelerate to 1 thread. `*_t1` are fully serial.
+threaded but limits Accelerate to 1 thread. `*_t1` are fully serial. The sparse LU
+cases all use NTHREADS threads. `acc_*` cases use the Accelerate tree (and its BLAS),
+`oblas_*` cases use the OpenBLAS tree.
 
 ### 7. Check, record and commit
 
@@ -172,6 +197,11 @@ threaded but limits Accelerate to 1 thread. `*_t1` are fully serial.
    - Dense ThinCurr eigenvalues and frequency-response norms agree with OpenBLAS
      to better than about 1e-10 relative.
    - HODLR eigenvalues agree to about 1e-3, which is within the compression tolerance.
+   - Every sparse LU case has status `ok`, takes 1 GMRES iteration, and has a norm
+     difference below about 1e-10. Two outcomes are expected: UMFPACK `failed` at 228k
+     unknowns (its 32-bit interface has a 2 GiB factor memory limit), and `skipped`
+     for packages that weren't built. A crash (`failed`) in an Accelerate case is
+     important, so check its log and report it.
 
    Anything larger is a correctness problem. Report it.
 2. Add a `tests.md` to the results directory containing:
@@ -204,6 +234,19 @@ git push origin build-accelerate
 - `make test`: 1148 passed and 349 skipped in both trees, with no failures. That run was
   before the sparse LU package was added; the Accelerate tree now gives 1175 passed and
   349 skipped.
+- Sparse LU, first solve with 8 threads (added later, see `sysinfo_20261122T1700Z.txt`):
+
+  | Package | 29k unknowns | 228k unknowns |
+  |---|---|---|
+  | Accelerate (default) | 0.54 s | 9.4 s |
+  | Accelerate (supernodal pivoting + METIS) | 0.55 s | 8.7 s |
+  | STRUMPACK (Accelerate BLAS / OpenBLAS) | 0.33 / 0.36 s | 4.7 / 6.6 s |
+  | UMFPACK (Accelerate BLAS / OpenBLAS) | 0.96 / 1.72 s | out of memory |
+  | SuperLU | 18.5 s | not run (> 30 min) |
+
+  Accelerate is about 2x faster than UMFPACK and handles the large case, but STRUMPACK
+  is about 2x faster again. Accelerate BLAS also speeds up UMFPACK (1.8x) and
+  STRUMPACK (1.4x at 228k).
 
 ## Interpreting results on other machines
 
@@ -212,5 +255,11 @@ git push origin build-accelerate
   possibly none.
 - **Newer Apple Silicon (M3/M4/M5)**: Accelerate uses the AMX/SME matrix units,
   so the BLAS-3 advantage should hold or grow.
+- **Sparse LU**: the main question is how Accelerate's sparse LU compares with
+  STRUMPACK on newer chips, and whether the supernodal-pivoting and METIS variants
+  change the ranking. If an Accelerate case crashes, rerun it alone from its scratch
+  directory with `OMP_NUM_THREADS=1` and record whether it still fails. On macOS
+  versions other than 27.2, it is also worth checking whether the two Accelerate bugs
+  in "Background" are still present, since the workarounds can be removed if not.
 - **dgemv regression**: check whether the large-N dgemv slowdown reproduces. It
   matters for ThinCurr time stepping with a dense L matrix.

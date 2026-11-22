@@ -147,4 +147,54 @@ if hodlr_lines:
     lines += hodlr_lines
     lines.append('')
 
+# Sparse direct (LU) solvers
+sparse_labels = {
+    'acc_accelerate': 'Accelerate sparse LU (default options)',
+    'acc_accelerate_metis': 'Accelerate sparse LU, METIS ordering',
+    'acc_accelerate_spp_metis': 'Accelerate sparse LU, supernodal pivoting + METIS',
+    'acc_strumpack': 'STRUMPACK (Accelerate BLAS)',
+    'oblas_strumpack': 'STRUMPACK (OpenBLAS)',
+    'acc_umfpack': 'UMFPACK (Accelerate BLAS)',
+    'oblas_umfpack': 'UMFPACK (OpenBLAS)',
+    'acc_superlu': 'SuperLU (Accelerate BLAS)',
+}
+sparse_path = os.path.join(res_dir, 'sparse.txt')
+if os.path.isfile(sparse_path):
+    sparse_rows = []
+    with open(sparse_path) as fid:
+        for line in fid:
+            parts = line.split()
+            if len(parts) == 8:
+                sparse_rows.append(parts)
+    sizes = []
+    for row in sparse_rows:
+        if (row[1], row[2]) not in sizes:
+            sizes.append((row[1], row[2]))
+    lines.append('## Sparse direct (LU) solvers, OFT N threads')
+    lines.append('')
+    lines.append('Order-3 Lagrange Laplacian on a unit cube (`lin_alg/test_native_bjacobi`, GMRES with a '
+                 'full LU preconditioner). "solve" is the first solve including factorization, in seconds; '
+                 '"wall" also includes mesh and matrix setup. "norm diff" is the relative difference of the '
+                 'solution norm from the first successful case.')
+    lines.append('')
+    for nlevels, ndofs in sizes:
+        lines.append('### {0} unknowns (nlevels={1})'.format(ndofs, nlevels))
+        lines.append('')
+        lines.append('| package | status | solve | wall | GMRES its | norm diff |')
+        lines.append('|---|---|---|---|---|---|')
+        ref_norm = None
+        for row in sparse_rows:
+            if row[1] != nlevels:
+                continue
+            label = sparse_labels.get(row[0], row[0])
+            if row[3] != 'ok':
+                lines.append('| {0} | {1} | — | {2} | — | — |'.format(label, row[3], row[4]))
+                continue
+            norm = float(row[7])
+            if ref_norm is None:
+                ref_norm = norm
+            lines.append('| {0} | ok | {1:.2f} | {2} | {3} | {4:.1e} |'.format(
+                label, float(row[5]), row[4], row[6], abs(norm - ref_norm)/abs(ref_norm)))
+        lines.append('')
+
 print('\n'.join(lines))
