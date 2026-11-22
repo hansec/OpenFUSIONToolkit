@@ -1,0 +1,71 @@
+Base release:        v1.0.0-beta5
+Development branch:  build-accelerate
+Revision id:         c01defc
+Verifying mesh holes and closures...
+
+nelems = 4609
+BENCH Lmat                     13.386 s
+BENCH eigs_direct              44.385 s
+BENCH freq_resp_direct         19.157 s
+BENCH td_direct                 5.350 s
+#----------------------------------------------
+             ____  ____________
+            / __ \/ ____/_  __/
+           / / / / /_    / /
+          / /_/ / __/   / /
+          \____/_/     /_/
+
+
+Parallelization Info:
+  # of MPI tasks      =    1
+  # of NUMA nodes     =    1
+  # of OpenMP threads =    1
+
+Linear Algebra backend: native
+
+#----------------------------------------------
+
+
+Creating thin-wall model
+  No V(t) driver coils found
+  Loading I(t) driver coils from XML file
+  Creating hole elements
+
+  Loading region surface resistivity:
+     1  1.2570E-05
+
+  Setup complete:
+    # of points    =         4608
+    # of edges     =        13824
+    # of cells     =         9216
+    # of holes     =            2
+    # of closures  =            1
+    # of Vcoils    =            0
+    # of Icoils    =            1
+Building element<->element self inductance matrix
+  Time = 13s          
+Building resistivity matrix
+ Inverting real matrix
+   Time =    2.0058370000000001     
+
+Starting eigenvalue solve (direct)
+  Time =   3.8662E+01   0
+  Eigenvalues
+      4.465472E-02
+      2.064789E-02
+      2.064789E-02
+      1.926168E-02
+      1.926168E-02
+Building coil<->element inductance matrices
+  Time =  0s          
+
+Starting frequency-domain run
+  Frequency [Hz] =   1.00000E+03
+ Inverting complex matrix
+   Time =    19.118020999999999     
+
+Starting time-domain simulation
+  timestep    time           sol_norm     nits    solver time
+  Starting factorization
+ Inverting real matrix
+   Time =    1.9935570000000000     

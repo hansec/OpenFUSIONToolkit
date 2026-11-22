@@ -1,0 +1,87 @@
+Base release:        v1.0.0-beta5
+Development branch:  build-accelerate
+Revision id:         c01defc
+
+Saving mesh: /private/tmp/claude-501/-Users-hansec-Agents-Claude-OpenFUSIONToolkit/4c7413a7-e06a-4de9-854d-f69c3abd0001/scratchpad/bench_work/mesh/torus_96x192.h5
+Verifying mesh holes and closures...
+
+nelems = 18433
+BENCH Lmat_hodlr                8.925 s
+BENCH eigs_iterative            0.447 s
+#----------------------------------------------
+             ____  ____________
+            / __ \/ ____/_  __/
+           / / / / /_    / /
+          / /_/ / __/   / /
+          \____/_/     /_/
+
+
+Parallelization Info:
+  # of MPI tasks      =    1
+  # of NUMA nodes     =    1
+  # of OpenMP threads =    8
+
+Linear Algebra backend: native
+
+#----------------------------------------------
+
+
+Creating thin-wall model
+  No V(t) driver coils found
+  Loading I(t) driver coils from XML file
+  Creating hole elements
+
+  Loading region surface resistivity:
+     1  1.2570E-05
+
+  Setup complete:
+    # of points    =        18432
+    # of edges     =        55296
+    # of cells     =        36864
+    # of holes     =            2
+    # of closures  =            1
+    # of Vcoils    =            0
+    # of Icoils    =            1
+
+Partitioning grid for block low rank compressed operators
+  nBlocks =            64
+  Avg block size =    287
+  # of SVD  =         304
+  # of ACA+ =         557
+
+Building block low rank inductance operator
+  SVD tolerance:   1.75E-07
+  ACA+ tolerance:  8.76E-09
+  Building hole and Vcoil columns
+  Building diagonal blocks
+    10%
+    20%
+    30%
+    40%
+    50%
+    60%
+    70%
+    80%
+    90%
+  Building off-diagonal blocks using ACA+ and SVD compression
+    10%
+    20%
+    30%
+    40%
+    50%
+    60%
+    70%
+    80%
+    90%
+  Compressed size:   4.5%  ( 1.51E+07/ 3.40E+08)
+  Time =  8s          
+Building resistivity matrix
+
+Starting eigenvalue solve (ARPACK)
+  Time =   4.4625E-01
+  Eigenvalues
+      4.466650E-02
+      2.068796E-02
+      2.068648E-02
+      1.931430E-02
+      1.931423E-02
