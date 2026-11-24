@@ -1,77 +1,47 @@
 reset
 undo off
 
-#
-create Cylinder height 1.0 radius 2.0
-move Volume 1 x 0 y 0 z 0.5 include_merged 
+# Cylinder geometry [m]: plasma (a), outer radius of fluid vacuum region (rv) and wall (b) radii
+# hz is half of the periodic length (L = 2*pi*R0 with R0 = 0.5 m)
+#{a = 0.1}
+#{rv = 0.125}
+#{b = 0.2}
+#{hz = PI*0.5}
+# Resolution: circumferential, radial (core, fluid vacuum, wall) and axial (half length)
+#{nth = 24}
+#{nr_core = 8}
+#{nr_vac = 3}
+#{nr_wall = 2}
+#{nz = 3}
 
-#
-webcut volume 1  with cylinder radius 0.5 axis z center 0 0 0
-webcut volume 1  with cylinder radius 1 axis z center 0 0 0
-
-webcut volume 1  with cylinder radius 1.235 axis z center 0 0 0
-webcut volume 1  with cylinder radius 1.265 axis z center 0 0 0
-
-#
+create surface circle radius {b} zplane
+sweep surface 1 vector 0 0 1 distance {hz}
+# Volume 1: rv < r < b, Volume 2: a < r < rv, Volume 3: r < a
+webcut volume 1 with cylinder radius {rv} axis z center 0 0 0
+webcut volume 2 with cylinder radius {a} axis z center 0 0 0
 imprint all
 merge all
 
-#
-curve 3  interval 30
-curve 3  scheme equal
-mesh curve 3
+# Mesh cross-section (z = 0) and sweep along z
+curve in surface 6 12 15 interval {nth}
+curve in surface 6 12 15 scheme equal
+surface 15 scheme circle interval {nr_core} fraction 0.5
+surface 12 scheme hole rad_intervals {nr_vac} bias 0
+surface 6 scheme hole rad_intervals {nr_wall} bias 0
+mesh surface 6 12 15
+volume 1 2 3 interval {nz}
+volume 1 scheme sweep source surface 6 target surface 5
+volume 2 scheme sweep source surface 12 target surface 11
+volume 3 scheme sweep source surface 15 target surface 14
+mesh volume 1 2 3
 
-#
-surface 15  scheme hole rad_intervals 10 bias 2
-#surface 15  scheme hole rad_intervals 6 bias 2
-mesh surface 15
-surface 21  scheme hole rad_intervals 5 bias -2
-#surface 21  scheme hole rad_intervals 3 bias -2
-mesh surface 21
-surface 27  scheme hole rad_intervals 1 bias 0
-mesh surface 27
-surface 24  scheme hole rad_intervals 3 bias 0
-mesh surface 24
-
-#
-volume 1 3 4 5  interval 2
-volume 1  redistribute nodes off 
-volume 1  scheme Sweep  source surface 24 target surface 23 sweep_transform least_squares  
-volume 1  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
-mesh volume 1
-volume 3  redistribute nodes off 
-volume 3  scheme Sweep  source surface 15 target surface 14 sweep_transform least_squares  
-volume 3  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
-mesh volume 3
-volume 4  redistribute nodes off 
-volume 4  scheme Sweep  source surface 21 target surface 20 sweep_transform least_squares  
-volume 4  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
-mesh volume 4
-volume 5  redistribute nodes off 
-volume 5  scheme Sweep  source surface 27 target surface 26 sweep_transform least_squares  
-volume 5  autosmooth_target on  fixed_imprints off  smart smooth on  tolerance 0.2  nlayers 5
-mesh volume 5
-
-#
-#HTet Volume 1 3 4 5 UNSTRUCTURED
-HTet Volume 1 3 4 5 STRUCTURED
-
-#
-volume 2 scheme Tetmesh
-set tetmesher interior points on 
-set tetmesher optimize level 3  overconstrained  off sliver  off 
-set tetmesher boundary recovery  off 
-volume 2 tetmesh growth_factor 1.0
-mesh volume 2
-
-# Output mesh
+# Blocks: 1 = plasma + fluid vacuum region, 2 = solid vacuum region
 set duplicate block elements off
-nodeset 1 surface 9 15 21 27 24
 block 1 volume 2 3
-block 2 volume 4
-block 3 volume 5
-block 4 volume 1
-block all element type tetra10
-export Genesis  "MUG-cyl_pinch.g" block 1 2 3 4 overwrite
+block 2 volume 1
+block all element type hex27
+# Periodic face (z = hz), matched to z = -hz following reflection
+nodeset 1 surface 5 11 14
 
-
+quality volume all shape
+export Genesis "MUG-cyl_pinch.g" overwrite
