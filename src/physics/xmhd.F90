@@ -4897,12 +4897,60 @@ subroutine oft_xmhd_inject(self,afine,acors)
 class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine level vector to inject
 class(oft_vector), intent(inout) :: acors !< Injected solution on coarse level
-real(r8), pointer, dimension(:) :: vtmp
+real(r8), pointer, dimension(:) :: vtmp,acurl,agrad
+real(r8), allocatable, dimension(:) :: gtmp
+logical, allocatable, dimension(:) :: moved,owned
 integer(i4) :: i
+class(oft_vector), pointer :: atmp
 DEBUG_STACK_PUSH
+!---Transpose of the gradient subspace correction applied in oft_xmhd_interp
+!   (geometric levels), so that restriction is the exact transpose of interpolation
+NULLIFY(atmp)
+IF(oft_hcurl%order==1)THEN
+  CALL afine%new(atmp)
+  CALL atmp%add(0.d0,1.d0,afine)
+  NULLIFY(acurl,agrad)
+  CALL atmp%get_local(acurl,1)
+  CALL atmp%get_local(agrad,2)
+  ALLOCATE(moved(mesh%np),owned(mesh%ne),gtmp(mesh%np))
+  IF(bbc(1:2)=='bc')THEN
+    moved=.TRUE.
+  ELSE
+    moved=.NOT.mesh%global%gbp
+  END IF
+  !---Count each edge once across processes
+  owned=.TRUE.
+  DO i=1,oft_hcurl%linkage%nbe
+    owned(oft_hcurl%linkage%lbe(i))=oft_hcurl%linkage%leo(i)
+  END DO
+  gtmp=0.d0
+  DO i=1,mesh%ne
+    IF(.NOT.owned(i))CYCLE
+    gtmp(mesh%le(2,i)) = gtmp(mesh%le(2,i)) + acurl(i)*SIGN(1_i8,mesh%global%le(i))
+    gtmp(mesh%le(1,i)) = gtmp(mesh%le(1,i)) - acurl(i)*SIGN(1_i8,mesh%global%le(i))
+  END DO
+  DO i=1,mesh%np
+    IF(moved(i))THEN
+      agrad(i)=0.d0
+    ELSE
+      gtmp(i)=0.d0
+    END IF
+  END DO
+  CALL atmp%restore_local(agrad,2)
+  agrad=0.d0
+  agrad(1:mesh%np)=gtmp
+  CALL atmp%restore_local(agrad,2,add=.TRUE.)
+  DEALLOCATE(acurl,agrad,gtmp,moved,owned)
+END IF
 call xmhd_set_level(xmhd_level-1) ! Step one level down
 !---Restrict
-CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(afine,acors)
+IF(ASSOCIATED(atmp))THEN
+  CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(atmp,acors)
+  CALL atmp%delete
+  DEALLOCATE(atmp)
+ELSE
+  CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(afine,acors)
+END IF
 !---Apply boundary conditions
 NULLIFY(vtmp)
 CALL acors%get_local(vtmp,iblock=1)
