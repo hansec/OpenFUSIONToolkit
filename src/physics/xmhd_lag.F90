@@ -93,7 +93,8 @@ USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
 USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
-  tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec
+  tensor_dot_interp, fem_dirichlet_diag, fem_dirichlet_vec
+USE fem_cell_overlap, ONLY: oft_fem_cell_overlap, fem_cell_overlap_create
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_lag_geval_all, &
   oft_scalar_fem, oft_3D_lagrange_cast
 USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vrinterp, oft_lag_vdinterp, &
@@ -363,6 +364,9 @@ TYPE(xmhd_ops), POINTER :: oft_xmhd_ops => NULL() !< Operator container
 TYPE(xmhd_ops), POINTER, DIMENSION(:) :: oft_xmhd_ops_ML => NULL() !< MG operator container
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_int => NULL() !< MG interpolation operators
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_J => NULL() !< MG Jacobian operators
+!> Cell overlap builders of the Jacobian matrices, by level (referenced by `ml_J(:)%m%cell_ovl`;
+!! like the operators these live for the duration of the run and are not freed)
+TYPE(oft_fem_cell_overlap), POINTER, DIMENSION(:) :: xmhd_cell_ovl => NULL()
 CLASS(oft_solver), POINTER :: xmhd_pre => NULL() !< Preconditioner object
 INTEGER(i4) :: xmhd_prefreq = 30 !< Desired update frequency for preconditioner
 INTEGER(i4) :: xmhd_opcount = 1 !< Number of time steps since preconditioner update
@@ -433,7 +437,7 @@ CONTAINS
 !! | `lin_tol=1E-9`     | Linear solver tolerance | real |
 !! | `nl_tol=1E-5`      | Non-Linear solver tolerance | real |
 !! | `nu_xmhd=1`        | Number of smoother iterations for MG preconditioner | int [nlevels] |
-!! | `xmhd_nparts=1`    | Number of local partitions for factor based preconditioning | int |
+!! | `xmhd_nparts=1`    | Number of local partitions for factor based preconditioning. When the native `add_schwarz` preconditioner uses `<overlap_mode>cell</overlap_mode>`, these parts are the cores of the overlapping blocks (one block per process when 1) | int |
 !! | `nclean=500`       | Frequency of divergence cleaning | int |
 !! | `rst_ind=0`        | Index of restart file to initialize from | int |
 !! | `maxextrap=2`      | Extrapolation order for NL initial guess | int |
@@ -2345,8 +2349,7 @@ end subroutine xmhd_build_ops
 !> Setup and allocate operators used in xMHD advance
 !------------------------------------------------------------------------------
 subroutine xmhd_alloc_ops
-integer(i4) :: i,j,level,levelin,offset
-INTEGER(i4), ALLOCATABLE :: color_tmp(:)
+integer(i4) :: i,j,level,levelin
 integer(i4), ALLOCATABLE :: j_lag(:)
 REAL(r8), POINTER :: node_flag(:)
 CLASS(oft_vector), POINTER :: vectmp
@@ -2357,6 +2360,7 @@ DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 allocate(ml_J(xmhd_ML_lagrange%nlevels-xmhd_minlev+1),ml_int(xmhd_ML_lagrange%nlevels-xmhd_minlev))
 allocate(oft_xmhd_ops_ML(xmhd_ML_lagrange%nlevels))
+allocate(xmhd_cell_ovl(xmhd_ML_lagrange%nlevels))
 xmhd_blevel=xmhd_ML_lagrange%blevel
 xmhd_nlevels=xmhd_ML_lagrange%nlevels
 xmhd_level=xmhd_ML_lagrange%level
@@ -2442,30 +2446,18 @@ do level=levelin,xmhd_minlev,-1
   ops=>oft_xmhd_ops
   CALL xmhd_rep%mat_create(ops%J,xmhd_mat_mask)
   ml_J(level-xmhd_minlev+1)%m=>ops%J
-  !---Set element coloring
-  IF(xmhd_nparts>1)THEN
-    SELECT TYPE(this=>ops%J)
-      CLASS IS(oft_native_matrix)
+  !---Create cell overlap builder and set element coloring (both from the same partition)
+  j=MAX(xmhd_nparts,1)
+  SELECT TYPE(this=>ops%J)
+    CLASS IS(oft_matrix)
+      IF(j>1)THEN
         ALLOCATE(this%color(this%nr))
-        this%color=0
-        offset=0
-        DO i=1,xmhd_rep%nfields
-          ALLOCATE(color_tmp(xmhd_rep%fields(i)%fe%ne))
-          SELECT TYPE(this=>xmhd_rep%fields(i)%fe)
-          CLASS IS(oft_fem_type)
-            CALL fem_partition(this,color_tmp,xmhd_nparts)
-          CLASS DEFAULT
-            CALL oft_abort("Invalid FE representation for partitioning", &
-              "xmhd_alloc_ops",__FILE__)
-          END SELECT
-          DO j=1,xmhd_rep%fields(i)%fe%ne
-            this%color(offset+j)=color_tmp(j)
-          END DO
-          offset=offset+xmhd_rep%fields(i)%fe%ne
-          DEALLOCATE(color_tmp)
-        END DO
-    END SELECT
-  END IF
+        CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_lagrange%ml_mesh,xmhd_rep,j,this%color)
+      ELSE
+        CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_lagrange%ml_mesh,xmhd_rep,j)
+      END IF
+      this%cell_ovl=>xmhd_cell_ovl(level)
+  END SELECT
 end do
 CALL ML_xmhd_rep%build_interp(xmhd_minlev)
 !---Alias
