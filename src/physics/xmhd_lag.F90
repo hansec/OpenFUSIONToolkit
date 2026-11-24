@@ -2448,8 +2448,9 @@ do level=levelin,xmhd_minlev,-1
   ml_J(level-xmhd_minlev+1)%m=>ops%J
   !---Create cell overlap builder and set element coloring (both from the same partition)
   j=MAX(xmhd_nparts,1)
+  !---(native matrices only, as for the previous coloring)
   SELECT TYPE(this=>ops%J)
-    CLASS IS(oft_matrix)
+    CLASS IS(oft_native_matrix)
       IF(j>1)THEN
         ALLOCATE(this%color(this%nr))
         CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_lagrange%ml_mesh,xmhd_rep,j,this%color)
