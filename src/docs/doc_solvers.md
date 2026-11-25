@@ -67,6 +67,24 @@ This method is supported through both the native and PETSc backends through
 | `groups`   | Group index (1..ngroups) for each field in multi-field vector [n] | int | Yes |
 | `boverlap` | Overlap boundary rows (native only) | bool | false |
 
+\subsection doc_solvers_basic_schur Physics-Based Block-Schur (xMHD)
+
+For 3D extended MHD (\ref xmhd), a physics-based Block-Schur preconditioner is provided
+through \ref xmhd::oft_xmhd_schur_pre "oft_xmhd_schur_pre". It partitions the system into
+magnetic (`Bc+Bg`), velocity (`Vx,Vy,Vz`), and optional scalar (`n,Ti,Te`) blocks and
+assembles an SPD parabolized Alfven + acoustic velocity Schur complement \f$ S_V \f$ across
+all MG levels so that p-MG / h-MG can be applied cleanly to the sub-blocks.
+
+**XML Spec:** `<xmhd><pre type="block_schur">`
+
+| Group        | Description | Type | Default |
+|--------------|-------------|------|---------|
+| `schur_type` | Factorization type (`lower`, `upper`, or `ldu`) | str | `ldu` |
+| `sv_scale`   | Scale factor on parabolized Alfven/acoustic term in \f$ S_V \f$ | real | `1.0` |
+| `b_pre`      | Solver or `<pre type="mg">` definition for magnetic block \f$ J_{BB} \f$ | xml | `gmres(2)+BJ(1,ilu)` |
+| `v_pre`      | Solver or `<pre type="mg">` definition for velocity Schur \f$ S_V \f$ | xml | MG on \f$ S_V \f$ |
+| `s_pre`      | Solver definition for scalar block \f$ J_{SS} \f$ (when active) | xml | `gmres(2)+BJ(-1,ilu)` |
+
 \subsection doc_solvers_basic_schwarz Additive Schwarz
 
 This method is currently only supported with the PETSc backend through

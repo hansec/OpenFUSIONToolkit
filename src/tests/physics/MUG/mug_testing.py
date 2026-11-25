@@ -214,14 +214,16 @@ def mpi_ranks(nbase, nlevels):
     return 2 if nbase != nlevels else 1
 
 
-def mug_command(exe, nlevels, order, minlev, petsc=False):
+def mug_command(exe, nlevels, order, minlev, petsc=False, xml_file=None):
     '''Command line for a 3-D xMHD test program, with an XML file selecting a fast preconditioner
 
     The tests do not need to exercise the default preconditioners, so native runs use a block-Jacobi/LU
     preconditioner: inside one GMRES iteration (`oft_in_xmhd.xml`) on a single level, or as the GMRES smoother of a
     multigrid preconditioner (`oft_in_xmhd_mg.xml`). The FE levels run from `minlev` to the mesh levels plus
-    `order-1`. PETSc runs keep the default preconditioners.
+    `order-1`. PETSc runs keep the default preconditioners unless `xml_file` is explicitly provided.
     '''
+    if xml_file is not None:
+        return "{0} oft.in {1}".format(exe, xml_file)
     if petsc:
         return exe
     if nlevels + order - 1 > minlev:
@@ -229,7 +231,7 @@ def mug_command(exe, nlevels, order, minlev, petsc=False):
     return "{0} oft.in oft_in_xmhd.xml".format(exe)
 
 
-def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,two_temp=False):
+def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,two_temp=False,xml_file=None):
     '''Write the input for a traveling sound wave and run test_sound (`representation` 'hcurl') or test_sound_lag
     ('lagrange')
 
@@ -253,7 +255,7 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
                                         mfnk=namelist_flag(mfnk), petsc=namelist_flag(petsc),
                                         mesh_type=(2 if hex_mesh else 1), two_temp=namelist_flag(two_temp),
                                         rep_options=rep_options))
-    return run_OFT(mug_command(exe, nlevels, order, minlev, petsc), mpi_ranks(nbase, nlevels), timeout)
+    return run_OFT(mug_command(exe, nlevels, order, minlev, petsc, xml_file=xml_file), mpi_ranks(nbase, nlevels), timeout)
 
 
 def validate_sound(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp=False):
@@ -265,7 +267,7 @@ def validate_sound(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp
 
 
 def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,
-                 bdf2=True):
+                 bdf2=True,xml_file=None):
     '''Write the input for a traveling shear Alfven wave and run test_alfven (`representation` 'hcurl') or
     test_alfven_lag ('lagrange')
 
@@ -294,7 +296,7 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
                                          linear=namelist_flag(linear), dt='8.E-7', nsteps='125', lin_tol=lin_tol,
                                          mfnk=namelist_flag(mfnk), petsc=namelist_flag(petsc),
                                          mesh_type=(2 if hex_mesh else 1), rep_options=rep_options))
-    return run_OFT(mug_command(exe, nlevels, order, minlev, petsc), mpi_ranks(nbase, nlevels), timeout)
+    return run_OFT(mug_command(exe, nlevels, order, minlev, petsc, xml_file=xml_file), mpi_ranks(nbase, nlevels), timeout)
 
 
 def validate_alfven(berr_exp,verr_exp,steps_exp=11,linear=False):

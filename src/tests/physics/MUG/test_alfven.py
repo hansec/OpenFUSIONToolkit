@@ -307,3 +307,23 @@ def test_hex_lin_r1_p4_mpi(petsc_flag):
     #assert alfven_setup(1,2,4,3,'0,0,2,2,2',linear=True,petsc=petsc_flag,hex_mesh=True)
     assert alfven_setup(1,2,4,4,'0,0,0,0,2',linear=True,petsc=petsc_flag,hex_mesh=True)
     assert validate_alfven(berr_exp,verr_exp,linear=True)
+
+#============================================================================
+# Block-Schur p-MG preconditioner tests
+@pytest.mark.linear
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_schur_lin_r1_p2(petsc_flag):
+    '''Linearized Alfven wave with physics-based Block-Schur p-MG preconditioner, serial.'''
+    berr_exp = 4.267325E-02
+    verr_exp = 2.124325E-02
+    assert alfven_setup(1,1,2,1,linear=True,petsc=petsc_flag,xml_file='oft_in_xmhd_schur.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+@pytest.mark.mpi
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_schur_lin_r1_p2_mpi(petsc_flag):
+    '''Linearized Alfven wave with physics-based Block-Schur p-MG preconditioner, two MPI processes.'''
+    berr_exp = 4.267325E-02
+    verr_exp = 2.124325E-02
+    assert alfven_setup(1,2,2,2,linear=True,petsc=petsc_flag,xml_file='oft_in_xmhd_schur.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
