@@ -417,6 +417,7 @@ TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_JSS => NULL() !< MG scalar-blo
 INTEGER(i4) :: gmres_maxits = 200
 INTEGER(i4) :: gmres_ninner = 20
 INTEGER(i4) :: xmhd_prefreq = 30 !< Desired update frequency for preconditioner
+INTEGER(i4) :: xmhd_nl_upfreq = 4 !< Newton iteration frequency for Jacobian re-assembly (non-MFNK)
 INTEGER(i4) :: xmhd_opcount = 1 !< Number of time steps since preconditioner update
 INTEGER(i4), DIMENSION(fem_max_levels) :: xmhd_nparts = 1 !< Total number of partitions for preconditioning (divided across MPI processes)
 REAL(r8) :: xmhd_opdt = 1.d0 !< Time step for current preconditioner object
@@ -508,6 +509,7 @@ CONTAINS
 !! | `me_factor=100`    | Electron mass factor | real |
 !! | `te_factor=1`      | Electron temperature factor (single temperature) | real |
 !! | `xmhd_prefreq=30`  | Frequency of full preconditioner update | int |
+!! | `xmhd_nl_upfreq=4` | Newton iteration frequency for Jacobian re-assembly when `xmhd_mfnk=F` | int |
 !! | `xmhd_monitor_div=F` | Monitor divergence error | bool |
 !! | `xmhd_mfnk=F`      | Use Matrix-Free NL solve | bool |
 !! | `nl_update=2`      | Update the preconditioner when a matrix-free NL solve takes at least this many iterations | int |
@@ -537,7 +539,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
   dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,vel_scale,xmhd_coarse_shift, &
-  xmhd_si,xmhd_si_sound,xmhd_si_full
+  xmhd_si,xmhd_si_sound,xmhd_si_full,xmhd_nl_upfreq
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -980,7 +982,7 @@ IF(xmhd_mfnk)THEN
   nksolver%up_freq=1
 ELSE
   nksolver%J_update=>xmhd_set_ops
-  nksolver%up_freq=4
+  nksolver%up_freq=MAX(1,xmhd_nl_upfreq)
 END IF
 !------------------------------------------------------------------------------
 ! Begin time stepping

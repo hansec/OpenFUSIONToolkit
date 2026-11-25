@@ -133,9 +133,10 @@ patch memory significantly) or combine it with an overlapped `block_jacobi` smoo
 
 \subsection doc_solvers_basic_schur Physics-Based Block-Schur (xMHD)
 
-For 3D extended MHD (\ref xmhd), a physics-based Block-Schur preconditioner is provided
-through \ref xmhd::oft_xmhd_schur_pre "oft_xmhd_schur_pre". It partitions the system into
-magnetic (`Bc+Bg`), velocity (`Vx,Vy,Vz`), and optional scalar (`n,Ti,Te`) blocks and
+For 3D extended MHD (\ref xmhd and \ref xmhd_lag), a physics-based Block-Schur preconditioner is provided
+through \ref xmhd::oft_xmhd_schur_pre "oft_xmhd_schur_pre" and \ref xmhd_lag::oft_xmhd_schur_pre
+"xmhd_lag::oft_xmhd_schur_pre". It partitions the system into magnetic (`Bc+Bg` in \ref xmhd or
+`Bx,By,Bz` in \ref xmhd_lag), velocity (`Vx,Vy,Vz`), and optional scalar (`n,Ti,Te`) blocks and
 assembles an SPD parabolized Alfven + acoustic velocity Schur complement \f$ S_V \f$ across
 all MG levels so that p-MG / h-MG can be applied cleanly to the sub-blocks.
 

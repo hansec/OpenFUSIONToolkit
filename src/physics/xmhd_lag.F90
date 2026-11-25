@@ -57,7 +57,8 @@ USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
 USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
-  create_cg_solver, create_diag_pre
+  create_cg_solver, create_diag_pre, create_gmres_solver, &
+  create_bjacobi_pre, create_ilu_pre
 !---
 USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
@@ -147,6 +148,9 @@ type :: xmhd_ops
   INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: b_bc_type => NULL() !< Magnetic field BC flag (see \ref xmhd_lag::xmhd_set_bc "xmhd_set_bc")
   INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: v_bc_type => NULL() !< Velocity BC flag (see \ref xmhd_lag::xmhd_set_bc "xmhd_set_bc")
   CLASS(oft_matrix), POINTER :: J => NULL() !< Jacobian matrix
+  CLASS(oft_matrix), POINTER :: J_BB => NULL() !< Magnetic (B) diagonal block for Block-Schur
+  CLASS(oft_matrix), POINTER :: S_V => NULL() !< Parabolized velocity Schur complement for Block-Schur
+  CLASS(oft_matrix), POINTER :: J_SS => NULL() !< Scalar (n,T) diagonal block for Block-Schur
   CLASS(oft_matrix), POINTER :: interp => NULL() !< Interpolation matrix
   TYPE(oft_xmhd_errmatrix) :: A !< NL metric matrix
 end type xmhd_ops
@@ -248,6 +252,54 @@ contains
   PROCEDURE :: inject => oft_xmhd_inject
 end type ml_xmhd_vecspace
 !------------------------------------------------------------------------------
+!> Multi-level vector space for magnetic (Bx,By,Bz) sub-block in Block-Schur MG
+!------------------------------------------------------------------------------
+TYPE, EXTENDS(oft_ml_fe_comp_vecspace) :: ml_xmhd_b_vecspace
+CONTAINS
+  !> Interpolate coarse B sub-vector to fine level
+  PROCEDURE :: interp => oft_xmhd_b_interp
+  !> Restrict fine B sub-vector to coarse level
+  PROCEDURE :: inject => oft_xmhd_b_inject
+END TYPE ml_xmhd_b_vecspace
+!------------------------------------------------------------------------------
+!> Multi-level vector space for velocity (Vx,Vy,Vz) sub-block in Block-Schur MG
+!------------------------------------------------------------------------------
+TYPE, EXTENDS(oft_ml_fe_comp_vecspace) :: ml_xmhd_v_vecspace
+CONTAINS
+  !> Interpolate coarse V sub-vector to fine level
+  PROCEDURE :: interp => oft_xmhd_v_interp
+  !> Restrict fine V sub-vector to coarse level
+  PROCEDURE :: inject => oft_xmhd_v_inject
+END TYPE ml_xmhd_v_vecspace
+!------------------------------------------------------------------------------
+!> Physics-based Block-Schur preconditioner for xMHD (Lagrange)
+!------------------------------------------------------------------------------
+TYPE, EXTENDS(oft_solver) :: oft_xmhd_schur_pre
+  INTEGER(i4) :: schur_type = 3 !< Factorization type: 1=lower, 2=upper, 3=LDU
+  INTEGER(i4) :: nscalars = 0 !< Number of scalar fields in S block
+  LOGICAL :: has_scalars = .FALSE. !< Whether scalar block S is active
+  CLASS(oft_solver), POINTER :: B_solver => NULL() !< Magnetic sub-block solver
+  CLASS(oft_solver), POINTER :: V_solver => NULL() !< Velocity Schur complement solver
+  CLASS(oft_solver), POINTER :: S_solver => NULL() !< Scalar sub-block solver
+  CLASS(oft_vector), POINTER :: w_full => NULL() !< Work vector in full xMHD space
+  CLASS(oft_vector), POINTER :: tmp_full => NULL() !< Work vector for A*w_full
+  CLASS(oft_vector), POINTER :: r_B => NULL() !< B sub-vector RHS
+  CLASS(oft_vector), POINTER :: z_B => NULL() !< B sub-vector solution
+  CLASS(oft_vector), POINTER :: dz_B => NULL() !< B sub-vector LDU correction
+  CLASS(oft_vector), POINTER :: r_V => NULL() !< V sub-vector RHS
+  CLASS(oft_vector), POINTER :: z_V => NULL() !< V sub-vector solution
+  CLASS(oft_vector), POINTER :: r_S => NULL() !< S sub-vector RHS
+  CLASS(oft_vector), POINTER :: z_S => NULL() !< S sub-vector solution
+  CLASS(oft_vector), POINTER :: dz_S => NULL() !< S sub-vector LDU correction
+CONTAINS
+  !> Apply Block-Schur preconditioner
+  PROCEDURE :: apply => schur_pre_apply
+  !> Update sub-block preconditioners after Jacobian rebuild
+  PROCEDURE :: update => schur_pre_update
+  !> Clean up internal storage
+  PROCEDURE :: delete => schur_pre_delete
+END TYPE oft_xmhd_schur_pre
+!------------------------------------------------------------------------------
 ! Global variables
 !------------------------------------------------------------------------------
 INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
@@ -272,6 +324,10 @@ LOGICAL :: xmhd_therm_equil = .FALSE. !< Include cross-species thermalization
 LOGICAL :: xmhd_diss_centered = .FALSE. !< Time-center dissipation terms
 LOGICAL :: xmhd_lin_bdf2 = .TRUE. !< Use BDF2 time integration for linear runs (otherwise backward Euler)
 LOGICAL :: xmhd_lin_euler_start = .FALSE. !< Start linear BDF2 runs with one backward Euler step
+REAL(r8) :: xmhd_si = 0.d0 !< Semi-implicit scale factor for the magnetic (Alfven) velocity increment term
+REAL(r8) :: xmhd_si_sound = 0.d0 !< Semi-implicit scale factor for the pressure (sound) velocity increment term
+LOGICAL :: xmhd_si_full = .FALSE. !< Include sign-indefinite J0 and grad(p0) terms in the semi-implicit operator
+CLASS(oft_vector), POINTER :: xmhd_si_ref => NULL() !< Start-of-step reference state for the semi-implicit operator
 LOGICAL :: xmhd_skip_update = .FALSE. !< Internal flag for skipping Jac update
 INTEGER(i4) :: te_ind = -1 !< Index of electron temperature field
 INTEGER(i4) :: n2_ind = -1 !< Index of hyper-diff aux field
@@ -348,9 +404,22 @@ TYPE(xmhd_ops), POINTER, DIMENSION(:) :: oft_xmhd_ops_ML => NULL() !< MG operato
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_int => NULL() !< MG interpolation operators
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_J => NULL() !< MG Jacobian operators
 CLASS(oft_solver), POINTER :: xmhd_pre => NULL() !< Preconditioner object
+!---Block-Schur preconditioning structures
+LOGICAL :: xmhd_use_schur = .FALSE. !< Use physics-based Block-Schur preconditioner
+LOGICAL :: xmhd_schur_has_s = .FALSE. !< Active scalar fields in Block-Schur
+REAL(r8) :: xmhd_schur_sv_scale = 1.d0 !< Scaling factor on parabolized Alfven/acoustic term in S_V
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_schur_B !< ML container for B (Bx,By,Bz) sub-block
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_schur_V !< ML container for V (Vx,Vy,Vz) sub-block
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_schur_S !< ML container for scalar sub-block
+TYPE(ml_xmhd_b_vecspace), TARGET :: xmhd_ml_b_vs !< ML vector space for B sub-block
+TYPE(ml_xmhd_v_vecspace), TARGET :: xmhd_ml_v_vs !< ML vector space for V sub-block
+TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_JBB => NULL() !< MG B-block Jacobians
+TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_SV => NULL() !< MG velocity Schur matrices
+TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_JSS => NULL() !< MG scalar-block Jacobians
 INTEGER(i4) :: gmres_maxits = 200
 INTEGER(i4) :: gmres_ninner = 20
 INTEGER(i4) :: xmhd_prefreq = 30 !< Desired update frequency for preconditioner
+INTEGER(i4) :: xmhd_nl_upfreq = 4 !< Newton iteration frequency for Jacobian re-assembly (non-MFNK)
 INTEGER(i4) :: xmhd_opcount = 1 !< Number of time steps since preconditioner update
 INTEGER(i4), DIMENSION(fem_max_levels) :: xmhd_nparts = 1 !< Total number of partitions for preconditioning (divided across MPI processes)
 REAL(r8) :: xmhd_opdt = 1.d0 !< Time step for current preconditioner object
@@ -401,6 +470,9 @@ CONTAINS
 !! | `xmhd_diss_centered=F` | Use time-centered dissipation terms for (V, Ti, Te) | bool |
 !! | `xmhd_lin_bdf2=T` | Linear runs only: use second-order BDF2 time integration (otherwise first-order backward Euler) | bool |
 !! | `xmhd_lin_euler_start=F` | Linear runs only: take one backward Euler step before BDF2, instead of using the initial condition for both BDF2 history levels (costs one extra preconditioner update) | bool |
+!! | `xmhd_si=0`        | Semi-implicit scale factor \f$ s \f$ for the magnetic velocity increment term \f$ s (\theta \Delta t)^2 W (V^{n+1}-V^n) \f$ (0 to disable). Pairs with `<pre type="block_schur">` for high-CFL robustness | real |
+!! | `xmhd_si_sound=0`  | Semi-implicit scale factor for the pressure (sound) part of the velocity increment term (requires `xmhd_adv_den` or `xmhd_adv_temp`) | real |
+!! | `xmhd_si_full=F`   | Include sign-indefinite \f$ J_0 \times \f$ and \f$ \nabla p_0 \f$ terms in the semi-implicit operator (default keeps \f$ W \f$ positive semidefinite) | bool |
 !! | `bbc="bc"`         | Magnetic field boundary condition ("bc": fixed normal component, "ic": fixed tangential components) | str(2) |
 !! | `vbc="all"`        | Velocity boundary condition ("all", "norm", "tang", "xml": per surface from `<vel_bc>`; velocity is always fixed in solid regions) | str(4) |
 !! | `nbc="d"`          | Density boundary condition ("d", "n", "x": per surface from `<den_bc>`) | str(1) |
@@ -435,6 +507,7 @@ CONTAINS
 !! | `me_factor=100`    | Electron mass factor | real |
 !! | `te_factor=1`      | Electron temperature factor (single temperature) | real |
 !! | `xmhd_prefreq=30`  | Frequency of full preconditioner update | int |
+!! | `xmhd_nl_upfreq=4` | Newton iteration frequency for Jacobian re-assembly when `xmhd_mfnk=F` | int |
 !! | `xmhd_monitor_div=F` | Monitor divergence error (ignored, the divergence error is always computed) | bool |
 !! | `xmhd_mfnk=F`      | Use Matrix-Free NL solve | bool |
 !! | `nl_update=2`      | Update the preconditioner when a matrix-free NL solve takes at least this many iterations | int |
@@ -463,7 +536,8 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   eta_temp,nu_par,nu_visc,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
-  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,k_db,vel_scale,xmhd_coarse_shift
+  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,k_db,vel_scale,xmhd_coarse_shift, &
+  xmhd_si,xmhd_si_sound,xmhd_si_full,xmhd_nl_upfreq
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -494,6 +568,8 @@ IF(nu_perp>=0.d0)THEN
   nu_visc=nu_perp
 END IF
 IF(dt_max<0.d0)dt_max=dt
+xmhd_use_schur=.FALSE.
+xmhd_schur_sv_scale=1.d0
 !---Look for xMHD node
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"xmhd",xmhd_root_node,ierr)
@@ -509,6 +585,10 @@ IF(ASSOCIATED(oft_env%xml))THEN
             CALL xml_get_element(xmhd_pre_node,"coarse_shift",shift_node,ierr)
             IF(ierr==0)CALL xml_read_content(shift_node,xmhd_coarse_shift,iostat=ierr)
           END IF
+        ELSE IF(TRIM(pre_type)=="block_schur")THEN
+          xmhd_use_schur=.TRUE.
+          CALL xml_get_element(xmhd_pre_node,"sv_scale",shift_node,ierr)
+          IF(ierr==0)CALL xml_read_content(shift_node,xmhd_schur_sv_scale,iostat=ierr)
         END IF
         DEALLOCATE(pre_type)
       END IF
@@ -834,7 +914,9 @@ solver%pm=oft_env%pm
 !------------------------------------------------------------------------------
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
-IF(nlevels==1)THEN
+IF(xmhd_use_schur)THEN
+  CALL xmhd_setup_schur_pre(solver%pre,nlevels,xmhd_pre_node)
+ELSE IF(nlevels==1)THEN
   IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
@@ -864,7 +946,7 @@ IF(xmhd_mfnk)THEN
   nksolver%up_freq=1
 ELSE
   nksolver%J_update=>xmhd_set_ops
-  nksolver%up_freq=4
+  nksolver%up_freq=MAX(1,xmhd_nl_upfreq)
 END IF
 !------------------------------------------------------------------------------
 ! Begin time stepping
@@ -939,6 +1021,7 @@ DO i=1,nsteps
     xmhd_opcount=xmhd_opcount+1
     !---Retry loop for solver failure
     CALL up%add(0.d0,1.d0,u)
+    IF((xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0))xmhd_si_ref=>up
     DO j=1,4
       !---Compute metric to get RHS
       IF(xmhd_hall.OR.xmhd_upwind)NULLIFY(oft_xmhd_ops%A%up)
@@ -1050,6 +1133,7 @@ CALL u%delete
 CALL up%delete
 CALL v%delete
 DEALLOCATE(u,up,v)
+NULLIFY(xmhd_si_ref)
 !--- extrapolation fields
 IF(maxextrap>1)THEN
   DO i=1,maxextrap
@@ -1357,7 +1441,9 @@ solver%pm=oft_env%pm
 !------------------------------------------------------------------------------
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
-IF(nlevels==1)THEN
+IF(xmhd_use_schur)THEN
+  CALL xmhd_setup_schur_pre(solver%pre,nlevels,xmhd_pre_node)
+ELSE IF(nlevels==1)THEN
   IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
@@ -1373,6 +1459,7 @@ ELSE
   DEALLOCATE(levels)
 END IF
 xmhd_pre=>solver%pre
+xmhd_pre%A=>oft_xmhd_ops%J
 !------------------------------------------------------------------------------
 ! Begin time stepping
 !------------------------------------------------------------------------------
@@ -1483,6 +1570,7 @@ DEALLOCATE(du,u0,v)
 CALL un1%delete
 CALL un2%delete
 DEALLOCATE(un1,un2)
+NULLIFY(xmhd_si_ref)
 !--- extrapolation fields
 IF(maxextrap>1)THEN
   DO i=1,maxextrap
@@ -1542,15 +1630,17 @@ END FUNCTION xmhd_elem_size
 !------------------------------------------------------------------------------
 !> Update Jacobian matrix with new fields
 !------------------------------------------------------------------------------
-subroutine xmhd_build_ops(fullin)
+subroutine xmhd_build_ops(fullin,refin)
 class(fem_interp), intent(inout) :: fullin !< Interpolator to evaluate fields
-TYPE(oft_local_mat), ALLOCATABLE, DIMENSION(:,:) :: mtmp,mtmp_solid
-type(oft_1d_int), allocatable, dimension(:) :: iloc
-INTEGER(i4) :: ii,i,ip,j,m,n,jr,jc,jp,nrows,jtmp(1),vi,vj,vl,vm,vk,vlc,li,lj
+class(fem_interp), optional, intent(inout) :: refin !< Optional start-of-step reference interpolator for semi-implicit term
+TYPE(oft_local_mat), ALLOCATABLE, DIMENSION(:,:) :: mtmp,mtmp_solid,mtmp_sv,mtmp_b,mtmp_s
+type(oft_1d_int), allocatable, dimension(:) :: iloc,iloc_b,iloc_v,iloc_s
+INTEGER(i4) :: ii,i,ip,j,m,n,jr,jc,jp,nrows,jtmp(1),vi,vj,vl,vm,vk,vlc,li,lj,ns_f
 integer(i4), allocatable, target :: j_lag(:),j_hcurl(:)
 INTEGER(i4), PARAMETER :: lev_cevita(3,6)=RESHAPE([1,2,3, 1,3,2, 2,3,1, 2,1,3, 3,1,2, 3,2,1],[3,6])
-integer(KIND=omp_lock_kind), allocatable, dimension(:) :: tlocks
+integer(KIND=omp_lock_kind), allocatable, dimension(:) :: tlocks,tlocks_b,tlocks_v,tlocks_s
 REAL(r8) :: f,diff,chi_temp(4),bmag,det,uvec(3),umat(3,3),nu_tmp(2),ten1(3,3)
+REAL(r8) :: c_sv,c_cs,si_ca,si_cs,si_p0,si_dp0(3),sv_p0,sv_dp0(3),fulltmp_ref(41)
 REAL(r8), ALLOCATABLE, TARGET :: lag_rop(:),lag_gop(:,:)
 REAL(r8), ALLOCATABLE, TARGET :: hcurl_rop(:,:),hcurl_cop(:,:)
 real(r8), allocatable :: lag_gopt(:,:),b_rop(:,:,:),b_cop(:,:,:)
@@ -1558,34 +1648,64 @@ class(oft_vector), pointer :: tmp
 real(r8) :: goptmp(3,4),vol,b(1,1),eta_curr,u,c1,c2,c3,c4,divv,tgam_fac,fulltmp(41)
 REAL(r8) :: bhat(3),dvT(3,3),pt(3),diff_tmp,c_gyro,krok_delta
 REAL(r8) :: he,v0_mag,cgop(3,6),uten(3,3,3),mass_fac,det_m
-logical :: curved
-class(oft_matrix), pointer :: Jac
+logical :: curved,build_si,si_ref
+class(oft_matrix), pointer :: Jac,Jac_B,Jac_V,Jac_S
 type(oft_quad_type), pointer :: quad
-type(xmhd_loc_values) :: u0
+type(xmhd_loc_values) :: u0,uref
 DEBUG_STACK_PUSH
 IF(oft_debug_print(2))write(*,'(4X,A,I4)')'Building xMHD Jacobian: ',xmhd_level
 !---
 Jac=>oft_xmhd_ops%J
+ns_f=0
+IF(xmhd_use_schur)THEN
+  Jac_B=>oft_xmhd_ops%J_BB
+  Jac_V=>oft_xmhd_ops%S_V
+  IF(xmhd_schur_has_s)THEN
+    Jac_S=>oft_xmhd_ops%J_SS
+    ns_f=ML_schur_S%nfields
+  END IF
+END IF
 quad=>xmhd_ML_lagrange%levels(xmhd_ML_lagrange%nlevels)%fe%quad
 tgam_fac=temp_gamma - 1.d0
 mass_fac=1.d0
 IF((xmhd_level<xmhd_nlevels).AND.(xmhd_coarse_shift>0.d0))mass_fac=1.d0+xmhd_coarse_shift
+build_si=(xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0)
+si_ref=build_si.AND.PRESENT(refin)
 !------------------------------------------------------------------------------
 ! Reset matrices
 !------------------------------------------------------------------------------
 CALL Jac%zero
+IF(xmhd_use_schur)THEN
+  CALL Jac_B%zero
+  CALL Jac_V%zero
+  IF(xmhd_schur_has_s)CALL Jac_S%zero
+END IF
 !--Setup thread locks
 ALLOCATE(tlocks(xmhd_rep%nfields))
 DO i=1,xmhd_rep%nfields
   call omp_init_lock(tlocks(i))
 END DO
+IF(xmhd_use_schur)THEN
+  ALLOCATE(tlocks_b(3),tlocks_v(3))
+  DO i=1,3
+    CALL omp_init_lock(tlocks_b(i))
+    CALL omp_init_lock(tlocks_v(i))
+  END DO
+  IF(xmhd_schur_has_s)THEN
+    ALLOCATE(tlocks_s(ns_f))
+    DO i=1,ns_f
+      CALL omp_init_lock(tlocks_s(i))
+    END DO
+  END IF
+END IF
 !------------------------------------------------------------------------------
 ! Construct matrix
 !------------------------------------------------------------------------------
 !$omp parallel private(det,det_m,j_lag,j_hcurl,lag_rop,lag_gop,hcurl_rop,b_rop,b_cop, &
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,jc,bhat,he,v0_mag,dvT,eta_curr,u,uvec,umat, &
-!$omp mtmp,mtmp_solid,chi_temp,bmag,c1,c2,c3,c4,divv,nu_tmp,ten1,cgop,fulltmp,lag_gopt,pt,diff_tmp, &
-!$omp uten,i,ii,iloc,u0,c_gyro,krok_delta,vi,vj,vl,vm,vk,vlc,li,lj)
+!$omp mtmp,mtmp_solid,mtmp_sv,mtmp_b,mtmp_s,iloc_b,iloc_v,iloc_s,chi_temp,bmag,c1,c2,c3,c4, &
+!$omp divv,nu_tmp,ten1,cgop,fulltmp,fulltmp_ref,lag_gopt,pt,diff_tmp,c_sv,c_cs,si_ca,si_cs, &
+!$omp si_p0,si_dp0,sv_p0,sv_dp0,uten,i,ii,iloc,u0,uref,c_gyro,krok_delta,vi,vj,vl,vm,vk,vlc,li,lj)
 !---Thread local arrays
 allocate(j_lag(oft_lagrange%nce))
 allocate(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce))
@@ -1608,6 +1728,26 @@ IF(j2_ind>0)THEN
   ALLOCATE(j_hcurl(oft_hcurl%nce))
   ALLOCATE(hcurl_rop(3,oft_hcurl%nce),hcurl_cop(3,oft_hcurl%nce))
   iloc(j2_ind)%v=>j_hcurl
+END IF
+IF(xmhd_use_schur)THEN
+  ALLOCATE(mtmp_sv(3,3),mtmp_b(3,3),iloc_b(3),iloc_v(3))
+  CALL ML_schur_V%current_level%mat_setup_local(mtmp_sv)
+  DO li=1,3
+    iloc_b(li)%v=>j_lag
+    iloc_v(li)%v=>j_lag
+    DO lj=1,3
+      mtmp_b(li,lj)%m=>mtmp(li,lj)%m
+    END DO
+  END DO
+  IF(xmhd_schur_has_s)THEN
+    ALLOCATE(mtmp_s(ns_f,ns_f),iloc_s(ns_f))
+    DO li=1,ns_f
+      iloc_s(li)%v=>iloc(6+li)%v
+      DO lj=1,ns_f
+        mtmp_s(li,lj)%m=>mtmp(6+li,6+lj)%m
+      END DO
+    END DO
+  END IF
 END IF
 !---Setup caching
 IF(xmhd_level==xmhd_nlevels)THEN
@@ -1632,6 +1772,7 @@ do ii=1,mesh%tloc_c(ip)%n
   IF(j2_ind>0)call oft_hcurl%ncdofs(i,j_hcurl)
   !---Zero local matrix
   CALL xmhd_rep%mat_zero_local(mtmp)
+  IF(xmhd_use_schur)CALL ML_schur_V%current_level%mat_zero_local(mtmp_sv)
 !------------------------------------------------------------------------------
 ! Quadrature Loop
 !------------------------------------------------------------------------------
@@ -2365,6 +2506,38 @@ do ii=1,mesh%tloc_c(ip)%n
       end do
     END IF
     END IF
+    !------------------------------------------------------------------------------
+    ! Semi-implicit velocity increment term and Block-Schur velocity operator S_V
+    !------------------------------------------------------------------------------
+    IF(build_si.AND.(.NOT.reg_solid(mesh%reg(i))))THEN
+      IF(si_ref)THEN
+        CALL refin%interp(i,quad%pts(:,m),goptmp,fulltmp_ref)
+        CALL xmhd_interp_unpack(fulltmp_ref,uref)
+      ELSE
+        uref = u0
+      END IF
+      si_p0 = uref%N*k_boltz*(uref%Ti+uref%Te)
+      si_dp0 = k_boltz*((uref%Ti+uref%Te)*uref%dN + uref%N*(uref%dTi+uref%dTe))
+      si_ca = 0.d0
+      IF(xmhd_jcb.AND.xmhd_adv_b)si_ca = xmhd_si*(jac_dt**2)*det/(uref%N*m_ion*mu0)
+      si_cs = 0.d0
+      IF(xmhd_adv_den.OR.xmhd_adv_temp)si_cs = xmhd_si_sound*(jac_dt**2)*det/(uref%N*m_ion)
+      CALL xmhd_si_local(mtmp(4:6,4:6),oft_lagrange%nce,lag_rop,lag_gop,uref%B,uref%J,si_p0,si_dp0,si_ca,si_cs,xmhd_si_full)
+    END IF
+    IF(xmhd_use_schur.AND.(.NOT.reg_solid(mesh%reg(i))))THEN
+      c_sv = 0.d0
+      IF(xmhd_jcb.AND.xmhd_adv_b)c_sv = xmhd_schur_sv_scale*(jac_dt**2)*det/(u0%N*m_ion*mu0)
+      c_cs = 0.d0
+      sv_p0 = 0.d0
+      sv_dp0 = 0.d0
+      IF(xmhd_adv_den.OR.xmhd_adv_temp)THEN
+        IF(xmhd_adv_den)sv_p0 = sv_p0 + 1.d0
+        IF(xmhd_adv_temp)sv_p0 = sv_p0 + tgam_fac
+        sv_p0 = (sv_p0/temp_gamma)*u0%N*k_boltz*(u0%Ti+u0%Te)
+        c_cs = xmhd_schur_sv_scale*(jac_dt**2)*det/(u0%N*m_ion)
+      END IF
+      CALL xmhd_si_local(mtmp_sv,oft_lagrange%nce,lag_rop,lag_gop,u0%B,u0%J,sv_p0,sv_dp0,c_sv,c_cs,.FALSE.)
+    END IF
 !------------------------------------------------------------------------------
 ! End quadrature loop
 !------------------------------------------------------------------------------
@@ -2399,12 +2572,24 @@ do ii=1,mesh%tloc_c(ip)%n
   CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%n_bc(j_lag),7)
   CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%t_bc(j_lag),8)
   IF(xmhd_two_temp)CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%t_bc(j_lag),te_ind)
+  !---Combine J_VV into parabolized S_V before velocity BCs
+  IF(xmhd_use_schur.AND.(.NOT.reg_solid(mesh%reg(i))))THEN
+    DO vj=1,3
+      DO vi=1,3
+        mtmp_sv(vi,vj)%m = mtmp_sv(vi,vj)%m + mtmp(3+vi,3+vj)%m
+      END DO
+    END DO
+  END IF
   !---Magnetic field and velocity BCs
-  CALL vec_bc_local(mtmp,j_lag,oft_xmhd_ops%b_bc_type,0)
-  CALL vec_bc_local(mtmp,j_lag,oft_xmhd_ops%v_bc_type,3)
+  CALL vec_bc_local(xmhd_rep,mtmp,j_lag,oft_xmhd_ops%b_bc_type,0)
+  CALL vec_bc_local(xmhd_rep,mtmp,j_lag,oft_xmhd_ops%v_bc_type,3)
+  IF(xmhd_use_schur.AND.(.NOT.reg_solid(mesh%reg(i))))THEN
+    CALL vec_bc_local(ML_schur_V%current_level,mtmp_sv,j_lag,oft_xmhd_ops%v_bc_type,0)
+  END IF
   !---Handle rotational periodicity
   IF(mesh%periodic%revolved)THEN
     CALL lagrange_vector_packblock(oft_lagrange,mtmp(4:6,4:6),j_lag)
+    IF(xmhd_use_schur.AND.(.NOT.reg_solid(mesh%reg(i))))CALL lagrange_vector_packblock(oft_lagrange,mtmp_sv,j_lag)
     IF(xmhd_adv_b)THEN
       CALL lagrange_vector_packblock(oft_lagrange,mtmp(1:3,1:3),j_lag)
       CALL lagrange_vector_packblock(oft_lagrange,mtmp(1:3,4:6),j_lag)
@@ -2424,8 +2609,14 @@ do ii=1,mesh%tloc_c(ip)%n
 !------------------------------------------------------------------------------
   IF(reg_solid(mesh%reg(i)))THEN
     CALL xmhd_rep%mat_add_local(Jac,mtmp_solid,iloc,tlocks)
+    IF(xmhd_use_schur)CALL ML_schur_B%current_level%mat_add_local(Jac_B,mtmp_b,iloc_b,tlocks_b)
   ELSE
     CALL xmhd_rep%mat_add_local(Jac,mtmp,iloc,tlocks)
+    IF(xmhd_use_schur)THEN
+      CALL ML_schur_B%current_level%mat_add_local(Jac_B,mtmp_b,iloc_b,tlocks_b)
+      CALL ML_schur_V%current_level%mat_add_local(Jac_V,mtmp_sv,iloc_v,tlocks_v)
+      IF(xmhd_schur_has_s)CALL ML_schur_S%current_level%mat_add_local(Jac_S,mtmp_s,iloc_s,tlocks_s)
+    END IF
   END IF
 end do
 END DO
@@ -2437,12 +2628,30 @@ NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !---Destroy local matrix
 CALL xmhd_rep%mat_destroy_local(mtmp)
 DEALLOCATE(mtmp,mtmp_solid,iloc)
+IF(xmhd_use_schur)THEN
+  CALL ML_schur_V%current_level%mat_destroy_local(mtmp_sv)
+  DEALLOCATE(mtmp_sv,mtmp_b,iloc_b,iloc_v)
+  IF(xmhd_schur_has_s)DEALLOCATE(mtmp_s,iloc_s)
+END IF
 !$omp end parallel
 !--Destroy thread locks
 DO i=1,xmhd_rep%nfields
   CALL omp_destroy_lock(tlocks(i))
 END DO
 DEALLOCATE(tlocks)
+IF(xmhd_use_schur)THEN
+  DO i=1,3
+    CALL omp_destroy_lock(tlocks_b(i))
+    CALL omp_destroy_lock(tlocks_v(i))
+  END DO
+  DEALLOCATE(tlocks_b,tlocks_v)
+  IF(xmhd_schur_has_s)THEN
+    DO i=1,ns_f
+      CALL omp_destroy_lock(tlocks_s(i))
+    END DO
+    DEALLOCATE(tlocks_s)
+  END IF
+END IF
 !------------------------------------------------------------------------------
 ! Set BC diagnoals
 !------------------------------------------------------------------------------
@@ -2450,8 +2659,17 @@ IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
 CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%n_bc,7)
 CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%t_bc,8)
 IF(xmhd_two_temp)CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%t_bc,te_ind)
-CALL vec_bc_diag(oft_xmhd_ops%b_bc_type,0,xmhd_bbcdir)
-CALL vec_bc_diag(oft_xmhd_ops%v_bc_type,3,xmhd_vbcdir)
+CALL vec_bc_diag(Jac,oft_xmhd_ops%b_bc_type,0,xmhd_bbcdir)
+CALL vec_bc_diag(Jac,oft_xmhd_ops%v_bc_type,3,xmhd_vbcdir)
+IF(xmhd_use_schur)THEN
+  CALL vec_bc_diag(Jac_B,oft_xmhd_ops%b_bc_type,0,xmhd_bbcdir)
+  CALL vec_bc_diag(Jac_V,oft_xmhd_ops%v_bc_type,0,xmhd_vbcdir)
+  IF(xmhd_schur_has_s)THEN
+    CALL fem_dirichlet_diag(oft_lagrange,Jac_S,oft_xmhd_ops%n_bc,1)
+    CALL fem_dirichlet_diag(oft_lagrange,Jac_S,oft_xmhd_ops%t_bc,2)
+    IF(xmhd_two_temp)CALL fem_dirichlet_diag(oft_lagrange,Jac_S,oft_xmhd_ops%t_bc,te_ind-6)
+  END IF
+END IF
 !------------------------------------------------------------------------------
 ! Final assembly
 !------------------------------------------------------------------------------
@@ -2459,6 +2677,22 @@ CALL oft_xmhd_create(tmp)
 CALL Jac%assemble(tmp)
 CALL tmp%delete
 DEALLOCATE(tmp)
+IF(xmhd_use_schur)THEN
+  CALL ML_schur_B%vec_create(tmp)
+  CALL Jac_B%assemble(tmp)
+  CALL tmp%delete
+  DEALLOCATE(tmp)
+  CALL ML_schur_V%vec_create(tmp)
+  CALL Jac_V%assemble(tmp)
+  CALL tmp%delete
+  DEALLOCATE(tmp)
+  IF(xmhd_schur_has_s)THEN
+    CALL ML_schur_S%vec_create(tmp)
+    CALL Jac_S%assemble(tmp)
+    CALL tmp%delete
+    DEALLOCATE(tmp)
+  END IF
+END IF
 DEBUG_STACK_POP
 CONTAINS
 !------------------------------------------------------------------------------
@@ -2469,7 +2703,8 @@ CONTAINS
 !! are zeroed for all components (`bc_type==1`) or the components normal to the axis of
 !! revolved meshes (`bc_type==-1`).
 !------------------------------------------------------------------------------
-SUBROUTINE vec_bc_local(mtmp,j_lag,bc_type,offset)
+SUBROUTINE vec_bc_local(fe_rep,mtmp,j_lag,bc_type,offset)
+CLASS(oft_fem_comp_type), INTENT(INOUT) :: fe_rep !< Composite FE representation
 TYPE(oft_local_mat), INTENT(INOUT) :: mtmp(:,:) !< Local matrix blocks
 INTEGER(i4), INTENT(IN) :: j_lag(:) !< Local to global Lagrange DOF mapping for cell
 INTEGER(i4), INTENT(IN) :: bc_type(:) !< BC type for each Lagrange node
@@ -2481,7 +2716,7 @@ IF(ANY(bc_type(j_lag)>1))THEN
     IF(bc_type(j_lag(jr))<=1)CYCLE
     IF(.NOT.oft_lagrange%global%gbe(j_lag(jr)))CYCLE
     CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),bc_type(j_lag(jr)),nn)
-    DO m=1,xmhd_rep%nfields
+    DO m=1,SIZE(mtmp,2)
       IF(.NOT.ASSOCIATED(mtmp(offset+1,m)%m))CYCLE
       DO jc=1,SIZE(mtmp(offset+1,m)%m,2)
         vtmp(1)=mtmp(offset+1,m)%m(jr,jc)
@@ -2495,14 +2730,15 @@ IF(ANY(bc_type(j_lag)>1))THEN
     END DO
   END DO
 END IF
-CALL xmhd_rep%mat_zero_local_rows(mtmp,(bc_type(j_lag)==1),offset+1)
-CALL xmhd_rep%mat_zero_local_rows(mtmp,(ABS(bc_type(j_lag))==1),offset+2)
-CALL xmhd_rep%mat_zero_local_rows(mtmp,(ABS(bc_type(j_lag))==1),offset+3)
+CALL fe_rep%mat_zero_local_rows(mtmp,(bc_type(j_lag)==1),offset+1)
+CALL fe_rep%mat_zero_local_rows(mtmp,(ABS(bc_type(j_lag))==1),offset+2)
+CALL fe_rep%mat_zero_local_rows(mtmp,(ABS(bc_type(j_lag))==1),offset+3)
 END SUBROUTINE vec_bc_local
 !------------------------------------------------------------------------------
 !> Set diagonal entries for boundary conditions on a vector Lagrange field
 !------------------------------------------------------------------------------
-SUBROUTINE vec_bc_diag(bc_type,offset,proj_bcs)
+SUBROUTINE vec_bc_diag(mat,bc_type,offset,proj_bcs)
+CLASS(oft_matrix), INTENT(INOUT) :: mat !< Target matrix
 INTEGER(i4), INTENT(IN) :: bc_type(:) !< BC type for each Lagrange node
 INTEGER(i4), INTENT(IN) :: offset !< Index of first vector component block minus one
 LOGICAL, INTENT(IN) :: proj_bcs !< Projected BCs present?
@@ -2519,16 +2755,62 @@ IF(proj_bcs)THEN
     CALL lagrange_vector_transmat(oft_lagrange,nn,j)
     DO jr=1,3
       DO jc=1,3
-        CALL Jac%add_values(jtmp,jtmp,nn(jr,jc),1,1,jr+offset,jc+offset)
+        CALL mat%add_values(jtmp,jtmp,nn(jr,jc),1,1,jr+offset,jc+offset)
       END DO
     END DO
   END DO
 END IF
-CALL fem_dirichlet_diag(oft_lagrange,Jac,(bc_type==1),offset+1)
-CALL fem_dirichlet_diag(oft_lagrange,Jac,(ABS(bc_type)==1),offset+2)
-CALL fem_dirichlet_diag(oft_lagrange,Jac,(ABS(bc_type)==1),offset+3)
+CALL fem_dirichlet_diag(oft_lagrange,mat,(bc_type==1),offset+1)
+CALL fem_dirichlet_diag(oft_lagrange,mat,(ABS(bc_type)==1),offset+2)
+CALL fem_dirichlet_diag(oft_lagrange,mat,(ABS(bc_type)==1),offset+3)
 END SUBROUTINE vec_bc_diag
 END SUBROUTINE xmhd_build_ops
+!------------------------------------------------------------------------------
+!> Add the parabolized (linearized ideal MHD) velocity operator to a 3x3 local matrix
+!!
+!! Adds, for Lagrange velocity test function \f$ \phi \f$ and trial function \f$ v \f$,
+!! \f[ c_a \left[ Q(\phi) \cdot Q(v) - \phi \cdot (J_0 \times Q(v)) \right]
+!!    + c_s (\nabla \cdot \phi) \left( \gamma p_0 \nabla \cdot v + v \cdot \nabla p_0 \right) \f]
+!! with \f$ Q(v) = (B_0 \cdot \nabla) v - B_0 (\nabla \cdot v) \f$. The \f$ J_0 \f$ and
+!! \f$ \nabla p_0 \f$ terms are only included when `full` is true; otherwise the operator
+!! is symmetric positive semidefinite.
+!------------------------------------------------------------------------------
+subroutine xmhd_si_local(mloc,nce,rop,gop,B0,J0,p0,dp0,ca,cs,full)
+TYPE(oft_local_mat), INTENT(inout) :: mloc(3,3) !< Local 3x3 velocity matrix blocks
+INTEGER(i4), INTENT(in) :: nce !< Number of Lagrange DOFs per cell
+REAL(r8), INTENT(in) :: rop(nce) !< Lagrange basis values
+REAL(r8), INTENT(in) :: gop(3,nce) !< Lagrange basis gradients
+REAL(r8), INTENT(in) :: B0(3) !< Magnetic field
+REAL(r8), INTENT(in) :: J0(3) !< Current density
+REAL(r8), INTENT(in) :: p0 !< Pressure
+REAL(r8), INTENT(in) :: dp0(3) !< Pressure gradient
+REAL(r8), INTENT(in) :: ca !< Coefficient for magnetic terms (includes quadrature weight)
+REAL(r8), INTENT(in) :: cs !< Coefficient for pressure terms (includes quadrature weight)
+LOGICAL, INTENT(in) :: full !< Include sign-indefinite J0 and grad(p0) terms
+INTEGER(i4) :: jr,jc,vm,vj
+REAL(r8) :: bdg(nce),qc(3),bq,jq(3),u
+DO jc=1,nce
+  bdg(jc) = DOT_PRODUCT(B0,gop(:,jc))
+END DO
+jq = 0.d0
+DO vm=1,3
+  DO jc=1,nce
+    qc = -B0*gop(vm,jc)
+    qc(vm) = qc(vm) + bdg(jc)
+    bq = DOT_PRODUCT(B0,qc)
+    IF(full)jq = cross_product(J0,qc)
+    DO vj=1,3
+      u = cs*temp_gamma*p0*gop(vm,jc)
+      IF(full)u = u + cs*rop(jc)*dp0(vm)
+      !$omp simd
+      DO jr=1,nce
+        mloc(vj,vm)%m(jr,jc) = mloc(vj,vm)%m(jr,jc) &
+          + ca*(bdg(jr)*qc(vj) - gop(vj,jr)*bq - rop(jr)*jq(vj)) + gop(vj,jr)*u
+      END DO
+    END DO
+  END DO
+END DO
+end subroutine xmhd_si_local
 !------------------------------------------------------------------------------
 !> Setup and allocate operators used in xMHD advance
 !------------------------------------------------------------------------------
@@ -2543,6 +2825,11 @@ DEBUG_STACK_PUSH
 ! Setup Operators and ML environment
 !------------------------------------------------------------------------------
 allocate(ml_J(xmhd_ML_lagrange%nlevels-xmhd_minlev+1),ml_int(xmhd_ML_lagrange%nlevels-xmhd_minlev))
+IF(xmhd_use_schur)THEN
+  ALLOCATE(ml_JBB(xmhd_ML_lagrange%nlevels-xmhd_minlev+1))
+  ALLOCATE(ml_SV(xmhd_ML_lagrange%nlevels-xmhd_minlev+1))
+  IF(xmhd_schur_has_s)ALLOCATE(ml_JSS(xmhd_ML_lagrange%nlevels-xmhd_minlev+1))
+END IF
 allocate(oft_xmhd_ops_ML(xmhd_ML_lagrange%nlevels))
 xmhd_blevel=xmhd_ML_lagrange%blevel
 xmhd_nlevels=xmhd_ML_lagrange%nlevels
@@ -2629,6 +2916,17 @@ do level=levelin,xmhd_minlev,-1
   ops=>oft_xmhd_ops
   CALL xmhd_rep%mat_create(ops%J,xmhd_mat_mask)
   ml_J(level-xmhd_minlev+1)%m=>ops%J
+  IF(xmhd_use_schur)THEN
+    CALL ML_schur_B%current_level%mat_create(ops%J_BB,xmhd_mat_mask(1:3,1:3))
+    ml_JBB(level-xmhd_minlev+1)%m=>ops%J_BB
+    CALL ML_schur_V%current_level%mat_create(ops%S_V,xmhd_mat_mask(4:6,4:6))
+    ml_SV(level-xmhd_minlev+1)%m=>ops%S_V
+    IF(xmhd_schur_has_s)THEN
+      CALL ML_schur_S%current_level%mat_create(ops%J_SS, &
+        xmhd_mat_mask(7:6+ML_schur_S%nfields,7:6+ML_schur_S%nfields))
+      ml_JSS(level-xmhd_minlev+1)%m=>ops%J_SS
+    END IF
+  END IF
   !---Set element coloring
   IF(xmhd_nparts(level)>1)THEN
     SELECT TYPE(this=>ops%J)
@@ -2650,11 +2948,23 @@ do level=levelin,xmhd_minlev,-1
   END IF
   !---Vertex-star patches for overlapping patch smoothers (see oft_patch_solvers)
   CALL comp_fem_vertex_patches(xmhd_rep,ops%J%patch_info)
+  IF(xmhd_use_schur)THEN
+    CALL comp_fem_vertex_patches(ML_schur_B%current_level,ops%J_BB%patch_info)
+    CALL comp_fem_vertex_patches(ML_schur_V%current_level,ops%S_V%patch_info)
+  END IF
 end do
 IF(mesh%periodic%revolved)THEN
   CALL build_ML_interp()
 ELSE
   CALL ML_xmhd_rep%build_interp(xmhd_minlev)
+END IF
+IF(xmhd_use_schur)THEN
+  IF(mesh%periodic%revolved)THEN
+    CALL oft_abort("Block-Schur with rotationally periodic MG not yet supported","xmhd_alloc_ops",__FILE__)
+  ELSE
+    CALL ML_schur_B%build_interp(xmhd_minlev)
+    CALL ML_schur_V%build_interp(xmhd_minlev)
+  END IF
 END IF
 !---Alias
 do level=levelin,xmhd_minlev,-1
@@ -3086,7 +3396,8 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j_lag,j_hcurl
 REAL(r8) :: f,diff,chi_temp(4),bmag,det
 REAL(r8) :: mloc(3,3),goptmp(3,4),vol,eta_curr,neg_vols(3),divv,diff_tmp
 REAL(r8) :: bhat(3),jp0q(3),np0q,vad(3),vad_mag,he,c1,cgop(3,6),nu_tmp(3),ten1(3,3)
-REAL(r8) :: diag_vals(8),pt(3),pt_r,floor_tmp(3),fulltmp(41),u,uvec(3),umat(3,3),ten2(3,3),ten3(3,3)
+REAL(r8) :: diag_vals(8),pt(3),pt_r,floor_tmp(3),fulltmp(41),fulltmp_ref(41),u,uvec(3),umat(3,3),ten2(3,3),ten3(3,3)
+REAL(r8) :: si_c,si_cs,si_q(3),si_bq
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: te_loc,j2_loc,n2_loc
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vpin_loc,lag_loc,b_loc
 REAL(r8), TARGET, ALLOCATABLE, DIMENSION(:) :: lag_rop
@@ -3095,10 +3406,10 @@ REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: npin
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: nout,tout,teout,j2out,n2out
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: vpin,bpin,vout,bout
 real(r8), pointer, dimension(:) :: vtmp
-logical :: curved,back_step
+logical :: curved,back_step,si_ref
 type(oft_quad_type), pointer :: quad
-TYPE(xmhd_interp) :: full_interp
-type(xmhd_loc_values) :: u0
+TYPE(xmhd_interp) :: full_interp,ref_interp
+type(xmhd_loc_values) :: u0,uref
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD non-linear function'
 quad=>oft_lagrange%quad
@@ -3108,6 +3419,11 @@ neg_vols=0.d0
 !------------------------------------------------------------------------------
 full_interp%u=>a
 CALL full_interp%setup(mesh)
+si_ref=((xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0)).AND.ASSOCIATED(xmhd_si_ref)
+IF(si_ref)THEN
+  ref_interp%u=>xmhd_si_ref
+  CALL ref_interp%setup(mesh)
+END IF
 !------------------------------------------------------------------------------
 ! Get local field values from previous step if necessary
 !------------------------------------------------------------------------------
@@ -3161,7 +3477,8 @@ IF(xmhd_taxis==2)ptind(2)=3
 !$omp parallel private(det,j_lag,j_hcurl,lag_rop,lag_gop,hcurl_rop,li, &
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,bhat,jp0q,vad,vad_mag,he,c1,cgop,divv,diff_tmp, &
 !$omp np0q,eta_curr,u,b_loc,lag_loc,pt_r,vpin_loc,chi_temp,te_loc, &
-!$omp j2_loc,n2_loc,bmag,uvec,umat,pt,nu_tmp,ten1,ten2,ten3,i,ii,floor_tmp,u0,fulltmp) &
+!$omp j2_loc,n2_loc,bmag,uvec,umat,pt,nu_tmp,ten1,ten2,ten3,i,ii,floor_tmp,u0,uref, &
+!$omp fulltmp,fulltmp_ref,si_c,si_cs,si_q,si_bq) &
 !$omp reduction(+:neg_vols) reduction(+:diag_vals)
 allocate(j_lag(oft_lagrange%nce))
 ALLOCATE(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce))
@@ -3446,6 +3763,30 @@ do ii=1,mesh%tloc_c(ip)%n
     !---Mass and scale
     umat = TRANSPOSE(umat)*self%dt*det
     uvec = (uvec*self%dt + u0%V)*det
+    !---Semi-implicit increment term s*dt^2*W_ref(V)
+    IF((xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0))THEN
+      IF(si_ref)THEN
+        CALL ref_interp%interp(i,quad%pts(:,m),goptmp,fulltmp_ref)
+        CALL xmhd_interp_unpack(fulltmp_ref,uref)
+      ELSE
+        uref = u0
+      END IF
+      si_c = 0.d0
+      IF(xmhd_jcb.AND.xmhd_adv_b)si_c = xmhd_si*self%dt*self%dt*det/(uref%N*m_ion*mu0)
+      si_cs = 0.d0
+      IF(xmhd_adv_temp.OR.xmhd_adv_den)si_cs = xmhd_si_sound*self%dt*self%dt*det/(uref%N*m_ion)
+      si_q = MATMUL(uref%B,u0%dV) - uref%B*divv
+      si_bq = DOT_PRODUCT(uref%B,si_q)
+      u = si_cs*temp_gamma*uref%N*k_boltz*(uref%Ti+uref%Te)*divv
+      IF(xmhd_si_full)THEN
+        uvec = uvec - si_c*cross_product(uref%J,si_q)
+        u = u + si_cs*k_boltz*DOT_PRODUCT(u0%V,(uref%Ti+uref%Te)*uref%dN + uref%N*(uref%dTi+uref%dTe))
+      END IF
+      DO j=1,3
+        umat(:,j) = umat(:,j) + si_c*uref%B(j)*si_q
+        umat(j,j) = umat(j,j) - si_c*si_bq + u
+      END DO
+    END IF
     !---Add contributions
     do jr=1,oft_lagrange%nce
       lag_loc(jr,1:3) = lag_loc(jr,1:3) + lag_rop(jr)*uvec &
@@ -3686,6 +4027,7 @@ IF(back_step)THEN
   IF(xmhd_upwind)DEALLOCATE(vpin)
 END IF
 CALL full_interp%delete
+IF(si_ref)CALL ref_interp%delete
 !----
 IF(neg_vols(1)>0.d0)WRITE(*,'(A,I6,A,ES11.3)') '[',oft_env%rank,'] NEG Ne volume   = ',REAL(neg_vols(1),4)
 IF(neg_vols(2)>0.d0)WRITE(*,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Ti volume   = ',REAL(neg_vols(2),4)
@@ -3742,12 +4084,12 @@ REAL(r8), TARGET, ALLOCATABLE :: lag_rop(:),lag_gop(:,:)
 real(r8), pointer, contiguous, dimension(:) :: neqin,nout,tout,teout
 real(r8), pointer, contiguous, dimension(:,:) :: vout,bout
 real(r8), pointer, dimension(:) :: vtmp
-real(r8) :: mloc(3,3),goptmp(3,4),vol,f,det,fulltmp(41)
-REAL(r8) :: neq,diag_vals(8),pt(3),pt_r
-logical :: curved,neq_present
+real(r8) :: mloc(3,3),goptmp(3,4),vol,f,det,fulltmp(41),fulltmp_eq(41)
+REAL(r8) :: neq,diag_vals(8),pt(3),pt_r,si_c,si_cs,si_divv,si_q(3),si_bq,si_u,si_f(3),umat(3,3)
+logical :: curved,neq_present,build_si
 type(oft_quad_type), pointer :: quad
-TYPE(xmhd_interp) :: full_interp
-type(xmhd_loc_values) :: u0
+TYPE(xmhd_interp) :: full_interp,eq_interp
+type(xmhd_loc_values) :: u0,ueq
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))write(*,'(2X,A)')'Apply xMHD mass matrix'
 quad=>oft_lagrange%quad
@@ -3762,6 +4104,11 @@ IF(ASSOCIATED(self%u0))THEN
   CALL self%u0%get_local(neqin,7)
 ELSE
   neq_present=.FALSE.
+END IF
+build_si=((xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0)).AND.ASSOCIATED(self%u0)
+IF(build_si)THEN
+  eq_interp%u=>self%u0
+  CALL eq_interp%setup(mesh)
 END IF
 !------------------------------------------------------------------------------
 ! Get local field values for result
@@ -3788,8 +4135,9 @@ IF(xmhd_taxis==2)ptind(2)=3
 !------------------------------------------------------------------------------
 ! Apply metric function
 !------------------------------------------------------------------------------
-!$omp parallel private(det,j_lag,lag_rop,lag_gop,u0,curved,goptmp,vol,j,m,jr,neq,pt,pt_r, &
-!$omp b_loc,te_loc,lag_loc,i,ii,fulltmp,mloc) reduction(+:diag_vals)
+!$omp parallel private(det,j_lag,lag_rop,lag_gop,u0,ueq,curved,goptmp,vol,j,m,jr,neq,pt,pt_r, &
+!$omp b_loc,te_loc,lag_loc,i,ii,fulltmp,fulltmp_eq,mloc,si_c,si_cs,si_divv,si_q,si_bq,si_u,si_f,umat) &
+!$omp reduction(+:diag_vals)
 allocate(j_lag(oft_lagrange%nce))
 allocate(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce))
 ALLOCATE(b_loc(oft_lagrange%nce,3),lag_loc(oft_lagrange%nce,5))
@@ -3828,6 +4176,10 @@ do ii=1,mesh%tloc_c(ip)%n
     !
     call full_interp%interp(i,quad%pts(:,m),goptmp,fulltmp)
     CALL xmhd_interp_unpack(fulltmp,u0)
+    IF(build_si)THEN
+      CALL eq_interp%interp(i,quad%pts(:,m),goptmp,fulltmp_eq)
+      CALL xmhd_interp_unpack(fulltmp_eq,ueq)
+    END IF
     !---Compute diagnostics
     pt_r = MAX(1.d-10,SUM(pt(ptind)**2))
     diag_vals(1) = diag_vals(1) + SUM(u0%B**2)*det
@@ -3872,6 +4224,30 @@ do ii=1,mesh%tloc_c(ip)%n
       IF(xmhd_adv_temp)lag_loc(jr,5) = lag_loc(jr,5) + lag_rop(jr)*u0%Ti*det
       IF(xmhd_two_temp)te_loc(jr) = te_loc(jr) + lag_rop(jr)*u0%Te*det
     end do
+    !---Semi-implicit modified velocity mass s*jac_dt^2*W(u_eq)*dV
+    IF(build_si)THEN
+      si_c = 0.d0
+      IF(xmhd_jcb.AND.xmhd_adv_b)si_c = xmhd_si*jac_dt*jac_dt*det/(ueq%N*m_ion*mu0)
+      si_cs = 0.d0
+      IF(xmhd_adv_temp.OR.xmhd_adv_den)si_cs = xmhd_si_sound*jac_dt*jac_dt*det/(ueq%N*m_ion)
+      si_divv = u0%dV(1,1)+u0%dV(2,2)+u0%dV(3,3)
+      si_q = MATMUL(ueq%B,u0%dV) - ueq%B*si_divv
+      si_bq = DOT_PRODUCT(ueq%B,si_q)
+      si_u = si_cs*temp_gamma*ueq%N*k_boltz*(ueq%Ti+ueq%Te)*si_divv
+      si_f = 0.d0
+      IF(xmhd_si_full)THEN
+        si_f = -si_c*cross_product(ueq%J,si_q)
+        si_u = si_u + si_cs*k_boltz*DOT_PRODUCT(u0%V,(ueq%Ti+ueq%Te)*ueq%dN + ueq%N*(ueq%dTi+ueq%dTe))
+      END IF
+      DO j=1,3
+        umat(:,j) = si_c*ueq%B(j)*si_q
+        umat(j,j) = umat(j,j) - si_c*si_bq + si_u
+      END DO
+      DO jr=1,oft_lagrange%nce
+        lag_loc(jr,1:3) = lag_loc(jr,1:3) + lag_rop(jr)*si_f &
+          + lag_gop(1,jr)*umat(:,1) + lag_gop(2,jr)*umat(:,2) + lag_gop(3,jr)*umat(:,3)
+      END DO
+    END IF
 !------------------------------------------------------------------------------
 ! End quadrature loop
 !------------------------------------------------------------------------------
@@ -3940,6 +4316,7 @@ DEALLOCATE(bout,vout,nout,tout)
 IF(ASSOCIATED(neqin))DEALLOCATE(neqin)
 IF(xmhd_two_temp)DEALLOCATE(teout)
 CALL full_interp%delete
+IF(build_si)CALL eq_interp%delete
 DEBUG_STACK_POP
 end subroutine xmhd_massmatrix_apply
 !------------------------------------------------------------------------------
@@ -4115,6 +4492,46 @@ IF(xmhd_minlev<0)xmhd_minlev=xmhd_nlevels
 IF(j2_ind>0)THEN
   IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_setup_rep",__FILE__)
 END IF
+!---Setup Block-Schur sub-field composite representations if enabled
+IF(xmhd_use_schur)THEN
+  IF(j2_ind>0)CALL oft_abort("Block-Schur preconditioner does not support hyper-resistivity yet", &
+    "xmhd_setup_rep",__FILE__)
+  ML_schur_B%nlevels=xmhd_ML_lagrange%nlevels
+  ML_schur_B%nfields=3
+  ALLOCATE(ML_schur_B%ml_fields(3),ML_schur_B%field_tags(3))
+  ML_schur_B%ml_fields(1)%ml=>xmhd_ML_lagrange
+  ML_schur_B%ml_fields(2)%ml=>xmhd_ML_lagrange
+  ML_schur_B%ml_fields(3)%ml=>xmhd_ML_lagrange
+  ML_schur_B%field_tags=(/'Bx','By','Bz'/)
+  CALL ML_schur_B%setup()
+  ML_schur_V%nlevels=xmhd_ML_lagrange%nlevels
+  ML_schur_V%nfields=3
+  ALLOCATE(ML_schur_V%ml_fields(3),ML_schur_V%field_tags(3))
+  ML_schur_V%ml_fields(1)%ml=>xmhd_ML_lagrange
+  ML_schur_V%ml_fields(2)%ml=>xmhd_ML_lagrange
+  ML_schur_V%ml_fields(3)%ml=>xmhd_ML_lagrange
+  ML_schur_V%field_tags=(/'Vx','Vy','Vz'/)
+  CALL ML_schur_V%setup()
+  xmhd_schur_has_s=(xmhd_adv_den.OR.xmhd_adv_temp)
+  IF(xmhd_schur_has_s)THEN
+    ML_schur_S%nlevels=xmhd_ML_lagrange%nlevels
+    ML_schur_S%nfields=ML_xmhd_rep%nfields-6
+    ALLOCATE(ML_schur_S%ml_fields(ML_schur_S%nfields),ML_schur_S%field_tags(ML_schur_S%nfields))
+    ML_schur_S%ml_fields(1)%ml=>xmhd_ML_lagrange
+    ML_schur_S%field_tags(1)='n'
+    ML_schur_S%ml_fields(2)%ml=>xmhd_ML_lagrange
+    ML_schur_S%field_tags(2)='T'
+    IF(xmhd_two_temp)THEN
+      ML_schur_S%ml_fields(te_ind-6)%ml=>xmhd_ML_lagrange
+      ML_schur_S%field_tags(te_ind-6)='Te'
+    END IF
+    IF(n2_ind>0)THEN
+      ML_schur_S%ml_fields(n2_ind-6)%ml=>xmhd_ML_lagrange
+      ML_schur_S%field_tags(n2_ind-6)='n2'
+    END IF
+    CALL ML_schur_S%setup()
+  END IF
+END IF
 end subroutine xmhd_setup_rep
 !------------------------------------------------------------------------------
 !> Set the current level for xMHD model
@@ -4126,6 +4543,11 @@ if(level>xmhd_ML_lagrange%nlevels.OR.level<=0)then
 end if
 CALL ML_xmhd_rep%set_level(level)
 xmhd_rep=>ML_xmhd_rep%current_level
+IF(xmhd_use_schur)THEN
+  CALL ML_schur_B%set_level(level)
+  CALL ML_schur_V%set_level(level)
+  IF(xmhd_schur_has_s)CALL ML_schur_S%set_level(level)
+END IF
 !---
 CALL xmhd_ML_lagrange%set_level(level)
 IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL oft_abort("Invalid FE object","xmhd_set_level",__FILE__)
@@ -4385,10 +4807,11 @@ end subroutine xmhd_interp_unpack
 !------------------------------------------------------------------------------
 subroutine xmhd_set_ops(uin)
 class(oft_vector), target, intent(inout) :: uin !< Current solution
-TYPE(xmhd_interp) :: full_interp
+TYPE(xmhd_interp) :: full_interp,ref_interp
 TYPE(cc_interp) :: fullcc_interp
 REAL(r8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: fullcc,fullcctmp
 integer(i4) :: i,l,k,levelin,minlev,qorder,nfields
+LOGICAL :: si_ref
 type(oft_timer) :: mytimer
 IF(xmhd_skip_update)THEN
   xmhd_skip_update=.FALSE.
@@ -4401,6 +4824,11 @@ IF(oft_debug_print(1))write(*,'(2X,A)')'Update xMHD Jacobians'
 NULLIFY(fullcc,fullcctmp)
 full_interp%u=>uin
 CALL full_interp%setup(mesh)
+si_ref=((xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0)).AND.ASSOCIATED(xmhd_si_ref)
+IF(si_ref)THEN
+  ref_interp%u=>xmhd_si_ref
+  CALL ref_interp%setup(mesh)
+END IF
 !------------------------------------------------------------------------------
 ! Construct Jacobian on each sublevel
 !------------------------------------------------------------------------------
@@ -4415,7 +4843,11 @@ do i=levelin,minlev,-1
 !------------------------------------------------------------------------------
   if(oft_lagrange%mesh%nc==mg_mesh%meshes(mg_mesh%mgdim)%nc)then
     !---Construct Jacobian
-    call xmhd_build_ops(full_interp)
+    IF(si_ref)THEN
+      call xmhd_build_ops(full_interp,ref_interp)
+    ELSE
+      call xmhd_build_ops(full_interp)
+    END IF
     !---Average on lowest level to cell centers
     if(oft_lagrange%order==1.AND.i>xmhd_minlev)then
       allocate(fullcc(nfields,mesh%nc))
@@ -4457,6 +4889,7 @@ end do
 if(ASSOCIATED(fullcc))deallocate(fullcc)
 if(ASSOCIATED(fullcctmp))deallocate(fullcctmp)
 call full_interp%delete()
+IF(si_ref)CALL ref_interp%delete()
 call xmhd_set_level(levelin)
 end subroutine xmhd_set_ops
 !------------------------------------------------------------------------------
@@ -5327,4 +5760,496 @@ IF(oft_env%head_proc)THEN
 END IF
 CALL oft_finalize()
 END SUBROUTINE xmhd_profile
+!------------------------------------------------------------------------------
+!> Zero constrained components of a 3-component vector Lagrange sub-vector (B or V)
+!!
+!! Uses the Lagrange representation `lag_rep` at the target MG level so sub-block MG
+!! transfers can enforce projected and Dirichlet BCs without mutating global level state.
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_subvec_bc_zero(lag_rep,u,bc_type)
+CLASS(oft_scalar_fem), INTENT(inout) :: lag_rep !< Lagrange FE representation for target level
+CLASS(oft_vector), INTENT(inout) :: u !< 3-component vector Lagrange sub-vector
+INTEGER(i4), INTENT(in) :: bc_type(:) !< BC type for each Lagrange node
+INTEGER(i4) :: i,j
+REAL(r8) :: nn(3,3)
+REAL(r8), POINTER, DIMENSION(:) :: vtmp
+REAL(r8), POINTER, DIMENSION(:,:) :: v3tmp
+DEBUG_STACK_PUSH
+ALLOCATE(v3tmp(lag_rep%ne,3))
+DO i=1,3
+  vtmp=>v3tmp(:,i)
+  CALL u%get_local(vtmp,iblock=i)
+END DO
+CALL lagrange_vector_unpack(lag_rep,v3tmp,.TRUE.)
+IF(ANY(bc_type>1))THEN
+  !$omp parallel do private(j,nn)
+  DO i=1,lag_rep%nbe
+    j=lag_rep%lbe(i)
+    IF(bc_type(j)<=1)CYCLE
+    IF(.NOT.lag_rep%global%gbe(j))CYCLE
+    CALL lag_vbc_tensor(lag_rep,j,bc_type(j),nn)
+    v3tmp(j,:)=MATMUL(nn,v3tmp(j,:))
+  END DO
+END IF
+!$omp parallel do
+DO i=1,lag_rep%ne
+  IF(bc_type(i)==1)v3tmp(i,1)=0.d0
+  IF(ABS(bc_type(i))==1)v3tmp(i,2:3)=0.d0
+END DO
+CALL lagrange_vector_repack(lag_rep,v3tmp,.TRUE.)
+DO i=1,3
+  vtmp=>v3tmp(:,i)
+  CALL u%restore_local(vtmp,iblock=i,wait=(i<3))
+END DO
+DEALLOCATE(v3tmp)
+DEBUG_STACK_POP
+END SUBROUTINE xmhd_subvec_bc_zero
+!------------------------------------------------------------------------------
+!> Interpolate magnetic (Bx,By,Bz) sub-vector for Block-Schur MG preconditioning
+!------------------------------------------------------------------------------
+SUBROUTINE oft_xmhd_b_interp(self,acors,afine)
+CLASS(ml_xmhd_b_vecspace), INTENT(inout) :: self !< ML vector space object
+CLASS(oft_vector), INTENT(inout) :: acors !< Coarse B sub-vector
+CLASS(oft_vector), INTENT(inout) :: afine !< Interpolated fine B sub-vector
+INTEGER(i4) :: lev
+CLASS(oft_scalar_fem), POINTER :: lag_loc
+DEBUG_STACK_PUSH
+CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level+1)
+lev=self%ML_FE_rep%level
+CALL afine%set(0.d0)
+CALL self%ML_FE_rep%interp_matrices(lev)%m%apply(acors,afine)
+IF(.NOT.oft_3D_lagrange_cast(lag_loc,xmhd_ML_lagrange%levels(lev)%fe)) &
+  CALL oft_abort("Invalid Lagrange FE object","oft_xmhd_b_interp",__FILE__)
+CALL xmhd_subvec_bc_zero(lag_loc,afine,oft_xmhd_ops_ML(lev)%b_bc_type)
+DEBUG_STACK_POP
+END SUBROUTINE oft_xmhd_b_interp
+!------------------------------------------------------------------------------
+!> Restrict magnetic (Bx,By,Bz) sub-vector for Block-Schur MG preconditioning
+!------------------------------------------------------------------------------
+SUBROUTINE oft_xmhd_b_inject(self,afine,acors)
+CLASS(ml_xmhd_b_vecspace), INTENT(inout) :: self !< ML vector space object
+CLASS(oft_vector), INTENT(inout) :: afine !< Fine B sub-vector
+CLASS(oft_vector), INTENT(inout) :: acors !< Restricted coarse B sub-vector
+INTEGER(i4) :: lev
+CLASS(oft_scalar_fem), POINTER :: lag_loc
+DEBUG_STACK_PUSH
+CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level-1)
+lev=self%ML_FE_rep%level
+CALL self%ML_FE_rep%interp_matrices(lev+1)%m%applyT(afine,acors)
+IF(.NOT.oft_3D_lagrange_cast(lag_loc,xmhd_ML_lagrange%levels(lev)%fe)) &
+  CALL oft_abort("Invalid Lagrange FE object","oft_xmhd_b_inject",__FILE__)
+CALL xmhd_subvec_bc_zero(lag_loc,acors,oft_xmhd_ops_ML(lev)%b_bc_type)
+DEBUG_STACK_POP
+END SUBROUTINE oft_xmhd_b_inject
+!------------------------------------------------------------------------------
+!> Interpolate velocity (Vx,Vy,Vz) sub-vector for Block-Schur MG preconditioning
+!------------------------------------------------------------------------------
+SUBROUTINE oft_xmhd_v_interp(self,acors,afine)
+CLASS(ml_xmhd_v_vecspace), INTENT(inout) :: self !< ML vector space object
+CLASS(oft_vector), INTENT(inout) :: acors !< Coarse velocity sub-vector
+CLASS(oft_vector), INTENT(inout) :: afine !< Interpolated fine velocity sub-vector
+INTEGER(i4) :: lev
+CLASS(oft_scalar_fem), POINTER :: lag_loc
+DEBUG_STACK_PUSH
+CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level+1)
+lev=self%ML_FE_rep%level
+CALL afine%set(0.d0)
+CALL self%ML_FE_rep%interp_matrices(lev)%m%apply(acors,afine)
+IF(.NOT.oft_3D_lagrange_cast(lag_loc,xmhd_ML_lagrange%levels(lev)%fe)) &
+  CALL oft_abort("Invalid Lagrange FE object","oft_xmhd_v_interp",__FILE__)
+CALL xmhd_subvec_bc_zero(lag_loc,afine,oft_xmhd_ops_ML(lev)%v_bc_type)
+DEBUG_STACK_POP
+END SUBROUTINE oft_xmhd_v_interp
+!------------------------------------------------------------------------------
+!> Restrict velocity (Vx,Vy,Vz) sub-vector for Block-Schur MG preconditioning
+!------------------------------------------------------------------------------
+SUBROUTINE oft_xmhd_v_inject(self,afine,acors)
+CLASS(ml_xmhd_v_vecspace), INTENT(inout) :: self !< ML vector space object
+CLASS(oft_vector), INTENT(inout) :: afine !< Fine velocity sub-vector
+CLASS(oft_vector), INTENT(inout) :: acors !< Restricted coarse velocity sub-vector
+INTEGER(i4) :: lev
+CLASS(oft_scalar_fem), POINTER :: lag_loc
+DEBUG_STACK_PUSH
+CALL self%ML_FE_rep%set_level(self%ML_FE_rep%level-1)
+lev=self%ML_FE_rep%level
+CALL self%ML_FE_rep%interp_matrices(lev+1)%m%applyT(afine,acors)
+IF(.NOT.oft_3D_lagrange_cast(lag_loc,xmhd_ML_lagrange%levels(lev)%fe)) &
+  CALL oft_abort("Invalid Lagrange FE object","oft_xmhd_v_inject",__FILE__)
+CALL xmhd_subvec_bc_zero(lag_loc,acors,oft_xmhd_ops_ML(lev)%v_bc_type)
+DEBUG_STACK_POP
+END SUBROUTINE oft_xmhd_v_inject
+!------------------------------------------------------------------------------
+!> Construct physics-based Block-Schur preconditioner from XML specification
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_setup_schur_pre(pre,nlevels,pre_node)
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Preconditioner object
+INTEGER(i4), INTENT(in) :: nlevels !< Number of MG levels
+TYPE(xml_node), INTENT(in) :: pre_node !< `<pre type="block_schur">` XML node
+TYPE(oft_xmhd_schur_pre), POINTER :: this
+TYPE(xml_node) :: sub_group,sub_node
+CHARACTER(LEN=:), ALLOCATABLE :: str_val
+INTEGER(i4) :: i,ierr
+INTEGER(i4), ALLOCATABLE :: levels(:)
+DEBUG_STACK_PUSH
+ALLOCATE(oft_xmhd_schur_pre::pre)
+SELECT TYPE(pre)
+  TYPE IS(oft_xmhd_schur_pre)
+    this=>pre
+  CLASS DEFAULT
+    CALL oft_abort("Failed to allocate Block-Schur preconditioner","xmhd_setup_schur_pre",__FILE__)
+END SELECT
+this%has_scalars=xmhd_schur_has_s
+IF(this%has_scalars)this%nscalars=ML_schur_S%nfields
+!---Read optional schur_type ("lower", "upper", "ldu")
+CALL xml_get_element(pre_node,"schur_type",sub_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(sub_node,str_val,iostat=ierr)
+  IF(ierr==0)THEN
+    SELECT CASE(TRIM(str_val))
+      CASE("lower")
+        this%schur_type=1
+      CASE("upper")
+        this%schur_type=2
+      CASE("ldu")
+        this%schur_type=3
+      CASE DEFAULT
+        CALL oft_abort("Invalid schur_type (use lower, upper, or ldu)","xmhd_setup_schur_pre",__FILE__)
+    END SELECT
+    DEALLOCATE(str_val)
+  END IF
+END IF
+!---Setup MG level list and vector spaces
+ALLOCATE(levels(nlevels))
+levels=(/(i,i=xmhd_minlev,xmhd_nlevels)/)
+xmhd_ml_b_vs%ML_FE_rep=>ML_schur_B
+xmhd_ml_v_vs%ML_FE_rep=>ML_schur_V
+!---Setup magnetic (B) sub-block solver
+CALL xml_get_element(pre_node,"b_pre",sub_group,ierr)
+IF(ierr==0)THEN
+  CALL setup_subblock_solver(this%B_solver,sub_group,ml_JBB,levels,nlevels,xmhd_ml_b_vs)
+ELSE
+  CALL create_gmres_solver(this%B_solver)
+  this%B_solver%its=2
+  SELECT TYPE(s=>this%B_solver)
+    TYPE IS(oft_native_gmres_solver)
+      s%nrits=2
+  END SELECT
+  CALL create_bjacobi_pre(this%B_solver%pre,1)
+  CALL create_ilu_pre(this%B_solver%pre%pre)
+END IF
+this%B_solver%A=>ml_JBB(nlevels)%m
+this%B_solver%full_residual=.FALSE.
+IF(ASSOCIATED(this%B_solver%pre))this%B_solver%pre%A=>ml_JBB(nlevels)%m
+!---Setup velocity Schur (S_V) sub-block solver
+CALL xml_get_element(pre_node,"v_pre",sub_group,ierr)
+IF(ierr==0)THEN
+  CALL setup_subblock_solver(this%V_solver,sub_group,ml_SV,levels,nlevels,xmhd_ml_v_vs)
+ELSE IF(nlevels>1)THEN
+  CALL create_mlpre(this%V_solver,ml_SV,levels,nlevels=nlevels, &
+    ml_vecspace=xmhd_ml_v_vs,stype=2,nu=nu_xmhd(xmhd_minlev:xmhd_nlevels))
+ELSE
+  CALL create_gmres_solver(this%V_solver)
+  this%V_solver%its=4
+  SELECT TYPE(s=>this%V_solver)
+    TYPE IS(oft_native_gmres_solver)
+      s%nrits=4
+  END SELECT
+  CALL create_bjacobi_pre(this%V_solver%pre,1)
+  CALL create_ilu_pre(this%V_solver%pre%pre)
+END IF
+this%V_solver%A=>ml_SV(nlevels)%m
+this%V_solver%full_residual=.FALSE.
+IF(ASSOCIATED(this%V_solver%pre))this%V_solver%pre%A=>ml_SV(nlevels)%m
+!---Setup scalar (S) sub-block solver if active
+IF(this%has_scalars)THEN
+  CALL xml_get_element(pre_node,"s_pre",sub_group,ierr)
+  IF(ierr==0)THEN
+    CALL xml_get_element(sub_group,"solver",sub_node,ierr)
+    IF(ierr/=0)CALL xml_get_element(sub_group,"pre",sub_node,ierr)
+    IF(ierr/=0)CALL oft_abort("No solver/pre element inside <s_pre>","xmhd_setup_schur_pre",__FILE__)
+    CALL create_solver_xml(this%S_solver,sub_node)
+  ELSE
+    CALL create_gmres_solver(this%S_solver)
+    this%S_solver%its=2
+    SELECT TYPE(s=>this%S_solver)
+      TYPE IS(oft_native_gmres_solver)
+        s%nrits=2
+    END SELECT
+    CALL create_bjacobi_pre(this%S_solver%pre,-1)
+    CALL create_ilu_pre(this%S_solver%pre%pre)
+  END IF
+  this%S_solver%A=>ml_JSS(nlevels)%m
+  this%S_solver%full_residual=.FALSE.
+  IF(ASSOCIATED(this%S_solver%pre))this%S_solver%pre%A=>ml_JSS(nlevels)%m
+END IF
+DEALLOCATE(levels)
+IF(oft_env%head_proc.AND.oft_debug_print(1))THEN
+  WRITE(*,'(2X,A,I2,A,ES10.2)')'Block-Schur preconditioner initialized: type=',this%schur_type, &
+    ', sv_scale=',xmhd_schur_sv_scale
+END IF
+DEBUG_STACK_POP
+CONTAINS
+SUBROUTINE setup_subblock_solver(sub_sol,group_node,mats_ml,levs,nlevs,ml_vs)
+CLASS(oft_solver), POINTER, INTENT(out) :: sub_sol
+TYPE(xml_node), INTENT(in) :: group_node
+TYPE(oft_matrix_ptr), INTENT(in) :: mats_ml(:)
+INTEGER(i4), INTENT(in) :: levs(:),nlevs
+CLASS(oft_ml_fe_comp_vecspace), TARGET, INTENT(in) :: ml_vs
+TYPE(xml_node) :: child_node,sm_node,sol_node
+CHARACTER(LEN=:), ALLOCATABLE :: stype_str
+INTEGER(i4) :: jerr
+LOGICAL :: is_mg
+is_mg=.FALSE.
+CALL xml_get_element(group_node,"pre",child_node,jerr)
+IF(jerr==0)THEN
+  CALL xml_read_attribute(child_node,"type",stype_str,iostat=jerr)
+  IF(jerr==0)THEN
+    IF(TRIM(stype_str)=="mg")is_mg=.TRUE.
+    DEALLOCATE(stype_str)
+  END IF
+ELSE
+  CALL xml_get_element(group_node,"solver",child_node,jerr)
+  IF(jerr/=0)CALL oft_abort("No <pre> or <solver> element in block-Schur sub-block","xmhd_setup_schur_pre",__FILE__)
+END IF
+IF(is_mg.AND.(nlevs>1))THEN
+  CALL create_mlpre(sub_sol,mats_ml,levs,nlevels=nlevs,ml_vecspace=ml_vs, &
+    stype=2,nu=nu_xmhd(xmhd_minlev:xmhd_nlevels),xml_root=child_node)
+ELSE IF(is_mg)THEN
+  !---Single-level fallback when <pre type="mg"> is given with nlevels==1
+  CALL xml_get_element(child_node,"smoother",sm_node,jerr)
+  IF(jerr/=0)CALL xml_get_element(child_node,"coarse",sm_node,jerr)
+  IF(jerr/=0)CALL oft_abort("Single-level fallback for <pre type=""mg""> requires <smoother> or <coarse>", &
+    "xmhd_setup_schur_pre",__FILE__)
+  CALL xml_get_element(sm_node,"solver",sol_node,jerr)
+  IF(jerr/=0)CALL oft_abort("No <solver> inside <smoother>/<coarse>","xmhd_setup_schur_pre",__FILE__)
+  CALL create_solver_xml(sub_sol,sol_node)
+ELSE
+  CALL create_solver_xml(sub_sol,child_node)
+END IF
+END SUBROUTINE setup_subblock_solver
+END SUBROUTINE xmhd_setup_schur_pre
+!------------------------------------------------------------------------------
+!> Apply physics-based Block-Schur preconditioner to xMHD residual
+!------------------------------------------------------------------------------
+SUBROUTINE schur_pre_apply(self,u,g)
+CLASS(oft_xmhd_schur_pre), INTENT(inout) :: self !< Preconditioner object
+CLASS(oft_vector), INTENT(inout) :: u !< Output preconditioned vector
+CLASS(oft_vector), INTENT(inout) :: g !< Input residual vector
+INTEGER(i4) :: k
+REAL(r8), POINTER :: vtmp(:)
+DEBUG_STACK_PUSH
+!---Allocate work vectors once
+IF(.NOT.self%initialized)THEN
+  CALL g%new(self%w_full)
+  CALL g%new(self%tmp_full)
+  CALL ML_schur_B%vec_create(self%r_B)
+  CALL ML_schur_B%vec_create(self%z_B)
+  CALL ML_schur_B%vec_create(self%dz_B)
+  CALL ML_schur_V%vec_create(self%r_V)
+  CALL ML_schur_V%vec_create(self%z_V)
+  IF(self%has_scalars)THEN
+    CALL ML_schur_S%vec_create(self%r_S)
+    CALL ML_schur_S%vec_create(self%z_S)
+    CALL ML_schur_S%vec_create(self%dz_S)
+  END IF
+  self%initialized=.TRUE.
+END IF
+!---Unpack input residual g into (r_B, r_V, r_S)
+NULLIFY(vtmp)
+DO k=1,3
+  CALL g%get_local(vtmp,iblock=k)
+  CALL self%r_B%restore_local(vtmp,iblock=k,wait=(k<3))
+  DEALLOCATE(vtmp)
+END DO
+DO k=1,3
+  CALL g%get_local(vtmp,iblock=3+k)
+  CALL self%r_V%restore_local(vtmp,iblock=k,wait=(k<3))
+  DEALLOCATE(vtmp)
+END DO
+IF(self%has_scalars)THEN
+  DO k=1,self%nscalars
+    CALL g%get_local(vtmp,iblock=6+k)
+    CALL self%r_S%restore_local(vtmp,iblock=k,wait=(k<self%nscalars))
+    DEALLOCATE(vtmp)
+  END DO
+END IF
+!---Apply block factorization
+IF(self%schur_type==2)THEN
+  !---Upper-triangular: solve S_V first, then back-substitute B and S
+  CALL self%z_V%set(0.d0)
+  CALL self%V_solver%apply(self%z_V,self%r_V)
+  CALL self%w_full%set(0.d0)
+  DO k=1,3
+    CALL self%z_V%get_local(vtmp,iblock=k)
+    CALL self%w_full%restore_local(vtmp,iblock=3+k,wait=(k<3))
+    DEALLOCATE(vtmp)
+  END DO
+  CALL self%A%apply(self%w_full,self%tmp_full)
+  DO k=1,3
+    CALL self%tmp_full%get_local(vtmp,iblock=k)
+    CALL self%dz_B%restore_local(vtmp,iblock=k,wait=(k<3))
+    DEALLOCATE(vtmp)
+  END DO
+  CALL self%r_B%add(1.d0,-1.d0,self%dz_B)
+  CALL self%z_B%set(0.d0)
+  CALL self%B_solver%apply(self%z_B,self%r_B)
+  IF(self%has_scalars)THEN
+    DO k=1,self%nscalars
+      CALL self%tmp_full%get_local(vtmp,iblock=6+k)
+      CALL self%dz_S%restore_local(vtmp,iblock=k,wait=(k<self%nscalars))
+      DEALLOCATE(vtmp)
+    END DO
+    CALL self%r_S%add(1.d0,-1.d0,self%dz_S)
+    CALL self%z_S%set(0.d0)
+    CALL self%S_solver%apply(self%z_S,self%r_S)
+  END IF
+ELSE
+  !---Lower-triangular (1) or Full LDU (3): solve B & S, eliminate into V, solve S_V
+  CALL self%z_B%set(0.d0)
+  CALL self%B_solver%apply(self%z_B,self%r_B)
+  IF(self%has_scalars)THEN
+    CALL self%z_S%set(0.d0)
+    CALL self%S_solver%apply(self%z_S,self%r_S)
+  END IF
+  !---Compute J_VB * z_B (+ J_VS * z_S) via full A%apply on (z_B, 0, z_S)
+  CALL self%w_full%set(0.d0)
+  DO k=1,3
+    CALL self%z_B%get_local(vtmp,iblock=k)
+    CALL self%w_full%restore_local(vtmp,iblock=k,wait=(k<3.OR.self%has_scalars))
+    DEALLOCATE(vtmp)
+  END DO
+  IF(self%has_scalars)THEN
+    DO k=1,self%nscalars
+      CALL self%z_S%get_local(vtmp,iblock=k)
+      CALL self%w_full%restore_local(vtmp,iblock=6+k,wait=(k<self%nscalars))
+      DEALLOCATE(vtmp)
+    END DO
+  END IF
+  CALL self%A%apply(self%w_full,self%tmp_full)
+  DO k=1,3
+    CALL self%tmp_full%get_local(vtmp,iblock=3+k)
+    CALL self%z_V%restore_local(vtmp,iblock=k,wait=(k<3))
+    DEALLOCATE(vtmp)
+  END DO
+  CALL self%r_V%add(1.d0,-1.d0,self%z_V)
+  !---Solve parabolized velocity Schur complement S_V * z_V = r_V*
+  CALL self%z_V%set(0.d0)
+  CALL self%V_solver%apply(self%z_V,self%r_V)
+  !---Back-substitute B (and S) for full LDU
+  IF(self%schur_type==3)THEN
+    CALL self%w_full%set(0.d0)
+    DO k=1,3
+      CALL self%z_V%get_local(vtmp,iblock=k)
+      CALL self%w_full%restore_local(vtmp,iblock=3+k,wait=(k<3))
+      DEALLOCATE(vtmp)
+    END DO
+    CALL self%A%apply(self%w_full,self%tmp_full)
+    DO k=1,3
+      CALL self%tmp_full%get_local(vtmp,iblock=k)
+      CALL self%r_B%restore_local(vtmp,iblock=k,wait=(k<3))
+      DEALLOCATE(vtmp)
+    END DO
+    CALL self%dz_B%set(0.d0)
+    CALL self%B_solver%apply(self%dz_B,self%r_B)
+    CALL self%z_B%add(1.d0,-1.d0,self%dz_B)
+    IF(self%has_scalars)THEN
+      DO k=1,self%nscalars
+        CALL self%tmp_full%get_local(vtmp,iblock=6+k)
+        CALL self%r_S%restore_local(vtmp,iblock=k,wait=(k<self%nscalars))
+        DEALLOCATE(vtmp)
+      END DO
+      CALL self%dz_S%set(0.d0)
+      CALL self%S_solver%apply(self%dz_S,self%r_S)
+      CALL self%z_S%add(1.d0,-1.d0,self%dz_S)
+    END IF
+  END IF
+END IF
+!---Pack (z_B, z_V, z_S) into output vector u
+IF(.NOT.self%has_scalars)THEN
+  !---Inactive scalar blocks have identity diagonal in J
+  CALL u%add(0.d0,1.d0,g)
+END IF
+DO k=1,3
+  CALL self%z_B%get_local(vtmp,iblock=k)
+  CALL u%restore_local(vtmp,iblock=k,wait=.TRUE.)
+  DEALLOCATE(vtmp)
+END DO
+DO k=1,3
+  CALL self%z_V%get_local(vtmp,iblock=k)
+  CALL u%restore_local(vtmp,iblock=3+k,wait=(k<3.OR.self%has_scalars))
+  DEALLOCATE(vtmp)
+END DO
+IF(self%has_scalars)THEN
+  DO k=1,self%nscalars
+    CALL self%z_S%get_local(vtmp,iblock=k)
+    CALL u%restore_local(vtmp,iblock=6+k,wait=(k<self%nscalars))
+    DEALLOCATE(vtmp)
+  END DO
+END IF
+DEBUG_STACK_POP
+END SUBROUTINE schur_pre_apply
+!------------------------------------------------------------------------------
+!> Update Block-Schur sub-block solvers after Jacobian rebuild
+!------------------------------------------------------------------------------
+SUBROUTINE schur_pre_update(self,new_pattern)
+CLASS(oft_xmhd_schur_pre), INTENT(inout) :: self !< Preconditioner object
+LOGICAL, OPTIONAL, INTENT(in) :: new_pattern !< Update matrix sparsity pattern?
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%B_solver))CALL self%B_solver%update(new_pattern)
+IF(ASSOCIATED(self%V_solver))CALL self%V_solver%update(new_pattern)
+IF(ASSOCIATED(self%S_solver))CALL self%S_solver%update(new_pattern)
+DEBUG_STACK_POP
+END SUBROUTINE schur_pre_update
+!------------------------------------------------------------------------------
+!> Destroy Block-Schur preconditioner internal storage
+!------------------------------------------------------------------------------
+SUBROUTINE schur_pre_delete(self,propogate)
+CLASS(oft_xmhd_schur_pre), INTENT(inout) :: self !< Preconditioner object
+LOGICAL, OPTIONAL, INTENT(in) :: propogate !< Propagate delete to sub-solvers?
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%B_solver))THEN
+  CALL self%B_solver%delete(propogate)
+  DEALLOCATE(self%B_solver)
+END IF
+IF(ASSOCIATED(self%V_solver))THEN
+  CALL self%V_solver%delete(propogate)
+  DEALLOCATE(self%V_solver)
+END IF
+IF(ASSOCIATED(self%S_solver))THEN
+  CALL self%S_solver%delete(propogate)
+  DEALLOCATE(self%S_solver)
+END IF
+IF(ASSOCIATED(self%w_full))THEN
+  CALL self%w_full%delete; DEALLOCATE(self%w_full)
+END IF
+IF(ASSOCIATED(self%tmp_full))THEN
+  CALL self%tmp_full%delete; DEALLOCATE(self%tmp_full)
+END IF
+IF(ASSOCIATED(self%r_B))THEN
+  CALL self%r_B%delete; DEALLOCATE(self%r_B)
+END IF
+IF(ASSOCIATED(self%z_B))THEN
+  CALL self%z_B%delete; DEALLOCATE(self%z_B)
+END IF
+IF(ASSOCIATED(self%dz_B))THEN
+  CALL self%dz_B%delete; DEALLOCATE(self%dz_B)
+END IF
+IF(ASSOCIATED(self%r_V))THEN
+  CALL self%r_V%delete; DEALLOCATE(self%r_V)
+END IF
+IF(ASSOCIATED(self%z_V))THEN
+  CALL self%z_V%delete; DEALLOCATE(self%z_V)
+END IF
+IF(ASSOCIATED(self%r_S))THEN
+  CALL self%r_S%delete; DEALLOCATE(self%r_S)
+END IF
+IF(ASSOCIATED(self%z_S))THEN
+  CALL self%z_S%delete; DEALLOCATE(self%z_S)
+END IF
+IF(ASSOCIATED(self%dz_S))THEN
+  CALL self%dz_S%delete; DEALLOCATE(self%dz_S)
+END IF
+self%initialized=.FALSE.
+DEBUG_STACK_POP
+END SUBROUTINE schur_pre_delete
 end module xmhd_lag

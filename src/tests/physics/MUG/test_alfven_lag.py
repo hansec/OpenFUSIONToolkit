@@ -361,3 +361,58 @@ def test_nl_r1_p2_patch_mpi():
     verr_exp = 2.842441E-02
     assert alfven_setup(1,2,2,2,xml_file='oft_in_xmhd_mg_patch.xml')
     assert validate_alfven(berr_exp,verr_exp)
+
+#============================================================================
+# Physics-based Block-Schur preconditioner with p-MG
+@pytest.mark.linear
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_schur_lin_r1_p2(petsc_flag):
+    '''Linearized Alfven wave with Block-Schur p-MG preconditioner, serial.'''
+    berr_exp = 4.2445515350299369E-002
+    verr_exp = 4.1907987520465033E-002
+    assert alfven_setup(1,1,2,1,linear=True,petsc=petsc_flag,xml_file='oft_in_xmhd_schur.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+@pytest.mark.mpi
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_schur_lin_r1_p2_mpi(petsc_flag):
+    '''Linearized Alfven wave with Block-Schur p-MG preconditioner, two MPI processes.'''
+    berr_exp = 4.2445515350299369E-002
+    verr_exp = 4.1907987520465033E-002
+    assert alfven_setup(1,2,2,2,linear=True,petsc=petsc_flag,xml_file='oft_in_xmhd_schur.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+def test_schur_patch_lin_r1_p2():
+    '''Linearized Alfven wave with Block-Schur p-MG and vertex-star patch smoother on B, serial.'''
+    berr_exp = 4.2445515350299369E-002
+    verr_exp = 4.1907987520465033E-002
+    assert alfven_setup(1,1,2,1,linear=True,petsc=False,xml_file='oft_in_xmhd_schur_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+@pytest.mark.mpi
+def test_schur_patch_lin_r1_p2_mpi():
+    '''Linearized Alfven wave with Block-Schur p-MG and vertex-star patch smoother on B, two MPI processes.'''
+    berr_exp = 4.2445515350299369E-002
+    verr_exp = 4.1907987520465033E-002
+    assert alfven_setup(1,2,2,2,linear=True,petsc=False,xml_file='oft_in_xmhd_schur_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+
+#============================================================================
+# Semi-implicit velocity increment (xmhd_si) with Block-Schur p-MG
+def test_si_nl_r1_p2():
+    '''Nonlinear Alfven wave with semi-implicit velocity increment (xmhd_si=1) and Block-Schur p-MG, serial.'''
+    berr_exp = 3.279583E-02
+    verr_exp = 2.842441E-02
+    assert alfven_setup(1,1,2,1,linear=False,petsc=False,xml_file='oft_in_xmhd_schur.xml',
+                        extra_options=' xmhd_si=1.\n xmhd_nl_upfreq=1\n')
+    assert validate_alfven(berr_exp,verr_exp,linear=False)
+@pytest.mark.linear
+@pytest.mark.parametrize("mpi", (False, True))
+def test_si_high_cfl_lin_r1_p2(mpi):
+    '''High-CFL linearized Alfven wave (dt=1e-4, CFL~30) with xmhd_si=1 and Block-Schur p-MG.'''
+    if mpi:
+        assert alfven_setup(1,2,2,2,linear=True,petsc=False,xml_file='oft_in_xmhd_schur.xml',
+                            dt='1.E-4',nsteps='5',extra_options=' xmhd_si=1.\n')
+    else:
+        assert alfven_setup(1,1,2,1,linear=True,petsc=False,xml_file='oft_in_xmhd_schur.xml',
+                            dt='1.E-4',nsteps='5',extra_options=' xmhd_si=1.\n')
