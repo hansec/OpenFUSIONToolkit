@@ -369,9 +369,10 @@ The star smoother is additive, damped by 1/λmax. Its two-grid is symmetric V(1,
 | 2 | i | 4.18 / 16.4 / 54.1 | .715 / .681 / .682 | 5.83 |
 | 2 | iis | 6.90 / 20.3 / 71.5 | .749 / .729 / .730 | |
 | 2 | iisl | 9.16 / 19.4 / 179 | .814 / .810 / .993 | |
-| 3 | i | 3.75 / … / … | .659 / … / … | (pending) |
+| 3 | i | 3.75 / 16.5 / 55.1 | .659 / .649 / .650 | 4.83 |
+| 3 | iisl | 15.7 / 20.1 / 158 | .857 / .757 / .905 | |
 
-The rest of the refined-mesh p = 3 star sweep was still running when this version was committed. Results will be added to `results/star_ref.txt`.
+The global iis transform is not computed for ref p = 3 (n > 9000).
 
 ### Findings
 

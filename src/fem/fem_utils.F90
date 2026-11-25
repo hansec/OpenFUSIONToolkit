@@ -18,8 +18,9 @@ USE oft_base
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_mesh, oft_bmesh, cell_is_curved
 USE oft_mesh_local, ONLY: mesh_local_partition
+USE oft_sort, ONLY: sort_array
 USE oft_stitching, ONLY: oft_global_stitch
-USE oft_la_base, ONLY: oft_matrix
+USE oft_la_base, ONLY: oft_matrix, oft_patch_info
 USE fem_base, ONLY: oft_afem_type, oft_fem_type, oft_bfem_type
 USE fem_composite, ONLY: oft_fem_comp_type
 IMPLICIT NONE
@@ -517,6 +518,247 @@ END DO
 DEALLOCATE(tloc_p,tloc_e,tloc_f,tloc_c)
 DEBUG_STACK_POP
 end subroutine comp_fem_partition_impl
+!------------------------------------------------------------------------------
+!> Build vertex-star patches for a composite FE representation
+!!
+!! One patch is created for each (global) mesh vertex. It contains every DOF of every
+!! field that lives on the vertex itself or on an edge, face or cell that contains the
+!! vertex (the "star" of the vertex). Local periodic copies of a vertex, which share a
+!! global index, are merged into a single patch. Patch DOF indices use the local
+!! composite numbering (fields concatenated in order) and are sorted.
+!!
+!! A colouring of the patches is also returned, such that no two patches of the same
+!! colour share a mesh cell. Patches of one colour are then decoupled for
+!! multiplicative (Gauss-Seidel-like) relaxation.
+!------------------------------------------------------------------------------
+subroutine comp_fem_vertex_patches(self_comp,pinfo)
+class(oft_fem_comp_type), intent(inout) :: self_comp !< Composite finite element structure
+TYPE(oft_patch_info), POINTER, intent(inout) :: pinfo !< Patch information (allocated here)
+TYPE(oft_1d_int), POINTER :: patches(:)
+INTEGER(i4), POINTER :: colors(:)
+INTEGER(i4) :: ncolors
+CLASS(oft_mesh), POINTER :: mesh
+INTEGER(i4) :: i,j,k,l,m,ii,jj,ifield,npatch,nv,ncl,ned,nfa,ndof,goffset,offset(4),nmax,c
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: vsort,vpatch,kvp,cells,edges,faces,vlist,cflag
+INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: lpsort,gkey
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: nshare,lshare
+INTEGER(i4) :: maxshare
+INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: gstructs
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: fe_ne
+DEBUG_STACK_PUSH
+!---Get mesh and field structure
+ALLOCATE(gstructs(4,self_comp%nfields),fe_ne(self_comp%nfields))
+DO ifield=1,self_comp%nfields
+  SELECT TYPE(this=>self_comp%fields(ifield)%fe)
+  CLASS IS(oft_fem_type)
+    IF(ifield==1)mesh=>this%mesh
+    gstructs(:,ifield)=this%gstruct
+    fe_ne(ifield)=this%ne
+  CLASS DEFAULT
+    CALL oft_abort("Invalid FE representation for patches","comp_fem_vertex_patches",__FILE__)
+  END SELECT
+END DO
+!---Group local vertices by global index (merges local periodic copies)
+ALLOCATE(lpsort(mesh%np),vsort(mesh%np),vpatch(mesh%np))
+DO i=1,mesh%np
+  lpsort(i)=mesh%global%lp(i)
+  vsort(i)=i
+END DO
+CALL sort_array(lpsort,vsort,mesh%np)
+npatch=0
+DO i=1,mesh%np
+  IF(i==1)THEN
+    npatch=npatch+1
+  ELSE IF(lpsort(i)/=lpsort(i-1))THEN
+    npatch=npatch+1
+  END IF
+  vpatch(vsort(i))=npatch
+END DO
+ALLOCATE(kvp(npatch+1))
+kvp=0
+DO i=1,mesh%np
+  kvp(vpatch(i)+1)=kvp(vpatch(i)+1)+1
+END DO
+kvp(1)=1
+DO i=1,npatch
+  kvp(i+1)=kvp(i+1)+kvp(i)
+END DO
+! vsort is ordered by global index, so vertices of patch i are vsort(kvp(i):kvp(i+1)-1)
+ALLOCATE(gkey(npatch))
+DO i=1,npatch
+  gkey(i)=lpsort(kvp(i))
+END DO
+DEALLOCATE(lpsort)
+!---Build patches
+ALLOCATE(patches(npatch))
+nmax=0
+DO i=1,mesh%np
+  nmax=MAX(nmax,mesh%kpc(i+1)-mesh%kpc(i))
+END DO
+nmax=nmax*MAXVAL(kvp(2:npatch+1)-kvp(1:npatch))
+!$omp parallel private(j,k,l,m,ii,jj,ifield,nv,ncl,ned,nfa,ndof,goffset,offset,cells,edges,faces,vlist)
+ALLOCATE(cells(nmax),edges(nmax*mesh%cell_ne),faces(nmax*mesh%cell_nf),vlist(nmax))
+!$omp do schedule(dynamic,16)
+DO i=1,npatch
+  !---Vertices
+  nv=kvp(i+1)-kvp(i)
+  vlist(1:nv)=vsort(kvp(i):kvp(i+1)-1)
+  !---Cells in star
+  ncl=0
+  DO j=1,nv
+    DO k=mesh%kpc(vlist(j)),mesh%kpc(vlist(j)+1)-1
+      ncl=ncl+1
+      cells(ncl)=mesh%lpc(k)
+    END DO
+  END DO
+  CALL unique_list(cells,ncl)
+  !---Edges and faces of star cells that contain a patch vertex
+  ned=0
+  nfa=0
+  DO j=1,ncl
+    DO k=1,mesh%cell_ne
+      ii=ABS(mesh%lce(k,cells(j)))
+      DO l=1,2
+        IF(ANY(vlist(1:nv)==mesh%le(l,ii)))THEN
+          ned=ned+1
+          edges(ned)=ii
+          EXIT
+        END IF
+      END DO
+    END DO
+    DO k=1,mesh%cell_nf
+      ii=ABS(mesh%lcf(k,cells(j)))
+      DO l=1,mesh%face_np
+        IF(ANY(vlist(1:nv)==mesh%lf(l,ii)))THEN
+          nfa=nfa+1
+          faces(nfa)=ii
+          EXIT
+        END IF
+      END DO
+    END DO
+  END DO
+  CALL unique_list(edges,ned)
+  CALL unique_list(faces,nfa)
+  !---Count and fill DOFs
+  ndof=0
+  DO ifield=1,self_comp%nfields
+    ndof=ndof+SUM(gstructs(:,ifield)*(/nv,ned,nfa,ncl/))
+  END DO
+  patches(i)%n=ndof
+  ALLOCATE(patches(i)%v(ndof))
+  ndof=0
+  goffset=0
+  DO ifield=1,self_comp%nfields
+    offset(1)=goffset
+    offset(2)=offset(1)+gstructs(1,ifield)*mesh%np
+    offset(3)=offset(2)+gstructs(2,ifield)*mesh%ne
+    offset(4)=offset(3)+gstructs(3,ifield)*mesh%nf
+    CALL add_dofs(patches(i)%v,ndof,vlist,nv,offset(1),gstructs(1,ifield))
+    CALL add_dofs(patches(i)%v,ndof,edges,ned,offset(2),gstructs(2,ifield))
+    CALL add_dofs(patches(i)%v,ndof,faces,nfa,offset(3),gstructs(3,ifield))
+    CALL add_dofs(patches(i)%v,ndof,cells,ncl,offset(4),gstructs(4,ifield))
+    goffset=goffset+fe_ne(ifield)
+  END DO
+  CALL sort_array(patches(i)%v,patches(i)%n)
+END DO
+DEALLOCATE(cells,edges,faces,vlist)
+!$omp end parallel
+!---Greedy colouring: patches sharing a cell get different colours
+ALLOCATE(colors(npatch),cflag(npatch+1))
+colors=0
+cflag=0
+ncolors=0
+DO i=1,npatch
+  DO j=kvp(i),kvp(i+1)-1
+    DO k=mesh%kpc(vsort(j)),mesh%kpc(vsort(j)+1)-1
+      c=mesh%lpc(k)
+      DO l=1,mesh%cell_np
+        m=colors(vpatch(mesh%lc(l,c)))
+        IF(m>0)cflag(m)=i
+      END DO
+    END DO
+  END DO
+  DO m=1,npatch+1
+    IF(cflag(m)/=i)EXIT
+  END DO
+  colors(i)=m
+  ncolors=MAX(ncolors,m)
+END DO
+!---Processes sharing each vertex (seam patches) and patch owner (lowest sharing rank)
+IF(ASSOCIATED(pinfo))CALL oft_abort("Patch information already exists","comp_fem_vertex_patches",__FILE__)
+ALLOCATE(pinfo)
+pinfo%npatch=npatch
+pinfo%ncolors=ncolors
+pinfo%patches=>patches
+pinfo%color=>colors
+ALLOCATE(pinfo%gid(npatch),pinfo%owner(npatch),pinfo%share(npatch))
+pinfo%gid=gkey
+pinfo%owner=oft_env%rank
+ALLOCATE(nshare(mesh%np))
+nshare=0
+maxshare=0
+IF(.NOT.mesh%fullmesh)THEN
+  DO j=1,mesh%pstitch%nproc_con
+    DO k=mesh%pstitch%kle(j),mesh%pstitch%kle(j+1)-1
+      l=mesh%lbp(mesh%pstitch%lle(1,k))
+      nshare(l)=nshare(l)+1
+    END DO
+  END DO
+END IF
+DO i=1,npatch
+  m=SUM(nshare(vsort(kvp(i):kvp(i+1)-1)))
+  pinfo%share(i)%n=0
+  ALLOCATE(pinfo%share(i)%v(m))
+END DO
+IF(.NOT.mesh%fullmesh)THEN
+  DO j=1,mesh%pstitch%nproc_con
+    DO k=mesh%pstitch%kle(j),mesh%pstitch%kle(j+1)-1
+      l=mesh%lbp(mesh%pstitch%lle(1,k))
+      i=vpatch(l)
+      IF(ANY(pinfo%share(i)%v(1:pinfo%share(i)%n)==mesh%pstitch%proc_con(j)))CYCLE
+      pinfo%share(i)%n=pinfo%share(i)%n+1
+      pinfo%share(i)%v(pinfo%share(i)%n)=mesh%pstitch%proc_con(j)
+    END DO
+  END DO
+END IF
+DO i=1,npatch
+  IF(pinfo%share(i)%n>0)THEN
+    CALL sort_array(pinfo%share(i)%v,pinfo%share(i)%n)
+    pinfo%owner(i)=MIN(oft_env%rank,pinfo%share(i)%v(1))
+  END IF
+END DO
+DEALLOCATE(nshare,gkey)
+DEALLOCATE(cflag,vsort,vpatch,kvp,gstructs,fe_ne)
+DEBUG_STACK_POP
+CONTAINS
+!---Add DOFs for a list of entities of one type for the current field
+SUBROUTINE add_dofs(dofs,ndof,ents,nents,off,g)
+INTEGER(i4), INTENT(inout) :: dofs(:),ndof
+INTEGER(i4), INTENT(in) :: ents(:),nents,off,g
+INTEGER(i4) :: je,jd
+DO je=1,nents
+  DO jd=1,g
+    ndof=ndof+1
+    dofs(ndof)=off+(ents(je)-1)*g+jd
+  END DO
+END DO
+END SUBROUTINE add_dofs
+!---Sort list and remove duplicate entries
+SUBROUTINE unique_list(list,n)
+INTEGER(i4), INTENT(inout) :: list(:),n
+INTEGER(i4) :: jl,nu
+IF(n==0)RETURN
+CALL sort_array(list,n)
+nu=1
+DO jl=2,n
+  IF(list(jl)/=list(nu))THEN
+    nu=nu+1
+    list(nu)=list(jl)
+  END IF
+END DO
+n=nu
+END SUBROUTINE unique_list
+end subroutine comp_fem_vertex_patches
 !------------------------------------------------------------------------------
 !> Set diagonal elements to one on owned rows according to BC flag
 !------------------------------------------------------------------------------

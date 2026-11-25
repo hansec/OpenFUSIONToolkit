@@ -647,6 +647,22 @@ CONTAINS
   PROCEDURE :: delete => cell_ovl_delete
 END TYPE oft_cell_overlap_builder
 !---------------------------------------------------------------------------------
+!> Overlapping row patches (eg. vertex stars) attached to a matrix for patch smoothers
+!!
+!! Patches whose defining entity is shared between processes ("seam" patches) are
+!! listed on every process holding part of them, with the same global key. Each
+!! seam patch is solved by a single owning process.
+!---------------------------------------------------------------------------------
+type, public :: oft_patch_info
+  integer(i4) :: npatch = 0 !< Number of local patches
+  integer(i4) :: ncolors = 0 !< Number of colors
+  type(oft_1d_int), pointer, dimension(:) :: patches => NULL() !< Local rows in each patch [npatch]
+  integer(i4), pointer, contiguous, dimension(:) :: color => NULL() !< Patch coloring, no shared rows or couplings between patches of one color [npatch]
+  integer(i8), pointer, contiguous, dimension(:) :: gid => NULL() !< Global patch key [npatch]
+  integer(i4), pointer, contiguous, dimension(:) :: owner => NULL() !< Process that solves each patch [npatch]
+  type(oft_1d_int), pointer, dimension(:) :: share => NULL() !< Other processes holding part of each patch (empty for interior patches) [npatch]
+end type oft_patch_info
+!---------------------------------------------------------------------------------
 !> Abstract matrix class
 !!
 !! Basic class for OFT matices (ex. fem operators)
@@ -663,6 +679,7 @@ type, abstract, public :: oft_matrix
   integer(i4) :: ncslice = 0 !< Number of owned columns
   integer(i4), pointer, contiguous, dimension(:) :: color => NULL() !< Element coloring
   class(oft_cell_overlap_builder), pointer :: cell_ovl => NULL() !< Cell overlap builder (not owned by the matrix)
+  type(oft_patch_info), pointer :: patch_info => NULL() !< Overlapping row patches for patch smoothers (optional)
   type(oft_map), pointer, dimension(:) :: i_map => NULL() !< Row block mapping
   type(oft_map), pointer, dimension(:) :: j_map => NULL() !< Column block mapping
   class(oft_vector), pointer :: D => NULL() !< Diagonal entries for scaling
@@ -981,7 +998,7 @@ ABSTRACT INTERFACE
   END SUBROUTINE oft_veccreate_proto
 END INTERFACE
 !---Declare public entities
-public vector_extrapolate, overlap_dofs_delete
+public vector_extrapolate, overlap_dofs_delete, matrix_delete_patches
 contains
 !---------------------------------------------------------------------------------
 !> Release resources of a cell overlap builder (default: nothing to do)
@@ -1329,6 +1346,30 @@ end subroutine matrix_applyt_cvec
 !!
 !! @note This subroutine is a dummy routine used to specify the interface
 !! of the member function and catch errors in uninitialized matrices.
+!---------------------------------------------------------------------------------
+!> Free patch (overlapping subdomain) information attached to a matrix
+!---------------------------------------------------------------------------------
+subroutine matrix_delete_patches(self)
+class(oft_matrix), intent(inout) :: self !< Matrix object
+integer(i4) :: i
+IF(.NOT.ASSOCIATED(self%patch_info))RETURN
+IF(ASSOCIATED(self%patch_info%patches))THEN
+  DO i=1,SIZE(self%patch_info%patches)
+    IF(ASSOCIATED(self%patch_info%patches(i)%v))DEALLOCATE(self%patch_info%patches(i)%v)
+  END DO
+  DEALLOCATE(self%patch_info%patches)
+END IF
+IF(ASSOCIATED(self%patch_info%share))THEN
+  DO i=1,SIZE(self%patch_info%share)
+    IF(ASSOCIATED(self%patch_info%share(i)%v))DEALLOCATE(self%patch_info%share(i)%v)
+  END DO
+  DEALLOCATE(self%patch_info%share)
+END IF
+IF(ASSOCIATED(self%patch_info%color))DEALLOCATE(self%patch_info%color)
+IF(ASSOCIATED(self%patch_info%gid))DEALLOCATE(self%patch_info%gid)
+IF(ASSOCIATED(self%patch_info%owner))DEALLOCATE(self%patch_info%owner)
+DEALLOCATE(self%patch_info)
+end subroutine matrix_delete_patches
 !---------------------------------------------------------------------------------
 subroutine matrix_delete(self)
 class(oft_matrix), intent(inout) :: self

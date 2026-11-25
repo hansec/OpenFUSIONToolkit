@@ -61,7 +61,7 @@ USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
 !---
 USE fem_base, ONLY: fem_max_levels, fem_common_linkage, oft_fem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp_vecspace
-USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
+USE fem_utils, ONLY: comp_fem_vertex_patches, fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec, &
   fem_map_flag, comp_fem_partition
 USE fem_cell_overlap, ONLY: oft_fem_cell_overlap, fem_cell_overlap_create
@@ -2626,6 +2626,8 @@ do level=levelin,xmhd_minlev,-1
         CALL comp_fem_partition(xmhd_rep,this%color,j)
       END IF
   END SELECT
+  !---Vertex-star patches for overlapping patch smoothers (see oft_patch_solvers)
+  CALL comp_fem_vertex_patches(xmhd_rep,ops%J%patch_info)
 end do
 IF(mesh%periodic%revolved)THEN
   CALL build_ML_interp()

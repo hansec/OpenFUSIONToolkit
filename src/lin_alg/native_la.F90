@@ -34,7 +34,7 @@ USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_map, oft_matrix_map, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
-  OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE
+  OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE, matrix_delete_patches
 USE oft_native_kernels
 USE oft_scatter, ONLY: oft_scatter_plan, scatter_plan_setup_local, scatter_plan_delete, scatter_local, &
   OFT_SCATTER_INSERT, OFT_SCATTER_ADD
@@ -2901,6 +2901,7 @@ CALL native_pattern_alias(self%pattern,self%kr,self%lc,self%map,self%linkage,sel
 IF(ASSOCIATED(self%color))DEALLOCATE(self%color)
 !---Cell overlap builder is not owned by the matrix
 NULLIFY(self%cell_ovl)
+CALL matrix_delete_patches(self)
 DEBUG_STACK_POP
 end subroutine mat_delete
 !---------------------------------------------------------------------------------
