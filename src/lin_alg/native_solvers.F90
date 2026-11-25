@@ -2048,8 +2048,25 @@ IF(.NOT.self%initialized)THEN
   color_avail=.FALSE.
   CALL solver_setup(self)
   IF(self%nlocal==-1)THEN
+    IF(self%A%ni>SIZE(self%slice_group))CALL oft_abort( &
+      "Matrix has more fields than supported slice_group size","bjprecond_apply",__FILE__)
     self%nlocal=-self%A%ni
     self%slice_group(1:self%A%ni)=(/(i,i=1,self%A%ni)/)
+  ELSE IF(self%nlocal<-1)THEN
+    IF(self%A%ni>SIZE(self%slice_group))CALL oft_abort( &
+      "Matrix has more fields than supported slice_group size","bjprecond_apply",__FILE__)
+    IF(ANY(self%slice_group(1:self%A%ni)<1))CALL oft_abort( &
+      "Invalid or incomplete `groups` specification for block Jacobi","bjprecond_apply",__FILE__)
+    ngroups=MAXVAL(self%slice_group(1:self%A%ni))
+    DO i=1,ngroups
+      IF(.NOT.ANY(self%slice_group(1:self%A%ni)==i))CALL oft_abort( &
+        "Empty group index in `groups` specification for block Jacobi","bjprecond_apply",__FILE__)
+    END DO
+    IF(ngroups==1)THEN
+      self%nlocal=1
+    ELSE
+      self%nlocal=-ngroups
+    END IF
   END IF
   IF(ASSOCIATED(A_native%color))THEN
     ncolors=MAXVAL(A_native%color)
@@ -2096,7 +2113,7 @@ IF(.NOT.self%initialized)THEN
         !---Use slice partitioning
         self%nlocal=ABS(self%nlocal)
         IF(color_avail)THEN
-          ngroups=MAXVAL(self%slice_group)
+          ngroups=MAXVAL(self%slice_group(1:self%A%ni))
           j=0
           DO i=1,self%A%ni
             DO k=1,self%A%i_map(i)%n
@@ -2150,7 +2167,7 @@ IF(.NOT.self%initialized)THEN
         !---Use slice partitioning
         self%nlocal=ABS(self%nlocal)
         IF(color_avail)THEN
-          ngroups=MAXVAL(self%slice_group)
+          ngroups=MAXVAL(self%slice_group(1:self%A%ni))
           DO i=1,self%A%ni
             DO k=1,self%A%i_map(i)%nslice
               j=self%A%i_map(i)%offset+self%A%i_map(i)%slice(k)
@@ -2404,10 +2421,11 @@ IF(self%nlocal<-1)THEN
     CALL xml_read_content(current_node,read_tmp,iostat=ierr)
     IF(ierr/=0)CALL oft_xml_abort("Error reading `groups` node","bjprecond_setup_xml",__FILE__)
     IF(ASSOCIATED(read_tmp))THEN
-      IF(SIZE(read_tmp)>10)THEN
+      IF(SIZE(read_tmp)>SIZE(self%slice_group))THEN
         CALL oft_abort("Too many slice groups specified","bjprecond_setup_xml",__FILE__)
       ELSE
-        self%slice_group=read_tmp(1)
+        self%slice_group=-1
+        self%slice_group(1:SIZE(read_tmp))=read_tmp
       END IF
       DEALLOCATE(read_tmp)
     END IF

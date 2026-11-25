@@ -25,6 +25,10 @@ oft_in_template = """
 &cube_options
  mesh_type=1
 /
+
+&test_xml_options
+ test_type={1}
+/
 """
 #
 xml_template = """
@@ -34,11 +38,11 @@ xml_template = """
 """
 
 # Common setup function and process handling
-def xml_setup(xml_file, petsc=False):
+def xml_setup(xml_file, petsc=False, test_type=1):
     os.chdir(test_dir)
     petsc_flag=('T' if petsc else 'F')
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(petsc_flag))
+        fid.write(oft_in_template.format(petsc_flag, test_type))
     with open('oft_in.xml','w+') as fid:
         fid.write(xml_template.format(xml_file))
     return run_OFT("./test_solver_xml oft.in oft_in.xml", 1, 60)
@@ -124,3 +128,50 @@ def test_cg_jacobi(petsc_flag):
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=petsc_flag)
     assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# Test native block-Jacobi custom field groupings (<nlocal> < -1 and <groups>)
+def test_gmres_bjacobi_groups():
+    xml_split = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="block_jacobi">
+            <nlocal>-1</nlocal>
+            <solver type="lu"></solver>
+        </pre>
+    </solver>
+    """
+    xml_grouped = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="block_jacobi">
+            <nlocal>-2</nlocal>
+            <groups>1 1 2</groups>
+            <solver type="lu"></solver>
+        </pre>
+    </solver>
+    """
+    xml_coupled = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="block_jacobi">
+            <nlocal>1</nlocal>
+            <solver type="lu"></solver>
+        </pre>
+    </solver>
+    """
+    def run_case(xml_str):
+        assert xml_setup(xml_str, petsc=False, test_type=2)
+        with open('xml.results', 'r') as fid:
+            return int(fid.readline()), float(fid.readline())
+
+    its_split, uu_split = run_case(xml_split)
+    its_grouped, uu_grouped = run_case(xml_grouped)
+    its_coupled, uu_coupled = run_case(xml_coupled)
+    assert abs(uu_split - uu_coupled) < 1.E-6
+    assert abs(uu_grouped - uu_coupled) < 1.E-6
+    assert its_coupled == 1
+    assert 1 < its_grouped < its_split

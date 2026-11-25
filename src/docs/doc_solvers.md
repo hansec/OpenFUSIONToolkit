@@ -63,8 +63,8 @@ This method is supported through both the native and PETSc backends through
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
-| `nlocal`   | Number of local blocks (-1 for field based) | int | Yes |
-| `groups`   | Group index for each field in multi-field vector [n] | int | Yes |
+| `nlocal`   | Number of local blocks (-1 for per-field, <-1 for custom field `groups`) | int | Yes |
+| `groups`   | Group index (1..ngroups) for each field in multi-field vector [n] | int | Yes |
 | `boverlap` | Overlap boundary rows (native only) | bool | false |
 
 \subsection doc_solvers_basic_schwarz Additive Schwarz
