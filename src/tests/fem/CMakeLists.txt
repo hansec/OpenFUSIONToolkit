@@ -14,6 +14,7 @@ if( OFT_BUILD_TESTS )
   # Conforming FE sequence tests
   oft_add_test( test_h1.F90 )
   configure_file( test_h1.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  oft_add_test( diag_hcurl_grad_cond.F90 )
   oft_add_test( test_hcurl.F90 )
   configure_file( test_hcurl.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   oft_add_test( test_hcurl_sop.F90 )
