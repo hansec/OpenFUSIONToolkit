@@ -23,6 +23,7 @@ USE oft_native_solvers, ONLY: oft_native_cg_solver, native_cg_solver_cast, &
   oft_native_gmres_solver, native_gmres_solver_cast, oft_jblock_precond, &
   oft_ml_precond, jblock_precond_cast, &
   ml_precond_cast, oft_diag_scale, diag_scale_cast, oft_bjprecond
+USE oft_patch_solvers, ONLY: oft_patch_precond
 USE oft_lu, ONLY: oft_lusolver, oft_ilusolver
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, oft_petsc_matrix_cast
@@ -541,6 +542,10 @@ SELECT CASE(solver_type)
       CALL create_native_pre(solver,"block_jacobi")
       native_solver=.TRUE.
     END IF
+  CASE("patch")
+    IF(use_petsc)CALL oft_abort("Patch smoother requires native linear algebra","create_solver_xml",__FILE__)
+    CALL create_native_pre(solver,"patch")
+    native_solver=.TRUE.
   CASE("add_schwarz")
     IF(use_petsc)THEN
       CALL create_petsc_pre(solver,"add_schwarz")
@@ -591,6 +596,8 @@ SELECT CASE(TRIM(pre_type))
     ALLOCATE(oft_diag_scale::pre)
   CASE("block_jacobi")
     ALLOCATE(oft_bjprecond::pre)
+  CASE("patch")
+    ALLOCATE(oft_patch_precond::pre)
   CASE("lu")
     ALLOCATE(oft_lusolver::pre)
   CASE("ilu")
@@ -721,6 +728,9 @@ SELECT CASE(pre_type)
     ELSE
       CALL create_native_pre(pre,"block_jacobi")
     END IF
+  CASE("patch")
+    IF(use_petsc)CALL oft_abort("Patch smoother requires native linear algebra","create_pre_xml",__FILE__)
+    CALL create_native_pre(pre,"patch")
   CASE("add_schwarz")
     IF(use_petsc)THEN
       CALL create_petsc_pre(pre,"add_schwarz")

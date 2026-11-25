@@ -34,6 +34,23 @@ def test_nl_r1_p2_mpi(mf,petsc_flag):
     assert alfven_setup(1,2,2,3,mf=mf,petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 
+# p-multigrid with the vertex-star patch smoother (oft_in_xmhd_mg_patch.xml); errors match the direct solves
+def test_nl_r1_p2_patch():
+    '''Nonlinear Alfven wave, quadratic elements on a tetrahedral mesh, serial, p-multigrid with a symmetric
+    vertex-star patch smoother.'''
+    berr_exp = 3.279583E-02
+    verr_exp = 2.842441E-02
+    assert alfven_setup(1,1,2,1,mg_xml='oft_in_xmhd_mg_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp)
+@pytest.mark.mpi
+def test_nl_r1_p2_patch_mpi():
+    '''Nonlinear Alfven wave, quadratic elements on a tetrahedral mesh, on two MPI processes, p-multigrid with a
+    symmetric vertex-star patch smoother (patches at process boundaries are completed across processes).'''
+    berr_exp = 3.279583E-02
+    verr_exp = 2.842441E-02
+    assert alfven_setup(1,2,2,2,mg_xml='oft_in_xmhd_mg_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp)
+
 #============================================================================
 # Nonlinear runs, tetrahedral mesh, cubic elements
 @pytest.mark.slow

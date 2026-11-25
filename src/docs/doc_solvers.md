@@ -96,6 +96,40 @@ This method is supported through both the native and PETSc backends through
 | `nlocal`   | Number of local blocks (-1 for field based) | int | Yes |
 | `groups`   | Group index for each field in multi-field vector [n] | int | Yes |
 | `boverlap` | Overlap boundary rows (native only) | bool | false |
+| `loverlap` | Overlap local blocks by one layer of matrix-graph neighbors, restricted additive Schwarz (native only) | bool | false |
+
+\subsection doc_solvers_basic_patch Overlapping patch (vertex-star) smoother
+
+This method is supported with the native backend through
+\ref oft_patch_solvers::oft_patch_precond "oft_patch_precond". Each patch is a set of matrix rows that is
+solved exactly (dense LU) and the patch corrections are combined additively or multiplicatively. The patches
+are supplied with the matrix (\ref oft_la_base::oft_patch_info "oft_patch_info"). MUG (`xmhd` and `xmhd_lag`)
+attaches vertex-star patches on every multigrid level, built by
+\ref fem_utils::comp_fem_vertex_patches "comp_fem_vertex_patches": all degrees of freedom of all fields on a
+vertex and on the edges, faces and cells that contain it. Vertex stars contain the gradients of the vertex
+hat functions, so they also resolve the near-kernel of the curl operator for H(curl) fields.
+
+On distributed meshes, patches of vertices on process boundaries are assembled and solved in full by one
+process, so the additive smoother is independent of the number of processes. In the multiplicative modes the
+interior patches are swept first, followed by an additive correction from the process-boundary patches.
+
+When `its` is positive the object performs `its` damped Richardson iterations and can be used directly as a
+multigrid smoother. Otherwise it acts as a preconditioner (eg. for a GMRES smoother).
+
+**XML Spec:** `<pre type="patch">`
+
+| Group      | Description | Type      | List |
+|------------|-------------|-----------|------|
+| `mode`     | Patch combination {additive, multiplicative, symmetric} (default: additive) | str | No |
+| `its`      | Richardson iterations (<=0 to act as preconditioner, default: -1) | int | Yes |
+| `df`       | Damping factor (default: 1) | real | Yes |
+| `single`   | Store patch factors in single precision (default: false) | bool | No |
+
+\note Memory use is the sum of the squared patch sizes. For MUG on tetrahedral meshes a vertex star holds about
+230 degrees of freedom for quadratic and 770 for cubic elements. Vertex-star smoothing is very effective when the
+Alfven-wave CFL number is small, but on its own it does not converge for CFL numbers of order one and larger,
+where the B-V wave coupling extends over many cells. In that regime it can be combined with a large-block
+smoother, for example as the down smoother with an overlapped `block_jacobi` up smoother.
 
 \subsection doc_solvers_basic_schwarz Additive Schwarz
 

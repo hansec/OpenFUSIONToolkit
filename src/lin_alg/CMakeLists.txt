@@ -15,6 +15,7 @@ set( SOLVER_OBJS
   mkl_bridge.c
   oft_arpack.F90
   oft_lu.F90
+  oft_patch_solvers.F90
 )
 set( MGMT_OBJS
   lin_alg_utils.F90
