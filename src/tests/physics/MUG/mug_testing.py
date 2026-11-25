@@ -267,7 +267,7 @@ def validate_sound(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp
 
 
 def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,
-                 bdf2=True,xml_file=None):
+                 bdf2=True,xml_file=None,dt='8.E-7',nsteps='125',extra_options=''):
     '''Write the input for a traveling shear Alfven wave and run test_alfven (`representation` 'hcurl') or
     test_alfven_lag ('lagrange')
 
@@ -283,6 +283,8 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
             rep_options += " xmhd_lin_euler_start=T\n"
         else:
             rep_options += " xmhd_lin_bdf2=F\n"
+    if extra_options:
+        rep_options += extra_options
     lin_tol = '1.E-13'
     if order == 4:
         lin_tol = '1.E-14'
@@ -292,7 +294,7 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
         fid.write(ALFVEN_TEMPLATE.format(nbase=nbase, nlevels=nlevels, order=order, minlev=minlev, nu_mhd=nu_mhd,
-                                         linear=namelist_flag(linear), dt='8.E-7', nsteps='125', lin_tol=lin_tol,
+                                         linear=namelist_flag(linear), dt=dt, nsteps=nsteps, lin_tol=lin_tol,
                                          mfnk=namelist_flag(mfnk), petsc=namelist_flag(petsc),
                                          mesh_type=(2 if hex_mesh else 1), rep_options=rep_options))
     return run_OFT(mug_command(exe, nlevels, order, minlev, petsc, xml_file=xml_file), mpi_ranks(nbase, nlevels), timeout)
