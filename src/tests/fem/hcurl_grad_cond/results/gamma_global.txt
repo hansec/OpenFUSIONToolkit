@@ -1,0 +1,7 @@
+global tiny p=1 b1=0.956370 b2=0.904276
+global tiny p=2 b1=0.988955 b2=0.988109 a=0.989679 a_rot=0.967804 a_grad=0.909052
+global tiny p=3 b1=0.997306 b2=0.997572 a=0.995768 a_rot=0.969302 a_grad=0.950721
+global tiny p=4 b1=0.998933 b2=0.998951 a=0.997188 a_rot=0.988408 a_grad=0.973044
+global ref p=1 b1=0.926754 b2=0.890298
+global ref p=2 b1=0.981204 b2=0.984816 a=0.985411 a_rot=0.961364 a_grad=0.897158
+global ref p=3 b1=0.994695 b2=0.995481 a=0.993055 a_rot=0.966955 a_grad=0.947184

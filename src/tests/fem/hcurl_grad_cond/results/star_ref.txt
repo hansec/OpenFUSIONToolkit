@@ -1,0 +1,15 @@
+ref p=1 cfl=0 i     nstar=189 k_star=4.288 rho_star_w=0.7668
+ref p=1 cfl=1 i     nstar=189 k_star=15.03 rho_star_w=0.9335
+ref p=1 cfl=10 i     nstar=189 k_star=49.43 rho_star_w=0.9798
+ref p=1 cfl=0 lag   nstar=189 k_star=4.765 rho_star_w=0.7901
+ref p=2 cfl=0 i     nstar=189 k_star=4.184 rho_star_w=0.761 rho_2g_star_w=0.715
+ref p=2 cfl=0 iis   nstar=189 k_star=6.901 rho_star_w=0.8551 rho_2g_star_w=0.7494
+ref p=2 cfl=0 iisl  nstar=189 k_star=9.161 rho_star_w=0.8908 rho_2g_star_w=0.8143
+ref p=2 cfl=1 i     nstar=189 k_star=16.37 rho_star_w=0.9389 rho_2g_star_w=0.6805
+ref p=2 cfl=1 iis   nstar=189 k_star=20.25 rho_star_w=0.9506 rho_2g_star_w=0.7292
+ref p=2 cfl=1 iisl  nstar=189 k_star=19.35 rho_star_w=0.9483 rho_2g_star_w=0.8096
+ref p=2 cfl=10 i     nstar=189 k_star=54.14 rho_star_w=0.9815 rho_2g_star_w=0.6817
+ref p=2 cfl=10 iis   nstar=189 k_star=71.49 rho_star_w=0.986 rho_2g_star_w=0.73
+ref p=2 cfl=10 iisl  nstar=189 k_star=179 rho_star_w=0.9944 rho_2g_star_w=0.9926
+ref p=2 cfl=0 lag   nstar=189 k_star=5.828 rho_star_w=0.8284
+ref p=3 cfl=0 i     nstar=189 k_star=3.746 rho_star_w=0.733 rho_2g_star_w=0.6587

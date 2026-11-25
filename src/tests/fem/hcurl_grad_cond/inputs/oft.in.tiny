@@ -1,0 +1,23 @@
+&runtime_options
+ ppn=1
+ debug=0
+ test_run=T
+/
+&mesh_options
+ meshname='cube'
+ cad_type=92
+ nlevels=1
+ nbase=1
+ grid_order=1
+/
+&cube_options
+ mesh_type=1
+ ni=1,2,4
+ rscale=1.,1.,2.
+ shift=-0.5,-0.5,-1.
+ ref_per=F,F,F
+/
+&diag_hcurl_grad_options
+ order=2
+ nparts=8
+/

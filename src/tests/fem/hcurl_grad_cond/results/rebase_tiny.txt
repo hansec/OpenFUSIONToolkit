@@ -1,0 +1,61 @@
+  built i p=1 in 0.0s
+  built iih p=1 in 0.0s
+  built iis p=1 in 0.0s
+  built iisl p=1 in 0.0s
+  built i p=2 in 0.0s
+  built iih p=2 in 0.1s
+  built iis p=2 in 0.2s
+  built iisl p=2 in 0.5s
+tiny p=2 cfl=0 i     k_diag=706.4 k_bj=154.6 rho_bj=1.824 k_ent=643.1 k_2lev=68.79 rho_2g_bjw=0.972 xc=0.1528 rho_2g_ras=0.01261  (6s)
+tiny p=2 cfl=0 iii   k_diag=699.5 k_bj=154.6 rho_bj=1.824 k_ent=643.1 k_2lev=68.79 rho_2g_bjw=0.972 xc=0.8733 rho_2g_ras=0.01261  (8s)
+tiny p=2 cfl=0 iih   k_diag=74.37 k_bj=30.65 rho_bj=1.509 k_ent=75.36 k_2lev=25.78 rho_2g_bjw=0.9534 xc=1.556e-16 rho_2g_ras=0.01322  (4s)
+tiny p=2 cfl=0 iis   k_diag=81.43 k_bj=27.94 rho_bj=1.095 k_ent=80.11 k_2lev=16.12 rho_2g_bjw=0.9093 xc=0.05293 rho_2g_ras=0.01046  (4s)
+tiny p=2 cfl=0 iisl  k_diag=266.2 k_bj=116.8 rho_bj=1.364 k_ent=277.4 k_2lev=31.65 rho_2g_bjw=0.9347 xc=0.06551 rho_2g_ras=0.01261  (4s)
+tiny p=2 cfl=1 i     k_diag=1656 k_bj=477.7 rho_bj=1.508 k_ent=1633 k_2lev=44.29 rho_2g_bjw=0.9635 xc=0.2101 rho_2g_ras=0.01151 rho_2g_ras_G=0.005821  (6s)
+tiny p=2 cfl=1 iii   k_diag=1615 k_bj=477.7 rho_bj=1.508 k_ent=1633 k_2lev=44.29 rho_2g_bjw=0.9635 xc=0.3133 rho_2g_ras=0.01151 rho_2g_ras_G=0.005821  (7s)
+tiny p=2 cfl=1 iih   k_diag=2264 k_bj=505.2 rho_bj=2.69 k_ent=2445 k_2lev=89.88 rho_2g_bjw=0.9778 xc=0.4536 rho_2g_ras=0.01459 rho_2g_ras_G=0.006043  (7s)
+tiny p=2 cfl=1 iis   k_diag=817.3 k_bj=264.4 rho_bj=1.41 k_ent=805.6 k_2lev=30.38 rho_2g_bjw=0.9521 xc=0.08967 rho_2g_ras=0.01445 rho_2g_ras_G=0.006043  (5s)
+tiny p=2 cfl=1 iisl  k_diag=1570 k_bj=458.2 rho_bj=1.742 k_ent=1577 k_2lev=34.05 rho_2g_bjw=0.9581 xc=0.1002 rho_2g_ras=0.01192 rho_2g_ras_G=0.005823  (17s)
+tiny p=2 cfl=10 i     k_diag=1.531e+05 k_bj=4.518e+04 rho_bj=1.581 k_ent=1.45e+05 k_2lev=45.28 rho_2g_bjw=0.9646 xc=0.2084 rho_2g_ras=0.01149 rho_2g_ras_G=0.006742  (7s)
+tiny p=2 cfl=10 iii   k_diag=1.499e+05 k_bj=4.507e+04 rho_bj=1.581 k_ent=1.499e+05 k_2lev=45.28 rho_2g_bjw=0.9646 xc=0.3116 rho_2g_ras=0.01149 rho_2g_ras_G=0.006742  (11s)
+tiny p=2 cfl=10 iih   k_diag=2.174e+05 k_bj=7.322e+04 rho_bj=4.597 k_ent=2.767e+05 k_2lev=1.12e+04 rho_2g_bjw=0.9998 xc=0.4663 rho_2g_ras=0.02095 rho_2g_ras_G=0.00695  (37s)
+tiny p=2 cfl=10 iis   k_diag=7.955e+04 k_bj=2.535e+04 rho_bj=1.452 k_ent=7.788e+04 k_2lev=31.15 rho_2g_bjw=0.9532 xc=0.09218 rho_2g_ras=0.01446 rho_2g_ras_G=0.00669  (5s)
+tiny p=2 cfl=10 iisl  k_diag=2.928e+05 k_bj=7.024e+04 rho_bj=3.494 k_ent=3.023e+05 k_2lev=2138 rho_2g_bjw=0.9991 xc=0.103 rho_2g_ras=0.009876 rho_2g_ras_G=0.006799  (27s)
+  built i p=3 in 0.0s
+  built iih p=3 in 0.7s
+  built iis p=3 in 1.2s
+  built iisl p=3 in 3.6s
+tiny p=3 cfl=0 i     k_diag=3270 k_bj=537.4 rho_bj=2.025 k_ent=2338 k_2lev=61.36 rho_2g_bjw=0.9663 xc=0.04398 rho_2g_ras=0.01063  (24s)
+tiny p=3 cfl=0 iii   k_diag=3082 k_bj=537.3 rho_bj=2.025 k_ent=2338 k_2lev=61.36 rho_2g_bjw=0.9663 xc=0.8575 rho_2g_ras=0.01063  (28s)
+tiny p=3 cfl=0 iih   k_diag=88.32 k_bj=30.65 rho_bj=1.509 k_ent=75.36 k_2lev=25.6 rho_2g_bjw=0.9454 xc=2.824e-16 rho_2g_ras=0.009711  (22s)
+tiny p=3 cfl=0 iis   k_diag=87.75 k_bj=30.82 rho_bj=1.213 k_ent=90.55 k_2lev=14.64 rho_2g_bjw=0.902 xc=0.004387 rho_2g_ras=0.00733  (17s)
+tiny p=3 cfl=0 iisl  k_diag=605.1 k_bj=290.5 rho_bj=1.63 k_ent=640.2 k_2lev=39.5 rho_2g_bjw=0.9444 xc=0.008428 rho_2g_ras=0.01102  (32s)
+tiny p=3 cfl=1 i     k_diag=2966 k_bj=872.8 rho_bj=1.535 k_ent=2575 k_2lev=28.79 rho_2g_bjw=0.9379 xc=0.09551 rho_2g_ras=0.005963 rho_2g_ras_G=0.001872  (29s)
+tiny p=3 cfl=1 iii   k_diag=2876 k_bj=872.9 rho_bj=1.535 k_ent=2575 k_2lev=28.79 rho_2g_bjw=0.9379 xc=0.3456 rho_2g_ras=0.005963 rho_2g_ras_G=0.001872  (27s)
+tiny p=3 cfl=1 iih   k_diag=9842 k_bj=2085 rho_bj=3.012 k_ent=8552 k_2lev=816.9 rho_2g_bjw=0.9976 xc=0.0953 rho_2g_ras=0.02008 rho_2g_ras_G=0.00192  (62s)
+tiny p=3 cfl=1 iis   k_diag=1016 k_bj=272.5 rho_bj=1.477 k_ent=875.8 k_2lev=21.05 rho_2g_bjw=0.9318 xc=0.05821 rho_2g_ras=0.007234 rho_2g_ras_G=0.003638  (34s)
+tiny p=3 cfl=1 iisl  k_diag=3640 k_bj=905.8 rho_bj=1.953 k_ent=3239 k_2lev=26.89 rho_2g_bjw=0.9446 xc=0.06565 rho_2g_ras=0.00603 rho_2g_ras_G=0.00204  (49s)
+tiny p=3 cfl=10 i     k_diag=2.475e+05 k_bj=8.235e+04 rho_bj=1.605 k_ent=2.197e+05 k_2lev=29.38 rho_2g_bjw=0.9396 xc=0.0972 rho_2g_ras=0.005967 rho_2g_ras_G=0.002331  (33s)
+tiny p=3 cfl=10 iii   k_diag=2.417e+05 k_bj=8.234e+04 rho_bj=1.605 k_ent=2.166e+05 k_2lev=29.38 rho_2g_bjw=0.9396 xc=0.345 rho_2g_ras=0.005967 rho_2g_ras_G=0.002331  (29s)
+tiny p=3 cfl=10 iih   k_diag=9.799e+05 k_bj=2.581e+05 rho_bj=4.687 k_ent=8.324e+05 k_2lev=1.059e+05 rho_2g_bjw=1 xc=0.09796 rho_2g_ras=0.04733 rho_2g_ras_G=0.002559  (179s)
+tiny p=3 cfl=10 iis   k_diag=9.838e+04 k_bj=2.592e+04 rho_bj=1.509 k_ent=8.458e+04 k_2lev=21.29 rho_2g_bjw=0.9328 xc=0.05984 rho_2g_ras=0.007245 rho_2g_ras_G=0.003673  (47s)
+tiny p=3 cfl=10 iisl  k_diag=9.348e+05 k_bj=1.204e+05 rho_bj=3.678 k_ent=9.609e+05 k_2lev=67.24 rho_2g_bjw=0.9748 xc=0.06749 rho_2g_ras=0.005885 rho_2g_ras_G=0.002595  (117s)
+  built i p=4 in 0.0s
+  built iih p=4 in 5.2s
+  built iis p=4 in 8.4s
+  built iisl p=4 in 31.8s
+tiny p=4 cfl=0 i     k_diag=1.391e+04 k_bj=1571 rho_bj=2.175 k_ent=6647 k_2lev=79.57 rho_2g_bjw=0.9722 xc=0.0172 rho_2g_ras=0.008413  (115s)
+tiny p=4 cfl=0 iii   k_diag=9529 k_bj=1571 rho_bj=2.175 k_ent=6502 k_2lev=79.57 rho_2g_bjw=0.9722 xc=0.8809 rho_2g_ras=0.008413  (92s)
+tiny p=4 cfl=0 iih   k_diag=119.9 k_bj=30.65 rho_bj=1.509 k_ent=75.36 k_2lev=25.17 rho_2g_bjw=0.9444 xc=1.573e-16 rho_2g_ras=0.006256  (142s)
+tiny p=4 cfl=0 iis   k_diag=92.32 k_bj=31.44 rho_bj=1.241 k_ent=92.07 k_2lev=14.89 rho_2g_bjw=0.9031 xc=0.001156 rho_2g_ras=0.004827  (97s)
+tiny p=4 cfl=0 iisl  k_diag=1457 k_bj=689.9 rho_bj=1.824 k_ent=1436 k_2lev=31.32 rho_2g_bjw=0.9409 xc=0.003057 rho_2g_ras=0.007334  (133s)
+tiny p=4 cfl=1 i     k_diag=5241 k_bj=1238 rho_bj=1.542 k_ent=4150 k_2lev=34.6 rho_2g_bjw=0.946 xc=0.04712 rho_2g_ras=0.003515 rho_2g_ras_G=0.0006751  (117s)
+tiny p=4 cfl=1 iii   k_diag=4541 k_bj=1238 rho_bj=1.542 k_ent=4151 k_2lev=34.6 rho_2g_bjw=0.946 xc=0.3983 rho_2g_ras=0.003515 rho_2g_ras_G=0.0006751  (131s)
+tiny p=4 cfl=1 iih   k_diag=2.417e+04 k_bj=3215 rho_bj=3.203 k_ent=1.378e+04 k_2lev=1989 rho_2g_bjw=0.999 xc=0.1688 rho_2g_ras=0.02797 rho_2g_ras_G=0.0007749  (395s)
+tiny p=4 cfl=1 iis   k_diag=1263 k_bj=277.9 rho_bj=1.524 k_ent=942 k_2lev=21.9 rho_2g_bjw=0.9344 xc=0.04437 rho_2g_ras=0.004155 rho_2g_ras_G=0.001877  (214s)
+tiny p=4 cfl=1 iisl  k_diag=5839 k_bj=1288 rho_bj=2.005 k_ent=4973 k_2lev=26.29 rho_2g_bjw=0.946 xc=0.0461 rho_2g_ras=0.003492 rho_2g_ras_G=0.0006807  (282s)
+tiny p=4 cfl=10 i     k_diag=3.912e+05 k_bj=1.164e+05 rho_bj=1.611 k_ent=3.027e+05 k_2lev=35.26 rho_2g_bjw=0.9473 xc=0.04761 rho_2g_ras=0.003519 rho_2g_ras_G=0.0006816  (154s)
+tiny p=4 cfl=10 iii   k_diag=3.792e+05 k_bj=1.167e+05 rho_bj=1.611 k_ent=3.505e+05 k_2lev=35.26 rho_2g_bjw=0.9473 xc=0.3978 rho_2g_ras=0.003519 rho_2g_ras_G=0.0006816  (138s)
+tiny p=4 cfl=10 iih   k_diag=1.681e+06 k_bj=4.36e+05 rho_bj=4.715 k_ent=1.385e+06 k_2lev=2.522e+05 rho_2g_bjw=1 xc=0.1735 rho_2g_ras=0.06442 rho_2g_ras_G=0.0007973  (1149s)
+tiny p=4 cfl=10 iis   k_diag=1.223e+05 k_bj=2.63e+04 rho_bj=1.546 k_ent=9.141e+04 k_2lev=22.07 rho_2g_bjw=0.935 xc=0.04561 rho_2g_ras=0.004163 rho_2g_ras_G=0.001883  (232s)
+tiny p=4 cfl=10 iisl  k_diag=1.689e+06 k_bj=1.913e+05 rho_bj=3.714 k_ent=1.548e+06 k_2lev=37.56 rho_2g_bjw=0.9657 xc=0.04739 rho_2g_ras=0.00342 rho_2g_ras_G=0.0006899  (725s)

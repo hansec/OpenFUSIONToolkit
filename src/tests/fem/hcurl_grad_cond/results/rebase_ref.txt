@@ -1,0 +1,45 @@
+  built i p=1 in 0.0s
+  built iih p=1 in 0.0s
+  built iis p=1 in 0.0s
+  built iisl p=1 in 0.0s
+  built i p=2 in 0.0s
+  built iih p=2 in 7.4s
+  built iis p=2 in 15.6s
+  built iisl p=2 in 5.1s
+ref p=2 cfl=0 i     k_diag=362.8 k_bj=81.68 rho_bj=1.892 k_ent=332.4 k_2lev=52.35 rho_2g_bjw=0.9638 xc=0.125 rho_2g_ras=0.9738  (389s)
+ref p=2 cfl=0 iii   k_diag=343.5 k_bj=81.68 rho_bj=1.892 k_ent=332.4 k_2lev=52.35 rho_2g_bjw=0.9638 xc=0.8526 rho_2g_ras=0.9738  (478s)
+ref p=2 cfl=0 iih   k_diag=41.08 k_bj=15.27 rho_bj=1.248 k_ent=40.33 k_2lev=15.9 rho_2g_bjw=0.9177 xc=1.409e-16 rho_2g_ras=1.052  (221s)
+ref p=2 cfl=0 iis   k_diag=41.44 k_bj=15.07 rho_bj=1.115 k_ent=39.99 k_2lev=11.63 rho_2g_bjw=0.8782 xc=0.05894 rho_2g_ras=0.9273  (188s)
+ref p=2 cfl=0 iisl  k_diag=102.8 k_bj=46.86 rho_bj=1.379 k_ent=107.7 k_2lev=20.44 rho_2g_bjw=0.9177 xc=0.06342 rho_2g_ras=0.929  (142s)
+ref p=2 cfl=1 i     k_diag=901.3 k_bj=356.3 rho_bj=1.616 k_ent=888.1 k_2lev=22.79 rho_2g_bjw=0.9321 xc=0.1674 rho_2g_ras=0.9779 rho_2g_ras_G=0.9745  (271s)
+ref p=2 cfl=1 iii   k_diag=879.2 k_bj=356.3 rho_bj=1.616 k_ent=888.1 k_2lev=22.79 rho_2g_bjw=0.9321 xc=0.2665 rho_2g_ras=0.9779 rho_2g_ras_G=0.9745  (230s)
+ref p=2 cfl=1 iih   k_diag=1191 k_bj=315.4 rho_bj=2.657 k_ent=1172 k_2lev=57.54 rho_2g_bjw=0.9652 xc=0.4355 rho_2g_ras=1.057 rho_2g_ras_G=1.052  (460s)
+ref p=2 cfl=1 iis   k_diag=391.4 k_bj=178 rho_bj=1.425 k_ent=381.6 k_2lev=16.78 rho_2g_bjw=0.9179 xc=0.0883 rho_2g_ras=1.018 rho_2g_ras_G=1.017  (344s)
+ref p=2 cfl=1 iisl  k_diag=725.6 k_bj=324.1 rho_bj=1.543 k_ent=739.8 k_2lev=17.98 rho_2g_bjw=0.9219 xc=0.1 rho_2g_ras=1.011 rho_2g_ras_G=1.009  (280s)
+ref p=2 cfl=10 i     k_diag=7.963e+04 k_bj=3.307e+04 rho_bj=1.643 k_ent=7.682e+04 k_2lev=22.8 rho_2g_bjw=0.9327 xc=0.1667 rho_2g_ras=0.9914 rho_2g_ras_G=0.9913  (277s)
+ref p=2 cfl=10 iii   k_diag=7.863e+04 k_bj=3.307e+04 rho_bj=1.643 k_ent=7.708e+04 k_2lev=22.8 rho_2g_bjw=0.9327 xc=0.2682 rho_2g_ras=0.9914 rho_2g_ras_G=0.9913  (253s)
+ref p=2 cfl=10 iih   k_diag=1.322e+05 k_bj=4.802e+04 rho_bj=4.808 k_ent=1.418e+05 k_2lev=6743 rho_2g_bjw=0.9997 xc=0.4543 rho_2g_ras=1.075 rho_2g_ras_G=1.075  (1330s)
+ref p=2 cfl=10 iis   k_diag=3.615e+04 k_bj=1.71e+04 rho_bj=1.468 k_ent=3.502e+04 k_2lev=17.15 rho_2g_bjw=0.9197 xc=0.0921 rho_2g_ras=1.019 rho_2g_ras_G=1.019  (731s)
+ref p=2 cfl=10 iisl  k_diag=1.789e+05 k_bj=5.194e+04 rho_bj=3.416 k_ent=1.768e+05 k_2lev=644.5 rho_2g_bjw=0.997 xc=0.1043 rho_2g_ras=1.063 rho_2g_ras_G=1.063  (585s)
+  built i p=3 in 0.0s
+Traceback (most recent call last):
+  File "/tmp/claude-0/-home-user-OpenFUSIONToolkit/09362a53-c42c-52f6-a857-6df865ce7581/scratchpad/rebase.py", line 333, in <module>
+    main()
+    ~~~~^^
+  File "/tmp/claude-0/-home-user-OpenFUSIONToolkit/09362a53-c42c-52f6-a857-6df865ce7581/scratchpad/rebase.py", line 291, in main
+    newT[kind] = build_T(L, C, Tc, base, glob)
+                 ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/claude-0/-home-user-OpenFUSIONToolkit/09362a53-c42c-52f6-a857-6df865ce7581/scratchpad/rebase.py", line 148, in build_T
+    Xr = orth_patch(L, M, sp.hstack([Ccols, Xg[:, ng]]).tocsc(), nr) if len(nr) else None
+         ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/claude-0/-home-user-OpenFUSIONToolkit/09362a53-c42c-52f6-a857-6df865ce7581/scratchpad/rebase.py", line 103, in orth_patch
+    X = Ej - Sq @ np.linalg.lstsq(Gm, MS.T @ Ej, rcond=1e-12)[0]
+                  ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/OpenFUSIONToolkit/oft_venv/lib/python3.13/site-packages/numpy/linalg/_linalg.py", line 2556, in lstsq
+    x, resids, rank, s = _umath_linalg.lstsq(a, b, rcond,
+                         ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+                                             signature=signature)
+                                             ^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/OpenFUSIONToolkit/oft_venv/lib/python3.13/site-packages/numpy/linalg/_linalg.py", line 156, in _raise_linalgerror_lstsq
+    raise LinAlgError("SVD did not converge in Linear Least Squares")
+numpy.linalg.LinAlgError: SVD did not converge in Linear Least Squares
