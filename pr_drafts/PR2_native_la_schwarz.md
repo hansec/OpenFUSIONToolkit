@@ -49,7 +49,7 @@ No existing input changes behaviour: block-Jacobi inputs are unchanged (same cod
 
 ## Test results
 
-All runs on Ubuntu 24.04, GCC 14, OpenMP + Open MPI, OpenBLAS/UMFPACK/SuperLU/ARPACK/HDF5/METIS from system packages, 4 cores, `OMP_NUM_THREADS=2`. Builds at 80043fa; the final commit c439741 changes only a test comment and one sentence of `doc_solvers.md`.
+All runs on Ubuntu 24.04, GCC 14, OpenMP + Open MPI, OpenBLAS/UMFPACK/SuperLU/ARPACK/HDF5/METIS from system packages, 4 cores, `OMP_NUM_THREADS=2`. Full-suite runs below are at 80043fa (c439741 changed only a test comment and one sentence of `doc_solvers.md`). After merging the #474 review fixes (790c51f) and applying the review conventions (87681d4): Release `lin_alg`+`fem`+`physics/MUG` (not slow) gave 2 failed (the known ILU pair), 587 passed, 380 skipped; checked build, all Schwarz tests including slow (`test_native_schwarz`, `test_cell_overlap`, `test_cell_schwarz`, `test_solver_xml`, `test_MUG_schwarz`) gave 52 passed, 15 skipped (PETSc variants), with no shared-value check failures. Iteration counts are unchanged.
 
 | Run | Result |
 |---|---|
