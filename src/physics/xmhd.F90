@@ -312,6 +312,10 @@ LOGICAL :: xmhd_therm_equil = .FALSE. !< Include cross-species thermalization
 LOGICAL :: xmhd_diss_centered = .FALSE. !< Time-center dissipation terms
 LOGICAL :: xmhd_lin_bdf2 = .TRUE. !< Use BDF2 time integration for linear runs (otherwise backward Euler)
 LOGICAL :: xmhd_lin_euler_start = .FALSE. !< Start linear BDF2 runs with one backward Euler step
+REAL(r8) :: xmhd_si = 0.d0 !< Semi-implicit scale factor for the magnetic (Alfven) part of the velocity increment term
+REAL(r8) :: xmhd_si_sound = 0.d0 !< Semi-implicit scale factor for the pressure (sound) part of the velocity increment term
+LOGICAL :: xmhd_si_full = .FALSE. !< Include sign-indefinite J0 and grad(p0) terms in the semi-implicit operator
+CLASS(oft_vector), POINTER :: xmhd_si_ref => NULL() !< Reference state for the semi-implicit operator (start of time step)
 LOGICAL :: xmhd_skip_update = .FALSE. !< Internal flag for skipping Jac update
 INTEGER(i4) :: te_ind = -1 !< Index of electron temperature field
 INTEGER(i4) :: n2_ind = -1 !< Index of hyper-diff aux field
@@ -445,6 +449,9 @@ CONTAINS
 !! | `xmhd_diss_centered=F` | Use time-centered dissipation terms for (V, Ti, Te) | bool |
 !! | `xmhd_lin_bdf2=T` | Linear runs only: use second-order BDF2 time integration (otherwise first-order backward Euler) | bool |
 !! | `xmhd_lin_euler_start=F` | Linear runs only: take one backward Euler step before BDF2, instead of using the initial condition for both BDF2 history levels (costs one extra preconditioner update) | bool |
+!! | `xmhd_si=0`        | Semi-implicit scale factor \f$ s \f$ for the magnetic part of the velocity increment term \f$ s \, (\theta \Delta t)^2 W (V^{n+1}-V^n) \f$, where \f$ W \f$ is the linearized ideal MHD force operator (0 to disable). Stabilizes the B-V coupling of under-resolved Alfven modes and makes the physics-based preconditioner (`pb_pre` type 1) robust at large time steps, at the cost of slowing resolved waves by a relative frequency error of about \f$ s (\omega \Delta t)^2/8 \f$ | real |
+!! | `xmhd_si_sound=0`  | Semi-implicit scale factor for the pressure (sound) part of the same term (requires `xmhd_adv_den` or `xmhd_adv_temp`) | real |
+!! | `xmhd_si_full=F`   | Include the sign-indefinite \f$ J_0 \times \f$ and \f$ \nabla p_0 \f$ terms in the semi-implicit operator (default keeps it positive semidefinite) | bool |
 !! | `bbc="bc"`         | Magnetic field boundary condition ("bc", "ic") | str(2) |
 !! | `vbc="all"`        | Velocity boundary condition ("all", "norm", "tang", "xml": per surface from `<vel_bc>`; velocity is always fixed in solid regions) | str(4) |
 !! | `nbc="d"`          | Density boundary condition ("d", "n", "x": per surface from `<den_bc>`) | str(1) |
@@ -502,7 +509,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   eta_temp,nu_par,nu_visc,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
-  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start
+  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,xmhd_si,xmhd_si_sound,xmhd_si_full
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -1022,6 +1029,7 @@ DO i=1,nsteps
     xmhd_opcount=xmhd_opcount+1
     !---Retry loop for solver failure
     CALL up%add(0.d0,1.d0,u)
+    IF((xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0))xmhd_si_ref=>up
     DO j=1,4
       !---Compute metric to get RHS
       IF(xmhd_hall.OR.xmhd_upwind)NULLIFY(oft_xmhd_ops%A%up)
@@ -1143,6 +1151,7 @@ CALL nksolver%delete
 CALL solver%delete
 CALL divout%delete
 !--- solver fields
+NULLIFY(xmhd_si_ref)
 CALL u%delete
 CALL up%delete
 CALL v%delete
@@ -1707,8 +1716,8 @@ class(fem_interp), intent(inout) :: fullin !< Interpolator to evaluate fields
 type(oft_local_mat), allocatable, dimension(:,:) :: mtmp,mtmp_solid,ptmp,ptmp_solid
 integer(KIND=omp_lock_kind), allocatable, dimension(:) :: plocks
 logical :: build_pb
-real(r8) :: pb_ca,pb_cs,pb_p0,pb_dp0(3),pb_qc(3),pb_jq(3),pb_bq
-real(r8), allocatable :: pb_bdg(:)
+real(r8) :: pb_ca,pb_cs,pb_p0,pb_dp0(3),si_ca,si_cs
+logical :: build_si
 type(oft_1d_int), allocatable, dimension(:) :: iloc
 integer(i4) :: ii,i,ip,j,m,n,jr,jc,jp,nrows,jtmp(1),vi,vj,vl,vm,vk,vlc
 integer(i4), allocatable, target :: j_lag(:),j_hgrad(:),j_hcurl(:)
@@ -1735,6 +1744,7 @@ quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad !oft_hcurl%quad
 tgam_fac=temp_gamma - 1.d0
 build_pb=.FALSE.
 IF(xmhd_pb.AND.(xmhd_pb_type/=4))build_pb=ASSOCIATED(oft_xmhd_ops%P)
+build_si=(xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0)
 !------------------------------------------------------------------------------
 ! Reset matrices
 !------------------------------------------------------------------------------
@@ -1753,7 +1763,7 @@ END DO
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,jc,bhat,he,v0_mag,dvT,eta_curr,u,uvec,umat, &
 !$omp mtmp,mtmp_solid,chi_temp,bmag,c1,c2,c3,c4,divv,nu_tmp,ten1,cgop,fulltmp,lag_gopt,pt,diff_tmp, &
 !$omp hgrad_ropt,hcurl_ropt,hcurl_copt,uten,i,ii,iloc,u0,c_gyro,krok_delta,vi,vj,vl,vm,vk,vlc, &
-!$omp ptmp,ptmp_solid,pb_ca,pb_cs,pb_p0,pb_dp0,pb_qc,pb_jq,pb_bq,pb_bdg)
+!$omp ptmp,ptmp_solid,pb_ca,pb_cs,pb_p0,pb_dp0,si_ca,si_cs)
 !---Thread local arrays
 allocate(j_lag(oft_lagrange%nce),j_hgrad(oft_hgrad%nce),j_hcurl(oft_hcurl%nce))
 allocate(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce))
@@ -1770,7 +1780,6 @@ IF(build_pb)THEN
   CALL xmhd_rep%mat_setup_local(ptmp, xmhd_pb_mask)
   ptmp_solid(1,1)%m=>ptmp(1,1)%m; ptmp_solid(1,2)%m=>ptmp(1,2)%m
   ptmp_solid(2,1)%m=>ptmp(2,1)%m; ptmp_solid(2,2)%m=>ptmp(2,2)%m
-  allocate(pb_bdg(oft_lagrange%nce))
 END IF
 allocate(iloc(xmhd_rep%nfields))
 iloc(1)%v=>j_hcurl
@@ -2569,39 +2578,27 @@ do ii=1,mesh%tloc_c(ip)%n
     END IF
     END IF
 !------------------------------------------------------------------------------
-! Parabolized velocity Schur complement for physics-based preconditioning
-!   S_V(phi,v) += (theta dt)^2/(n m_i) [ (1/mu0) Q(phi).Q(v) - (1/mu0) phi.(J0 x Q(v))
-!                 + (div phi)(gamma p0 div v + v.grad p0) ]
-!   with Q(v) = curl(v x B0) ~ (B0.grad)v - B0 (div v)  (grad(B0) terms dropped)
+! Parabolized velocity operator (see xmhd_si_local): semi-implicit increment term
+! s (theta dt)^2 W in the Jacobian, and parabolized velocity Schur complement for
+! physics-based preconditioning
 !------------------------------------------------------------------------------
+    IF(build_pb.OR.build_si)THEN
+      pb_p0 = u0%N*k_boltz*(u0%Ti+u0%Te)
+      pb_dp0 = k_boltz*((u0%Ti+u0%Te)*u0%dN + u0%N*(u0%dTi+u0%dTe))
+    END IF
+    IF(build_si)THEN
+      si_ca = 0.d0
+      IF(xmhd_jcb)si_ca = xmhd_si*jac_dt*jac_dt*det/(u0%N*m_ion*mu0)
+      si_cs = 0.d0
+      IF(xmhd_adv_temp.OR.xmhd_adv_den)si_cs = xmhd_si_sound*jac_dt*jac_dt*det/(u0%N*m_ion)
+      CALL xmhd_si_local(mtmp,oft_lagrange%nce,lag_rop,lag_gop,u0%B,u0%J,pb_p0,pb_dp0,si_ca,si_cs,xmhd_si_full)
+    END IF
     IF(build_pb)THEN
       pb_ca = 0.d0
       IF(xmhd_jcb)pb_ca = xmhd_pb_alfven*jac_dt*jac_dt*det/(u0%N*m_ion*mu0)
       pb_cs = 0.d0
       IF(xmhd_adv_temp.OR.xmhd_adv_den)pb_cs = xmhd_pb_sound*jac_dt*jac_dt*det/(u0%N*m_ion)
-      pb_p0 = u0%N*k_boltz*(u0%Ti+u0%Te)
-      pb_dp0 = k_boltz*((u0%Ti+u0%Te)*u0%dN + u0%N*(u0%dTi+u0%dTe))
-      DO jc=1,oft_lagrange%nce
-        pb_bdg(jc) = DOT_PRODUCT(u0%B,lag_gop(:,jc))
-      END DO
-      DO vm=1,3
-        DO jc=1,oft_lagrange%nce
-          !---Q for column basis function (component vm)
-          pb_qc = -u0%B*lag_gop(vm,jc)
-          pb_qc(vm) = pb_qc(vm) + pb_bdg(jc)
-          pb_bq = DOT_PRODUCT(u0%B,pb_qc)
-          pb_jq = cross_product(u0%J,pb_qc)
-          DO vj=1,3
-            u = pb_cs*(temp_gamma*pb_p0*lag_gop(vm,jc) + lag_rop(jc)*pb_dp0(vm))
-            !$omp simd
-            DO jr=1,oft_lagrange%nce
-              ptmp(2+vj,2+vm)%m(jr,jc) = ptmp(2+vj,2+vm)%m(jr,jc) &
-                + pb_ca*(pb_bdg(jr)*pb_qc(vj) - lag_gop(vj,jr)*pb_bq - lag_rop(jr)*pb_jq(vj)) &
-                + lag_gop(vj,jr)*u
-            END DO
-          END DO
-        END DO
-      END DO
+      CALL xmhd_si_local(ptmp,oft_lagrange%nce,lag_rop,lag_gop,u0%B,u0%J,pb_p0,pb_dp0,pb_ca,pb_cs,.TRUE.)
     END IF
 !------------------------------------------------------------------------------
 ! End quadrature loop
@@ -2643,7 +2640,7 @@ CALL xmhd_rep%mat_destroy_local(mtmp)
 deallocate(mtmp,mtmp_solid,iloc)
 IF(build_pb)THEN
   CALL xmhd_rep%mat_destroy_local(ptmp)
-  deallocate(ptmp,ptmp_solid,pb_bdg)
+  deallocate(ptmp,ptmp_solid)
 END IF
 !$omp end parallel
 !--Destroy thread locks
@@ -2668,6 +2665,53 @@ call tmp%delete
 DEALLOCATE(tmp)
 DEBUG_STACK_POP
 end subroutine xmhd_build_ops
+!------------------------------------------------------------------------------
+!> Add the parabolized (linearized ideal MHD) velocity operator to a local matrix
+!!
+!! Adds, for Lagrange velocity test function \f$ \phi \f$ and trial function \f$ v \f$,
+!! \f[ c_a \left[ Q(\phi) \cdot Q(v) - \phi \cdot (J_0 \times Q(v)) \right]
+!!    + c_s (\nabla \cdot \phi) \left( \gamma p_0 \nabla \cdot v + v \cdot \nabla p_0 \right) \f]
+!! with \f$ Q(v) = (B_0 \cdot \nabla) v - B_0 (\nabla \cdot v) \approx \nabla \times (v \times B_0) \f$
+!! (gradient of \f$ B_0 \f$ dropped). The \f$ J_0 \f$ and \f$ \nabla p_0 \f$ terms are only included
+!! if `full` is true; without them the operator is symmetric positive semidefinite.
+!------------------------------------------------------------------------------
+subroutine xmhd_si_local(mloc,nce,rop,gop,B0,J0,p0,dp0,ca,cs,full)
+TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:) !< Local matrix blocks (velocity blocks are 3:5)
+INTEGER(i4), INTENT(in) :: nce !< Number of Lagrange DOFs per cell
+REAL(r8), INTENT(in) :: rop(nce) !< Lagrange basis values
+REAL(r8), INTENT(in) :: gop(3,nce) !< Lagrange basis gradients
+REAL(r8), INTENT(in) :: B0(3) !< Magnetic field
+REAL(r8), INTENT(in) :: J0(3) !< Current density
+REAL(r8), INTENT(in) :: p0 !< Pressure
+REAL(r8), INTENT(in) :: dp0(3) !< Pressure gradient
+REAL(r8), INTENT(in) :: ca !< Coefficient for magnetic terms (includes quadrature weight)
+REAL(r8), INTENT(in) :: cs !< Coefficient for pressure terms (includes quadrature weight)
+LOGICAL, INTENT(in) :: full !< Include sign-indefinite J0 and grad(p0) terms
+INTEGER(i4) :: jr,jc,vm,vj
+REAL(r8) :: bdg(nce),qc(3),bq,jq(3),u
+DO jc=1,nce
+  bdg(jc) = DOT_PRODUCT(B0,gop(:,jc))
+END DO
+jq = 0.d0
+DO vm=1,3
+  DO jc=1,nce
+    !---Q for column basis function (component vm)
+    qc = -B0*gop(vm,jc)
+    qc(vm) = qc(vm) + bdg(jc)
+    bq = DOT_PRODUCT(B0,qc)
+    IF(full)jq = cross_product(J0,qc)
+    DO vj=1,3
+      u = cs*temp_gamma*p0*gop(vm,jc)
+      IF(full)u = u + cs*rop(jc)*dp0(vm)
+      !$omp simd
+      DO jr=1,nce
+        mloc(2+vj,2+vm)%m(jr,jc) = mloc(2+vj,2+vm)%m(jr,jc) &
+          + ca*(bdg(jr)*qc(vj) - gop(vj,jr)*bq - rop(jr)*jq(vj)) + gop(vj,jr)*u
+      END DO
+    END DO
+  END DO
+END DO
+end subroutine xmhd_si_local
 !------------------------------------------------------------------------------
 !> Apply scaling and boundary conditions to local (cell) xMHD matrices
 !------------------------------------------------------------------------------
@@ -3344,6 +3388,10 @@ real(r8) :: f,diff,chi_temp(4),bmag,det
 real(r8) :: mloc(3,3),goptmp(3,4),vol,eta_curr,neg_vols(3),divv,diff_tmp
 real(r8) :: bhat(3),jp0q(3),np0q,vad(3),vad_mag,he,c1,cgop(3,6),nu_tmp(3),ten1(3,3)
 real(r8) :: diag_vals(7),pt(3),pt_r,floor_tmp(3),fulltmp(40),u,uvec(3),umat(3,3),ten2(3,3),ten3(3,3)
+real(r8) :: si_q(3),si_c,si_cs,si_bq,fulltmp_ref(40)
+logical :: si_ref
+TYPE(xmhd_interp) :: ref_interp
+type(xmhd_loc_values) :: uref
 real(r8), allocatable, dimension(:) :: bc_loc,bg_loc,jpin_loc,te_loc,j2_loc,n2_loc
 real(r8), allocatable, dimension(:,:) :: vpin_loc,lag_loc
 real(r8), target, allocatable, dimension(:) :: lag_rop
@@ -3365,6 +3413,12 @@ neg_vols=0.d0
 !------------------------------------------------------------------------------
 full_interp%u=>a
 CALL full_interp%setup(mesh)
+!---Reference state for the semi-implicit term (frozen over a time step)
+si_ref=((xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0)).AND.ASSOCIATED(xmhd_si_ref)
+IF(si_ref)THEN
+  ref_interp%u=>xmhd_si_ref
+  CALL ref_interp%setup(mesh)
+END IF
 !------------------------------------------------------------------------------
 ! Get local field values from previous step if necessary
 !------------------------------------------------------------------------------
@@ -3416,7 +3470,8 @@ IF(xmhd_taxis==2)ptind(2)=3
 !$omp parallel private(det,j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop, &
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,bhat,jp0q,vad,vad_mag,he,c1,cgop,divv,diff_tmp, &
 !$omp np0q,eta_curr,u,bc_loc,bg_loc,lag_loc,pt_r,vpin_loc,jpin_loc,chi_temp,te_loc, &
-!$omp j2_loc,n2_loc,bmag,uvec,umat,pt,nu_tmp,ten1,ten2,ten3,i,ii,floor_tmp,u0,fulltmp) &
+!$omp j2_loc,n2_loc,bmag,uvec,umat,pt,nu_tmp,ten1,ten2,ten3,i,ii,floor_tmp,u0,fulltmp, &
+!$omp si_q,si_c,si_cs,si_bq,fulltmp_ref,uref) &
 !$omp reduction(+:neg_vols) reduction(+:diag_vals)
 allocate(j_lag(oft_lagrange%nce),j_hgrad(oft_hgrad%nce),j_hcurl(oft_hcurl%nce))
 allocate(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce))
@@ -3711,6 +3766,32 @@ do ii=1,mesh%tloc_c(ip)%n
     !---Mass and scale
     umat = TRANSPOSE(umat)*self%dt*det
     uvec = (uvec*self%dt + u0%V)*det
+    !---Semi-implicit term s*dt^2*W_ref(V), with W evaluated at the reference state (start of
+    !   the time step, current state if unset). dt^2 has the same sign for the old and new time
+    !   levels, so the step contains the increment s*(dt/2)^2*W_ref*(V^{n+1}-V^n)
+    IF((xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0))THEN
+      IF(si_ref)THEN
+        call ref_interp%interp(i,quad%pts(:,m),goptmp,fulltmp_ref)
+        CALL xmhd_interp_unpack(fulltmp_ref,uref)
+      ELSE
+        uref = u0
+      END IF
+      si_c = 0.d0
+      IF(xmhd_jcb)si_c = xmhd_si*self%dt*self%dt*det/(uref%N*m_ion*mu0)
+      si_cs = 0.d0
+      IF(xmhd_adv_temp.OR.xmhd_adv_den)si_cs = xmhd_si_sound*self%dt*self%dt*det/(uref%N*m_ion)
+      si_q = MATMUL(uref%B,u0%dV) - uref%B*divv
+      si_bq = DOT_PRODUCT(uref%B,si_q)
+      u = si_cs*temp_gamma*uref%N*k_boltz*(uref%Ti+uref%Te)*divv
+      IF(xmhd_si_full)THEN
+        uvec = uvec - si_c*cross_product(uref%J,si_q)
+        u = u + si_cs*k_boltz*DOT_PRODUCT(u0%V,(uref%Ti+uref%Te)*uref%dN + uref%N*(uref%dTi+uref%dTe))
+      END IF
+      DO j=1,3
+        umat(:,j) = umat(:,j) + si_c*uref%B(j)*si_q
+        umat(j,j) = umat(j,j) - si_c*si_bq + u
+      END DO
+    END IF
     !---Add contributions
     do jr=1,oft_lagrange%nce
       lag_loc(jr,1:3) = lag_loc(jr,1:3) + lag_rop(jr)*uvec &
@@ -3968,6 +4049,7 @@ IF(back_step)THEN
   IF(xmhd_upwind)DEALLOCATE(vpin)
 END IF
 CALL full_interp%delete
+IF(si_ref)CALL ref_interp%delete
 !----
 IF(neg_vols(1)>0.d0)WRITE(*,'(A,I6,A,ES11.3)') '[',oft_env%rank,'] NEG Ne volume   = ',REAL(neg_vols(1),4)
 IF(neg_vols(2)>0.d0)WRITE(*,'(A,I6,A,ES11.3)')'[',oft_env%rank,'] NEG Ti volume   = ',REAL(neg_vols(2),4)
@@ -3993,8 +4075,10 @@ real(r8), pointer, contiguous, dimension(:) :: neqin,bcout,bgout,nout,tout,teout
 real(r8), pointer, contiguous, dimension(:,:) :: vout
 real(r8), pointer, dimension(:) :: vtmp
 real(r8) :: mloc(3,3),goptmp(3,4),vol,f,det,cgop(3,6),fulltmp(40)
-real(r8) :: neq,diag_vals(7),pt(3),pt_r
-logical :: curved,neq_present
+real(r8) :: neq,diag_vals(7),pt(3),pt_r,fulltmp_eq(40),si_q(3),si_c,si_cs,si_bq,si_u,si_divv,umat(3,3),si_f(3)
+logical :: curved,neq_present,build_si
+TYPE(xmhd_interp) :: eq_interp
+type(xmhd_loc_values) :: ueq
 type(oft_quad_type), pointer :: quad
 TYPE(xmhd_interp) :: full_interp
 type(xmhd_loc_values) :: u0
@@ -4006,6 +4090,12 @@ quad=>oft_hcurl%quad
 !------------------------------------------------------------------------------
 full_interp%u=>a
 CALL full_interp%setup(mesh)
+!---Equilibrium fields for semi-implicit term (linear runs)
+build_si=((xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0)).AND.ASSOCIATED(self%u0)
+IF(build_si)THEN
+  eq_interp%u=>self%u0
+  CALL eq_interp%setup(mesh)
+END IF
 NULLIFY(neqin)
 IF(ASSOCIATED(self%u0))THEN
   neq_present=.TRUE.
@@ -4041,7 +4131,7 @@ IF(xmhd_taxis==2)ptind(2)=3
 !------------------------------------------------------------------------------
 !$omp parallel private(det,j_lag,j_hgrad,j_hcurl,lag_rop,hgrad_rop,hcurl_rop, &
 !$omp hcurl_cop,u0,curved,goptmp,vol,j,m,jr,neq,pt,pt_r,cgop,bc_loc,bg_loc,te_loc, &
-!$omp lag_loc,i,ii,fulltmp) reduction(+:diag_vals)
+!$omp lag_loc,i,ii,fulltmp,fulltmp_eq,ueq,si_q,si_c,si_cs,si_bq,si_u,si_divv,umat,si_f) reduction(+:diag_vals)
 allocate(j_lag(oft_lagrange%nce),j_hgrad(oft_hgrad%nce),j_hcurl(oft_hcurl%nce))
 allocate(lag_rop(oft_lagrange%nce),hgrad_rop(3,oft_hgrad%nce),hcurl_rop(3,oft_hcurl%nce))
 allocate(hcurl_cop(3,oft_hcurl%nce))
@@ -4086,9 +4176,14 @@ do ii=1,mesh%tloc_c(ip)%n
     CALL oft_h1_geval_all(oft_hgrad,i,quad%pts(:,m),hgrad_rop,goptmp)
     CALL oft_hcurl_eval_all(oft_hcurl,i,quad%pts(:,m),hcurl_rop,goptmp)
     CALL oft_hcurl_ceval_all(oft_hcurl,i,quad%pts(:,m),hcurl_cop,cgop)
+    IF(build_si)CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),xmhd_lag_gop,goptmp)
     !
     call full_interp%interp(i,quad%pts(:,m),goptmp,fulltmp)
     CALL xmhd_interp_unpack(fulltmp,u0)
+    IF(build_si)THEN
+      call eq_interp%interp(i,quad%pts(:,m),goptmp,fulltmp_eq)
+      CALL xmhd_interp_unpack(fulltmp_eq,ueq)
+    END IF
     !---Compute diagnostics
     pt_r = MAX(1.d-10,SUM(pt(ptind)**2))
     diag_vals(1) = diag_vals(1) + SUM(u0%B**2)*det
@@ -4136,6 +4231,30 @@ do ii=1,mesh%tloc_c(ip)%n
       IF(xmhd_adv_temp)lag_loc(jr,5) = lag_loc(jr,5) + lag_rop(jr)*u0%Ti*det
       IF(xmhd_two_temp)te_loc(jr) = te_loc(jr) + lag_rop(jr)*u0%Te*det
     end do
+    !---Semi-implicit term s*jac_dt^2*W(u_eq)*dV, matching the Jacobian (modified velocity mass)
+    IF(build_si)THEN
+      si_c = 0.d0
+      IF(xmhd_jcb)si_c = xmhd_si*jac_dt*jac_dt*det/(ueq%N*m_ion*mu0)
+      si_cs = 0.d0
+      IF(xmhd_adv_temp.OR.xmhd_adv_den)si_cs = xmhd_si_sound*jac_dt*jac_dt*det/(ueq%N*m_ion)
+      si_divv = u0%dV(1,1)+u0%dV(2,2)+u0%dV(3,3)
+      si_q = MATMUL(ueq%B,u0%dV) - ueq%B*si_divv
+      si_bq = DOT_PRODUCT(ueq%B,si_q)
+      si_u = si_cs*temp_gamma*ueq%N*k_boltz*(ueq%Ti+ueq%Te)*si_divv
+      si_f = 0.d0
+      IF(xmhd_si_full)THEN
+        si_f = -si_c*cross_product(ueq%J,si_q)
+        si_u = si_u + si_cs*k_boltz*DOT_PRODUCT(u0%V,(ueq%Ti+ueq%Te)*ueq%dN + ueq%N*(ueq%dTi+ueq%dTe))
+      END IF
+      DO j=1,3
+        umat(:,j) = si_c*ueq%B(j)*si_q
+        umat(j,j) = umat(j,j) - si_c*si_bq + si_u
+      END DO
+      do jr=1,oft_lagrange%nce
+        lag_loc(jr,1:3) = lag_loc(jr,1:3) + lag_rop(jr)*si_f &
+          + xmhd_lag_gop(1,jr)*umat(:,1) + xmhd_lag_gop(2,jr)*umat(:,2) + xmhd_lag_gop(3,jr)*umat(:,3)
+      end do
+    END IF
 !------------------------------------------------------------------------------
 ! End quadrature loop
 !------------------------------------------------------------------------------
@@ -4229,6 +4348,7 @@ DEALLOCATE(bcout,bgout,vout,nout,tout)
 IF(ASSOCIATED(neqin))DEALLOCATE(neqin)
 IF(xmhd_two_temp)DEALLOCATE(teout)
 CALL full_interp%delete
+IF(build_si)CALL eq_interp%delete
 DEBUG_STACK_POP
 end subroutine xmhd_massmatrix_apply
 !------------------------------------------------------------------------------

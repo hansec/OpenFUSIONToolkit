@@ -77,6 +77,10 @@ def run(args):
     rep = " bbc='bc'\n nu_visc=1.E-3\n gmres_maxits=%d\n" % args.maxits
     if args.linear:
         rep += " xmhd_lin_euler_start=T\n"
+        if args.lin_be:
+            rep += " xmhd_lin_bdf2=F\n"
+    if args.si > 0.0:  # semi-implicit velocity increment term (xmhd_si)
+        rep += " xmhd_si=%g\n" % args.si
     inp = ALFVEN_TEMPLATE.format(
         nbase=args.nbase,
         nlevels=args.nlevels,
@@ -87,7 +91,7 @@ def run(args):
         dt=args.dt,
         nsteps=args.nsteps,
         lin_tol=args.lin_tol,
-        mfnk="F",
+        mfnk="T" if args.mfnk else "F",
         petsc="F",
         mesh_type=1,
         rep_options=rep,
@@ -123,6 +127,8 @@ def run(args):
     wall = time.time() - t0
     open(os.path.join(d, "log.txt"), "w").write(out)
     steps = re.findall(r"Timestep\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)", out)
+    if not steps:  # linear runs print no Newton iteration count
+        steps = [(a, b, c, "0", d, e) for a, b, c, d, e in re.findall(r"Timestep\s+(\d+)\s+(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s*$", out, re.M)]
     lits = [int(s[2]) for s in steps]
     nlits = [int(s[3]) for s in steps]
     dts = [float(s[5]) for s in steps]
@@ -159,6 +165,9 @@ if __name__ == "__main__":
     ap.add_argument("--kcycle", type=int, default=0)
     ap.add_argument("--cscale", action="store_true")
     ap.add_argument("--linear", action="store_true")
+    ap.add_argument("--lin_be", action="store_true")
+    ap.add_argument("--si", type=float, default=0.0)
+    ap.add_argument("--mfnk", action="store_true")
     ap.add_argument("--lin_tol", default="1.E-12")
     ap.add_argument("--maxits", type=int, default=200)
     ap.add_argument("--np", type=int, default=1)
