@@ -1716,8 +1716,10 @@ class(fem_interp), intent(inout) :: fullin !< Interpolator to evaluate fields
 type(oft_local_mat), allocatable, dimension(:,:) :: mtmp,mtmp_solid,ptmp,ptmp_solid
 integer(KIND=omp_lock_kind), allocatable, dimension(:) :: plocks
 logical :: build_pb
-real(r8) :: pb_ca,pb_cs,pb_p0,pb_dp0(3),si_ca,si_cs
-logical :: build_si
+real(r8) :: pb_ca,pb_cs,pb_p0,pb_dp0(3),si_ca,si_cs,si_p0,si_dp0(3),fulltmp_ref(40)
+logical :: build_si,si_ref
+TYPE(xmhd_interp) :: ref_interp
+type(xmhd_loc_values) :: uref
 type(oft_1d_int), allocatable, dimension(:) :: iloc
 integer(i4) :: ii,i,ip,j,m,n,jr,jc,jp,nrows,jtmp(1),vi,vj,vl,vm,vk,vlc
 integer(i4), allocatable, target :: j_lag(:),j_hgrad(:),j_hcurl(:)
@@ -1745,6 +1747,13 @@ tgam_fac=temp_gamma - 1.d0
 build_pb=.FALSE.
 IF(xmhd_pb.AND.(xmhd_pb_type/=4))build_pb=ASSOCIATED(oft_xmhd_ops%P)
 build_si=(xmhd_si>0.d0).OR.(xmhd_si_sound>0.d0)
+!---Semi-implicit operator uses the same frozen reference state as the residual on the finest level
+si_ref=.FALSE.
+IF(build_si.AND.ASSOCIATED(xmhd_si_ref))si_ref=(oft_lagrange%mesh%nc==mg_mesh%meshes(mg_mesh%mgdim)%nc)
+IF(si_ref)THEN
+  ref_interp%u=>xmhd_si_ref
+  CALL ref_interp%setup(mesh)
+END IF
 !------------------------------------------------------------------------------
 ! Reset matrices
 !------------------------------------------------------------------------------
@@ -1763,7 +1772,7 @@ END DO
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,jc,bhat,he,v0_mag,dvT,eta_curr,u,uvec,umat, &
 !$omp mtmp,mtmp_solid,chi_temp,bmag,c1,c2,c3,c4,divv,nu_tmp,ten1,cgop,fulltmp,lag_gopt,pt,diff_tmp, &
 !$omp hgrad_ropt,hcurl_ropt,hcurl_copt,uten,i,ii,iloc,u0,c_gyro,krok_delta,vi,vj,vl,vm,vk,vlc, &
-!$omp ptmp,ptmp_solid,pb_ca,pb_cs,pb_p0,pb_dp0,si_ca,si_cs)
+!$omp ptmp,ptmp_solid,pb_ca,pb_cs,pb_p0,pb_dp0,si_ca,si_cs,si_p0,si_dp0,fulltmp_ref,uref)
 !---Thread local arrays
 allocate(j_lag(oft_lagrange%nce),j_hgrad(oft_hgrad%nce),j_hcurl(oft_hcurl%nce))
 allocate(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce))
@@ -2582,18 +2591,24 @@ do ii=1,mesh%tloc_c(ip)%n
 ! s (theta dt)^2 W in the Jacobian, and parabolized velocity Schur complement for
 ! physics-based preconditioning
 !------------------------------------------------------------------------------
-    IF(build_pb.OR.build_si)THEN
-      pb_p0 = u0%N*k_boltz*(u0%Ti+u0%Te)
-      pb_dp0 = k_boltz*((u0%Ti+u0%Te)*u0%dN + u0%N*(u0%dTi+u0%dTe))
-    END IF
     IF(build_si)THEN
+      IF(si_ref)THEN
+        call ref_interp%interp(i,quad%pts(:,m),goptmp,fulltmp_ref)
+        CALL xmhd_interp_unpack(fulltmp_ref,uref)
+      ELSE
+        uref = u0
+      END IF
+      si_p0 = uref%N*k_boltz*(uref%Ti+uref%Te)
+      si_dp0 = k_boltz*((uref%Ti+uref%Te)*uref%dN + uref%N*(uref%dTi+uref%dTe))
       si_ca = 0.d0
-      IF(xmhd_jcb)si_ca = xmhd_si*jac_dt*jac_dt*det/(u0%N*m_ion*mu0)
+      IF(xmhd_jcb)si_ca = xmhd_si*jac_dt*jac_dt*det/(uref%N*m_ion*mu0)
       si_cs = 0.d0
-      IF(xmhd_adv_temp.OR.xmhd_adv_den)si_cs = xmhd_si_sound*jac_dt*jac_dt*det/(u0%N*m_ion)
-      CALL xmhd_si_local(mtmp,oft_lagrange%nce,lag_rop,lag_gop,u0%B,u0%J,pb_p0,pb_dp0,si_ca,si_cs,xmhd_si_full)
+      IF(xmhd_adv_temp.OR.xmhd_adv_den)si_cs = xmhd_si_sound*jac_dt*jac_dt*det/(uref%N*m_ion)
+      CALL xmhd_si_local(mtmp,oft_lagrange%nce,lag_rop,lag_gop,uref%B,uref%J,si_p0,si_dp0,si_ca,si_cs,xmhd_si_full)
     END IF
     IF(build_pb)THEN
+      pb_p0 = u0%N*k_boltz*(u0%Ti+u0%Te)
+      pb_dp0 = k_boltz*((u0%Ti+u0%Te)*u0%dN + u0%N*(u0%dTi+u0%dTe))
       pb_ca = 0.d0
       IF(xmhd_jcb)pb_ca = xmhd_pb_alfven*jac_dt*jac_dt*det/(u0%N*m_ion*mu0)
       pb_cs = 0.d0
@@ -2643,6 +2658,7 @@ IF(build_pb)THEN
   deallocate(ptmp,ptmp_solid)
 END IF
 !$omp end parallel
+IF(si_ref)CALL ref_interp%delete
 !--Destroy thread locks
 DO i=1,xmhd_rep%nfields
   CALL omp_destroy_lock(tlocks(i))
