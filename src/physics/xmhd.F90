@@ -1734,7 +1734,7 @@ Jac=>oft_xmhd_ops%J
 quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad !oft_hcurl%quad
 tgam_fac=temp_gamma - 1.d0
 build_pb=.FALSE.
-IF(xmhd_pb)build_pb=ASSOCIATED(oft_xmhd_ops%P)
+IF(xmhd_pb.AND.(xmhd_pb_type/=4))build_pb=ASSOCIATED(oft_xmhd_ops%P)
 !------------------------------------------------------------------------------
 ! Reset matrices
 !------------------------------------------------------------------------------
@@ -2897,7 +2897,7 @@ do level=levelin,xmhd_minlev,-1
   ops=>oft_xmhd_ops
   CALL xmhd_rep%mat_create(ops%J,xmhd_mat_mask)
   ml_J(level-xmhd_minlev+1)%m=>ops%J
-  IF(xmhd_pb)THEN
+  IF(xmhd_pb.AND.(xmhd_pb_type/=4))THEN
     CALL xmhd_rep%mat_create(ops%P,xmhd_pb_mask)
     ml_P(level-xmhd_minlev+1)%m=>ops%P
   END IF
@@ -2920,7 +2920,7 @@ do level=levelin,xmhd_minlev,-1
         END IF
     END SELECT
     !---Use same partitioning for physics-based preconditioning matrix
-    IF(xmhd_pb.AND.ASSOCIATED(ops%J%color))THEN
+    IF(xmhd_pb.AND.ASSOCIATED(ops%J%color).AND.ASSOCIATED(ops%P))THEN
       ALLOCATE(ops%P%color(ops%P%nr))
       ops%P%color=ops%J%color
     END IF
@@ -4776,6 +4776,7 @@ do i=levelin,minlev,-1
   if(oft_lagrange%mesh%nc==mg_mesh%meshes(mg_mesh%mgdim)%nc)then
     !---Construct Jacobian
     call xmhd_build_ops(full_interp)
+    IF(xmhd_pb.AND.(xmhd_pb_type==4))CALL xmhd_pb_build_bschur(i)
     !---Average on lowest level to cell centers
     if(oft_lagrange%order==1.AND.i>xmhd_minlev)then
       allocate(fullcc(nfields,mesh%nc))
@@ -4809,6 +4810,7 @@ do i=levelin,minlev,-1
     fullcc_interp%bcc=>fullcc
     !---Construct Jacobian
     call xmhd_build_ops(fullcc_interp)
+    IF(xmhd_pb.AND.(xmhd_pb_type==4))CALL xmhd_pb_build_bschur(i)
   end if
 end do
 !------------------------------------------------------------------------------
@@ -4866,6 +4868,283 @@ IF(oft_env%head_proc)THEN
 END IF
 end subroutine xmhd_create_pb
 !------------------------------------------------------------------------------
+!> Build B-Schur preconditioning matrix for the current level (PB type 4)
+!!
+!! \f$ Q = \begin{bmatrix} J_{VV} & 0 \\ 0 & J_{XX} - J_{XV} diag(J_{VV})^{-1} J_{VX} \end{bmatrix} \f$,
+!! where X are all non-velocity fields. The product is formed in global numbering
+!! (duplicated periodic DOFs folded) and each entry is stored once, on the first local
+!! copy of its row and column, which is consistent with stitched matrix-vector products.
+!!
+!! @note Serial only, native matrices only. The sparsity pattern is created on the first
+!! call and reused afterwards.
+!------------------------------------------------------------------------------
+subroutine xmhd_pb_build_bschur(level)
+INTEGER(i4), INTENT(in) :: level !< Current level index
+CLASS(oft_native_matrix), POINTER :: J
+CLASS(oft_vector), POINTER :: tmp
+TYPE(oft_graph_ptr), ALLOCATABLE :: graphs(:,:)
+INTEGER(i4) :: nr,nf,ng,i,k,kk,m,g,gk,gj,fi,fj,r,c,nq,ntmp,nl
+INTEGER(i4), ALLOCATABLE :: lg(:),fld(:),rep(:),gfld(:),gkr(:),glc(:),pos(:),lst(:),qkr(:),qlc(:),bcnt(:,:)
+REAL(r8), ALLOCATABLE :: gM(:),dV(:),acc(:),qM(:)
+REAL(r8) :: coef,vtmp(1,1)
+LOGICAL :: create
+DEBUG_STACK_PUSH
+IF(oft_env%nprocs>1)CALL oft_abort('PB type 4 is currently serial only','xmhd_pb_build_bschur',__FILE__)
+SELECT TYPE(this=>oft_xmhd_ops%J)
+  CLASS IS(oft_native_matrix)
+    J=>this
+  CLASS DEFAULT
+    CALL oft_abort('PB type 4 requires native matrices','xmhd_pb_build_bschur',__FILE__)
+END SELECT
+nr=J%nr
+nf=J%ni
+!---Local to global map and field index
+ALLOCATE(lg(nr),fld(nr))
+DO i=1,nf
+  DO k=1,J%i_map(i)%n
+    lg(J%i_map(i)%offset+k)=INT(J%i_map(i)%offsetg+J%i_map(i)%lge(k),4)
+    fld(J%i_map(i)%offset+k)=i
+  END DO
+END DO
+ng=MAXVAL(lg)
+ALLOCATE(rep(ng),gfld(ng))
+rep=0
+DO i=1,nr
+  IF(rep(lg(i))==0)THEN
+    rep(lg(i))=i
+    gfld(lg(i))=fld(i)
+  END IF
+END DO
+!---Fold local matrix into global CSR (sum duplicates)
+ALLOCATE(gkr(ng+1),pos(ng),lst(ng))
+gkr=0
+DO i=1,nr
+  gkr(lg(i)+1)=gkr(lg(i)+1)+(J%kr(i+1)-J%kr(i))
+END DO
+gkr(1)=1
+DO g=1,ng
+  gkr(g+1)=gkr(g+1)+gkr(g)
+END DO
+ALLOCATE(glc(gkr(ng+1)-1),gM(gkr(ng+1)-1))
+lst=gkr(1:ng) ! fill pointer
+DO i=1,nr
+  g=lg(i)
+  DO k=J%kr(i),J%kr(i+1)-1
+    glc(lst(g))=lg(J%lc(k))
+    gM(lst(g))=J%M(k)
+    lst(g)=lst(g)+1
+  END DO
+END DO
+!---Deduplicate columns within each global row (in place)
+pos=0
+ntmp=1
+DO g=1,ng
+  kk=ntmp
+  DO k=gkr(g),gkr(g+1)-1
+    gj=glc(k)
+    IF(pos(gj)>=kk)THEN
+      gM(pos(gj))=gM(pos(gj))+gM(k)
+    ELSE
+      glc(ntmp)=gj; gM(ntmp)=gM(k)
+      pos(gj)=ntmp
+      ntmp=ntmp+1
+    END IF
+  END DO
+  gkr(g)=kk
+END DO
+gkr(ng+1)=ntmp
+!---Velocity diagonal
+ALLOCATE(dV(ng))
+dV=0.d0
+DO g=1,ng
+  IF(xmhd_pb_groups(gfld(g))/=2)CYCLE
+  DO k=gkr(g),gkr(g+1)-1
+    IF(glc(k)==g)dV(g)=gM(k)
+  END DO
+  IF(dV(g)==0.d0)dV(g)=1.d0
+END DO
+!---Form Q in global numbering (two passes: count, fill)
+ALLOCATE(acc(ng),qkr(ng+1))
+pos=0; acc=0.d0
+qkr(1)=1
+DO m=1,2
+  nq=0
+  DO g=1,ng
+    CALL q_row(g,m==2)
+    IF(m==1)qkr(g+1)=qkr(g)+nq
+  END DO
+  IF(m==1)THEN
+    ALLOCATE(qlc(qkr(ng+1)-1),qM(qkr(ng+1)-1))
+  END IF
+END DO
+!---Create matrix on first call
+create=.NOT.ASSOCIATED(oft_xmhd_ops%P)
+CALL oft_xmhd_create(tmp)
+IF(create)THEN
+  ALLOCATE(bcnt(nf,nf),graphs(nf,nf))
+  bcnt=0
+  DO g=1,ng
+    fi=gfld(g)
+    DO k=qkr(g),qkr(g+1)-1
+      bcnt(fi,gfld(qlc(k)))=bcnt(fi,gfld(qlc(k)))+1
+    END DO
+  END DO
+  DO i=1,nr ! Diagonal entries for redundant local copies
+    IF(rep(lg(i))/=i)bcnt(fld(i),fld(i))=bcnt(fld(i),fld(i))+1
+  END DO
+  DO fi=1,nf
+    DO fj=1,nf
+      IF(bcnt(fi,fj)==0)CYCLE
+      ALLOCATE(graphs(fi,fj)%g)
+      graphs(fi,fj)%g%nr=J%i_map(fi)%n
+      graphs(fi,fj)%g%nc=J%j_map(fj)%n
+      graphs(fi,fj)%g%nrg=J%i_map(fi)%ng
+      graphs(fi,fj)%g%ncg=J%j_map(fj)%ng
+      graphs(fi,fj)%g%nnz=bcnt(fi,fj)
+      ALLOCATE(graphs(fi,fj)%g%kr(J%i_map(fi)%n+1),graphs(fi,fj)%g%lc(bcnt(fi,fj)))
+      graphs(fi,fj)%g%kr=0
+      graphs(fi,fj)%g%lc=0
+    END DO
+  END DO
+  !---Row counts
+  DO g=1,ng
+    r=rep(g); fi=gfld(g)
+    DO k=qkr(g),qkr(g+1)-1
+      fj=gfld(qlc(k))
+      kk=r-J%i_map(fi)%offset
+      graphs(fi,fj)%g%kr(kk+1)=graphs(fi,fj)%g%kr(kk+1)+1
+    END DO
+  END DO
+  DO i=1,nr
+    IF(rep(lg(i))==i)CYCLE
+    fi=fld(i); kk=i-J%i_map(fi)%offset
+    graphs(fi,fi)%g%kr(kk+1)=graphs(fi,fi)%g%kr(kk+1)+1
+  END DO
+  DO fi=1,nf
+    DO fj=1,nf
+      IF(.NOT.ASSOCIATED(graphs(fi,fj)%g))CYCLE
+      graphs(fi,fj)%g%kr(1)=1
+      DO kk=1,J%i_map(fi)%n
+        graphs(fi,fj)%g%kr(kk+1)=graphs(fi,fj)%g%kr(kk+1)+graphs(fi,fj)%g%kr(kk)
+      END DO
+    END DO
+  END DO
+  !---Fill columns
+  DO fi=1,nf
+    DO fj=1,nf
+      IF(.NOT.ASSOCIATED(graphs(fi,fj)%g))CYCLE
+      bcnt(fi,fj)=0
+    END DO
+  END DO
+  DO g=1,ng
+    r=rep(g); fi=gfld(g)
+    DO k=qkr(g),qkr(g+1)-1
+      c=rep(qlc(k)); fj=gfld(qlc(k))
+      CALL graph_insert(fi,fj,r-J%i_map(fi)%offset,c-J%j_map(fj)%offset)
+    END DO
+  END DO
+  DO i=1,nr
+    IF(rep(lg(i))==i)CYCLE
+    fi=fld(i)
+    CALL graph_insert(fi,fi,i-J%i_map(fi)%offset,i-J%j_map(fi)%offset)
+  END DO
+  !---Sort columns within rows
+  DO fi=1,nf
+    DO fj=1,nf
+      IF(.NOT.ASSOCIATED(graphs(fi,fj)%g))CYCLE
+      DO kk=1,graphs(fi,fj)%g%nr
+        r=graphs(fi,fj)%g%kr(kk); c=graphs(fi,fj)%g%kr(kk+1)-1
+        IF(c>r)CALL sort_array(graphs(fi,fj)%g%lc(r:c),c-r+1)
+      END DO
+    END DO
+  END DO
+  CALL create_matrix(oft_xmhd_ops%P,graphs,tmp,tmp,native=.TRUE.)
+  ml_P(level-xmhd_minlev+1)%m=>oft_xmhd_ops%P
+  DO fi=1,nf
+    DO fj=1,nf
+      IF(.NOT.ASSOCIATED(graphs(fi,fj)%g))CYCLE
+      DEALLOCATE(graphs(fi,fj)%g%kr,graphs(fi,fj)%g%lc)
+      DEALLOCATE(graphs(fi,fj)%g)
+    END DO
+  END DO
+  DEALLOCATE(graphs,bcnt)
+END IF
+!---Set values
+CALL oft_xmhd_ops%P%zero
+DO g=1,ng
+  r=rep(g); fi=gfld(g)
+  DO k=qkr(g),qkr(g+1)-1
+    c=rep(qlc(k)); fj=gfld(qlc(k))
+    vtmp(1,1)=qM(k)
+    CALL oft_xmhd_ops%P%add_values([r-J%i_map(fi)%offset],[c-J%j_map(fj)%offset],vtmp,1,1,fi,fj)
+  END DO
+END DO
+CALL oft_xmhd_ops%P%assemble(tmp)
+CALL tmp%delete
+DEALLOCATE(tmp)
+DEALLOCATE(lg,fld,rep,gfld,gkr,glc,gM,pos,lst,dV,acc,qkr,qlc,qM)
+DEBUG_STACK_POP
+CONTAINS
+!---Compute one global row of Q (count only, or fill)
+subroutine q_row(gr,fill)
+INTEGER(i4), INTENT(in) :: gr
+LOGICAL, INTENT(in) :: fill
+INTEGER(i4) :: kq,kv,jj
+LOGICAL :: vrow
+vrow=(xmhd_pb_groups(gfld(gr))==2)
+nl=0
+DO kq=gkr(gr),gkr(gr+1)-1
+  jj=glc(kq)
+  IF((xmhd_pb_groups(gfld(jj))==2).EQV.vrow)CALL acc_add(jj,gM(kq))
+END DO
+IF(.NOT.vrow)THEN
+  DO kq=gkr(gr),gkr(gr+1)-1
+    gk=glc(kq)
+    IF(xmhd_pb_groups(gfld(gk))/=2)CYCLE
+    coef=gM(kq)/dV(gk)
+    DO kv=gkr(gk),gkr(gk+1)-1
+      jj=glc(kv)
+      IF(xmhd_pb_groups(gfld(jj))==2)CYCLE
+      CALL acc_add(jj,-coef*gM(kv))
+    END DO
+  END DO
+END IF
+!---Flush accumulator
+nq=nl
+IF(fill)THEN
+  DO kq=1,nl
+    qlc(qkr(gr)+kq-1)=lst(kq)
+    qM(qkr(gr)+kq-1)=acc(lst(kq))
+  END DO
+END IF
+DO kq=1,nl
+  acc(lst(kq))=0.d0
+  pos(lst(kq))=0
+END DO
+end subroutine q_row
+!---Add value to sparse row accumulator
+subroutine acc_add(col,val)
+INTEGER(i4), INTENT(in) :: col
+REAL(r8), INTENT(in) :: val
+IF(pos(col)==0)THEN
+  nl=nl+1
+  lst(nl)=col
+  pos(col)=nl
+END IF
+acc(col)=acc(col)+val
+end subroutine acc_add
+!---Insert column into block graph row (rows filled in order of arrival)
+subroutine graph_insert(bi,bj,brow,bcol)
+INTEGER(i4), INTENT(in) :: bi,bj,brow,bcol
+INTEGER(i4) :: kp
+kp=graphs(bi,bj)%g%kr(brow)
+DO WHILE(graphs(bi,bj)%g%lc(kp)/=0)
+  kp=kp+1
+END DO
+graphs(bi,bj)%g%lc(kp)=bcol
+end subroutine graph_insert
+end subroutine xmhd_pb_build_bschur
+!------------------------------------------------------------------------------
 !> Zero all field blocks of a composite vector that are (not) in a given group
 !------------------------------------------------------------------------------
 subroutine xmhd_pb_zero_groups(self,vec,group,keep)
@@ -4903,7 +5182,31 @@ IF(uu>0.d0)THEN
   CALL self%r%add(1.d0,-1.d0,self%w)
 END IF
 self%pinv%full_residual=.FALSE.
-IF(self%pb_type==3)THEN
+IF(self%pb_type==4)THEN
+  !---B-Schur: predictor x_V* = J_VV^{-1} r_V
+  CALL self%t%add(0.d0,1.d0,self%r)
+  CALL xmhd_pb_zero_groups(self,self%t,2,.TRUE.)
+  CALL self%xv%set(0.d0)
+  CALL self%pinv%apply(self%xv,self%t)
+  CALL xmhd_pb_zero_groups(self,self%xv,2,.TRUE.)
+  !---Schur solve: x_X = S_X^{-1} (r_X - J_XV x_V*)
+  CALL self%J%apply(self%xv,self%w)
+  CALL self%t%add(0.d0,1.d0,self%r)
+  CALL self%t%add(1.d0,-1.d0,self%w)
+  CALL xmhd_pb_zero_groups(self,self%t,2,.FALSE.)
+  CALL self%x%set(0.d0)
+  CALL self%pinv%apply(self%x,self%t)
+  CALL xmhd_pb_zero_groups(self,self%x,2,.FALSE.)
+  !---Corrector: x_V = J_VV^{-1} (r_V - J_VX x_X)
+  CALL self%J%apply(self%x,self%w)
+  CALL self%t%add(0.d0,1.d0,self%r)
+  CALL self%t%add(1.d0,-1.d0,self%w)
+  CALL xmhd_pb_zero_groups(self,self%t,2,.TRUE.)
+  CALL self%xv%set(0.d0)
+  CALL self%pinv%apply(self%xv,self%t)
+  CALL xmhd_pb_zero_groups(self,self%xv,2,.TRUE.)
+  CALL self%x%add(1.d0,1.d0,self%xv)
+ELSE IF(self%pb_type==3)THEN
   !---Block diagonal: x = P^{-1} r
   CALL self%t%add(0.d0,1.d0,self%r)
   CALL self%x%set(0.d0)
