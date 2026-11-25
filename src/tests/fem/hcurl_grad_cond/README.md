@@ -34,7 +34,7 @@ It holds this report, the offline analysis scripts, the MUG run drivers, and the
    - The new functions at each p-level are strongly coupled to the p−1 space, and the rotational and gradient families are strongly coupled to each other.
    - Strengthened Cauchy–Schwarz constants γ are 0.98–0.999, and grow with p (§6). The same values hold within a single element, so they are intrinsic to the H(Curl)+grad(H^1) space with this hierarchy.
    - The near-cancelling (gradient vs rotational) combinations are local to **vertex stars**: the patch of all cells around a vertex.
-3. **The recommended direction is a vertex-star (Arnold–Falk–Winther) Schwarz smoother for the B block inside p-MG** (§8). On the B operator A = M + τK:
+3. **The recommended direction is a vertex-star (Arnold–Falk–Winther) Schwarz smoother for the B block inside p-MG** (§8). An all-field version already exists on another branch (see the follow-up below). On the B operator A = M + τK:
 
    | quantity | vertex stars | other smoothers |
    |---|---|---|
@@ -51,12 +51,24 @@ It holds this report, the offline analysis scripts, the MUG run drivers, and the
 
 ### Proposed follow-up (not started; needs approval)
 
-1. **Add an `overlap_mode` "vertex" (star) block builder to the native Schwarz preconditioner.**
-   - Blocks: one per vertex, holding the DOFs of all entities whose closure contains the vertex (the vertex, plus the edges, faces and cells around it).
-   - Local solves: exact, using LU, or Cholesky for this SPD block.
-   - Use it as the p-MG smoother for the B block (or the whole system) in MUG.
-2. **Measure MUG iteration counts** on the Alfvén and spheromak cases against cell overlap 0/1.
-3. **If CFL ≫ 1 is important**, also test a star smoother combined with an exact or auxiliary solve on the gradient subspace (Hiptmair–Xu-type). §7 shows the gradient solve matters little at CFL ≤ 10 once the coarse p−1 solve is present.
+**A vertex-star smoother already exists.** It is on branch `claude/pmg-structure-aware-smoothers`:
+- implementation commit `2c4919e`: native preconditioner `type="patch"` in `src/lin_alg/oft_patch_solvers.F90`, plus the vertex-star builder `comp_fem_vertex_patches` in `src/fem/fem_utils.F90`, attached on every MUG MG level;
+- report: `pmg_smoother_report.md`.
+
+That branch is based on `claude/busy-einstein-4qu62p`, not on the cell-adjacency Schwarz branch merged here.
+
+Its stars are **coupled B–V (all-field) patches**. Results reported there:
+- at small CFL, B-block-alone stationary factor about 0.08 and all-field factor about 0.175 (symmetric multiplicative sweeps), with two-grid about 0.013;
+- at CFL ≳ 1 the coupled B–V star blocks become nearly singular and the method fails.
+
+The analysis here explains the small-CFL success: stars hold the coupled gradient/rotational pairs of §6. The B-block-only stars of §8 stay robust up to CFL 10. That suggests the large-CFL failure comes from the B–V coupling inside the patch, not from the B space.
+
+So, rather than writing a second implementation:
+
+1. **Evaluate the existing `type="patch"` smoother** on this branch's test cases, against cell-mode Schwarz with overlap 0/1. That requires merging or porting `2c4919e` onto this branch.
+2. **Test B-block-only stars inside a field split**: stars on B, with V/n/T handled separately (e.g. block Jacobi or cell Schwarz). This keeps the CFL-robust B part of §8 and avoids the near-singular coupled B–V patch blocks.
+3. **Measure MUG iteration counts** on the Alfvén and spheromak cases at dt from 8e-7 to 1e-4.
+4. **If CFL ≫ 1 is important**, add an exact or auxiliary solve on the gradient subspace (Hiptmair–Xu-type). §7 shows that at CFL ≤ 10 it matters little once the coarse p−1 solve is present.
 
 ## 1. Setup
 
