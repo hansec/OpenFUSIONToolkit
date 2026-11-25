@@ -281,9 +281,9 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
             rep_options += " xmhd_lin_euler_start=T\n"
         else:
             rep_options += " xmhd_lin_bdf2=F\n"
-    lin_tol = '1.E-12'
+    lin_tol = '1.E-13'
     if order == 4:
-        lin_tol = '1.E-13'
+        lin_tol = '1.E-14'
     mfnk = False
     if not linear:
         mfnk = mf

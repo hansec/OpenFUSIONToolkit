@@ -93,9 +93,23 @@ This method is supported through both the native and PETSc backends through
 
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
-| `nlocal`   | Number of local blocks (-1 for field based) | int | Yes |
-| `groups`   | Group index for each field in multi-field vector [n] | int | Yes |
+| `nlocal`   | Number of local blocks (-1 for per-field, <-1 for custom field `groups`) | int | Yes |
+| `groups`   | Group index (1..ngroups) for each field in multi-field vector [n] | int | Yes |
 | `boverlap` | Overlap boundary rows (native only) | bool | false |
+| `loverlap` | Overlap internal block boundaries by one graph layer (native only) | bool | false |
+
+\subsection doc_solvers_basic_mg Multi-Grid Preconditioner
+
+Multi-grid V-cycle preconditioning is provided through \ref oft_native_solvers::oft_ml_precond
+"oft_ml_precond".
+
+**XML Spec:** `<pre type="mg">`
+
+| Option         | Description | Type | Default |
+|----------------|-------------|------|---------|
+| `report`       | Print per-stage residual diagnostics (0=off, 1=total, 2=per-block) | int (attr) | `0` |
+| `coarse_damp`  | Damping factor \f$ \omega_c \f$ applied to coarse-grid correction | real (attr/elem) | `1.0` |
+| `coarse_shift` | (xMHD only) Mass-matrix shift \f$ \sigma \f$ on coarse levels (\f$ J_c \leftarrow J_c + \sigma M_c \f$) | real (attr/elem) | `0.0` |
 
 \subsection doc_solvers_basic_schwarz Additive Schwarz
 

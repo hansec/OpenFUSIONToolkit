@@ -217,6 +217,7 @@ type, public, extends(oft_solver) :: oft_ml_precond
   integer(i4) :: report_err = 0 !< Report errors after each cycle (0: no, 1: total, 2: block-wise)
   integer(i4) :: level !< Current level in ML context
   integer(i4) :: minlevel !< Lowest level
+  real(r8) :: coarse_damp = 1.d0 !< Damping factor applied to coarse-grid correction
   real(r8) :: timings(4) = 0.d0 !< Timing for each stage
   class(oft_solver), pointer :: smooth_up => NULL() !< Smoother for up-cycle
   class(oft_solver), pointer :: smooth_down => NULL() !< Smoother for down-cycle
@@ -1843,7 +1844,7 @@ if(associated(self%base_solve))then
   CALL self%ml_vecspace%interp(self%ucors,self%p)
   if(associated(self%bc))call self%bc%apply(self%p)
   !---Add coarse correction
-  call u%add(1.d0,1.d0,self%p)
+  call u%add(1.d0,self%coarse_damp,self%p)
   self%timings(4)=self%timings(4)+mytimer%tock()
 end if
 !---Reset RHS
@@ -2054,8 +2055,25 @@ IF(.NOT.self%initialized)THEN
   color_avail=.FALSE.
   CALL solver_setup(self)
   IF(self%nlocal==-1)THEN
+    IF(self%A%ni>SIZE(self%slice_group))CALL oft_abort( &
+      "Matrix has more fields than supported slice_group size","bjprecond_apply",__FILE__)
     self%nlocal=-self%A%ni
     self%slice_group(1:self%A%ni)=(/(i,i=1,self%A%ni)/)
+  ELSE IF(self%nlocal<-1)THEN
+    IF(self%A%ni>SIZE(self%slice_group))CALL oft_abort( &
+      "Matrix has more fields than supported slice_group size","bjprecond_apply",__FILE__)
+    IF(ANY(self%slice_group(1:self%A%ni)<1))CALL oft_abort( &
+      "Invalid or incomplete `groups` specification for block Jacobi","bjprecond_apply",__FILE__)
+    ngroups=MAXVAL(self%slice_group(1:self%A%ni))
+    DO i=1,ngroups
+      IF(.NOT.ANY(self%slice_group(1:self%A%ni)==i))CALL oft_abort( &
+        "Empty group index in `groups` specification for block Jacobi","bjprecond_apply",__FILE__)
+    END DO
+    IF(ngroups==1)THEN
+      self%nlocal=1
+    ELSE
+      self%nlocal=-ngroups
+    END IF
   END IF
   IF(ASSOCIATED(A_native%color))THEN
     ncolors=MAXVAL(A_native%color)
@@ -2102,7 +2120,7 @@ IF(.NOT.self%initialized)THEN
         !---Use slice partitioning
         self%nlocal=ABS(self%nlocal)
         IF(color_avail)THEN
-          ngroups=MAXVAL(self%slice_group)
+          ngroups=MAXVAL(self%slice_group(1:self%A%ni))
           j=0
           DO i=1,self%A%ni
             DO k=1,self%A%i_map(i)%n
@@ -2156,7 +2174,7 @@ IF(.NOT.self%initialized)THEN
         !---Use slice partitioning
         self%nlocal=ABS(self%nlocal)
         IF(color_avail)THEN
-          ngroups=MAXVAL(self%slice_group)
+          ngroups=MAXVAL(self%slice_group(1:self%A%ni))
           DO i=1,self%A%ni
             DO k=1,self%A%i_map(i)%nslice
               j=self%A%i_map(i)%offset+self%A%i_map(i)%slice(k)
@@ -2197,12 +2215,23 @@ IF(.NOT.self%initialized)THEN
     END DO
     IF(self%loverlap.AND.self%nlocal>1)THEN
       ALLOCATE(sflag(A_native%nr))
-      DO i=1,self%A%ni
-        DO k=1,self%A%i_map(i)%nslice
-          j=self%A%i_map(i)%offset+self%A%i_map(i)%slice(k)
-          sflag(j)=self%slice_group(i)
+      sflag=0
+      IF(self%boundary_overlap)THEN
+        j=0
+        DO i=1,self%A%ni
+          DO k=1,self%A%i_map(i)%n
+            sflag(j+k)=self%slice_group(i)
+          END DO
+          j=j+self%A%i_map(i)%n
         END DO
-      END DO
+      ELSE
+        DO i=1,self%A%ni
+          DO k=1,self%A%i_map(i)%nslice
+            j=self%A%i_map(i)%offset+self%A%i_map(i)%slice(k)
+            sflag(j)=self%slice_group(i)
+          END DO
+        END DO
+      END IF
       parts_tmp=>self%parts
       ALLOCATE(self%parts(self%nlocal))
       !$omp parallel private(j,jr,k,eflag)
@@ -2439,10 +2468,11 @@ IF(self%nlocal<-1)THEN
     CALL xml_read_content(current_node,read_tmp,iostat=ierr)
     IF(ierr/=0)CALL oft_xml_abort("Error reading `groups` node","bjprecond_setup_xml",__FILE__)
     IF(ASSOCIATED(read_tmp))THEN
-      IF(SIZE(read_tmp)>10)THEN
+      IF(SIZE(read_tmp)>SIZE(self%slice_group))THEN
         CALL oft_abort("Too many slice groups specified","bjprecond_setup_xml",__FILE__)
       ELSE
-        self%slice_group=read_tmp(1)
+        self%slice_group=-1
+        self%slice_group(1:SIZE(read_tmp))=read_tmp
       END IF
       DEALLOCATE(read_tmp)
     END IF
