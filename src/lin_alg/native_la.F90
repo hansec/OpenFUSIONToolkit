@@ -33,7 +33,7 @@ USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
   oft_global_reduction, oft_stitch_check
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
-  oft_matrix, oft_cmatrix, oft_matrix_map, oft_graph
+  oft_matrix, oft_cmatrix, oft_matrix_map, oft_graph, matrix_delete_patches
 IMPLICIT NONE
 #include "local.h"
 private
@@ -2286,6 +2286,7 @@ END IF
 IF(ASSOCIATED(self%Mfull))DEALLOCATE(self%Mfull)
 IF(ASSOCIATED(self%redind))DEALLOCATE(self%redind)
 IF(ASSOCIATED(self%color))DEALLOCATE(self%color)
+CALL matrix_delete_patches(self)
 self%nred=0
 DEBUG_STACK_POP
 end subroutine mat_delete

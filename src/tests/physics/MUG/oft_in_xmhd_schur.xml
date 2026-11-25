@@ -1,0 +1,41 @@
+<oft>
+  <xmhd>
+    <pre type="block_schur">
+      <schur_type>ldu</schur_type>
+      <b_pre>
+        <solver type="gmres">
+          <its>2</its>
+          <nrits>2</nrits>
+          <pre type="block_jacobi">
+            <nlocal>2</nlocal>
+            <solver type="lu"></solver>
+          </pre>
+        </solver>
+      </b_pre>
+      <v_pre>
+        <pre type="mg">
+          <smoother direction="both">
+            <solver type="gmres">
+              <its>2</its>
+              <nrits>2</nrits>
+              <pre type="block_jacobi">
+                <nlocal>2</nlocal>
+                <solver type="lu"></solver>
+              </pre>
+            </solver>
+          </smoother>
+          <coarse>
+            <solver type="gmres">
+              <its>1</its>
+              <nrits>1</nrits>
+              <pre type="block_jacobi">
+                <nlocal>1</nlocal>
+                <solver type="lu"></solver>
+              </pre>
+            </solver>
+          </coarse>
+        </pre>
+      </v_pre>
+    </pre>
+  </xmhd>
+</oft>

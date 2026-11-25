@@ -98,6 +98,57 @@ This method is supported through both the native and PETSc backends through
 | `boverlap` | Overlap boundary rows (native only) | bool | false |
 | `loverlap` | Overlap internal block boundaries by one graph layer (native only) | bool | false |
 
+\subsection doc_solvers_basic_patch Overlapping patch (vertex-star) smoother
+
+This method is supported with the native backend through
+\ref oft_patch_solvers::oft_patch_precond "oft_patch_precond". Each patch is a set of matrix rows that is
+solved exactly (dense LU) and the patch corrections are combined additively or multiplicatively. The patches
+are supplied with the matrix (\ref oft_la_base::oft_patch_info "oft_patch_info"). MUG (`xmhd` and `xmhd_lag`)
+attaches vertex-star patches on every multigrid level (including the sub-block matrices \f$ J_{BB} \f$ and
+\f$ S_V \f$ when using `block_schur`), built by
+\ref fem_utils::comp_fem_vertex_patches "comp_fem_vertex_patches": all degrees of freedom of all fields on a
+vertex and on the edges, faces and cells that contain it. Vertex stars contain the gradients of the vertex
+hat functions, so they resolve the near-kernel of the curl operator for H(curl) fields.
+
+On distributed meshes, patches of vertices on process boundaries are assembled and solved in full by one
+process, so the additive smoother is independent of the number of processes. In the multiplicative modes the
+interior patches are swept first, followed by an additive correction from the process-boundary patches.
+
+When `its` is positive the object performs `its` damped Richardson iterations and can be used directly as a
+multigrid smoother. Otherwise it acts as a preconditioner (eg. for a GMRES smoother).
+
+**XML Spec:** `<pre type="patch">`
+
+| Group      | Description | Type      | List |
+|------------|-------------|-----------|------|
+| `mode`     | Patch combination {additive, multiplicative, symmetric} (default: additive) | str | No |
+| `its`      | Richardson iterations (<=0 to act as preconditioner, default: -1) | int | Yes |
+| `df`       | Damping factor (default: 1) | real | Yes |
+| `single`   | Store patch factors in single precision (default: false) | bool | No |
+
+\note Memory use is the sum of the squared patch sizes. On coupled B-V systems vertex-star smoothing alone
+does not converge at Alfven CFL numbers of order one or larger, where B-V wave coupling spans multiple cells;
+in that regime use it inside `<b_pre>` of \ref doc_solvers_basic_schur "block_schur" (which also reduces
+patch memory significantly) or combine it with an overlapped `block_jacobi` smoother.
+
+\subsection doc_solvers_basic_schur Physics-Based Block-Schur (xMHD)
+
+For 3D extended MHD (\ref xmhd), a physics-based Block-Schur preconditioner is provided
+through \ref xmhd::oft_xmhd_schur_pre "oft_xmhd_schur_pre". It partitions the system into
+magnetic (`Bc+Bg`), velocity (`Vx,Vy,Vz`), and optional scalar (`n,Ti,Te`) blocks and
+assembles an SPD parabolized Alfven + acoustic velocity Schur complement \f$ S_V \f$ across
+all MG levels so that p-MG / h-MG can be applied cleanly to the sub-blocks.
+
+**XML Spec:** `<xmhd><pre type="block_schur">`
+
+| Group        | Description | Type | Default |
+|--------------|-------------|------|---------|
+| `schur_type` | Factorization type (`lower`, `upper`, or `ldu`) | str | `ldu` |
+| `sv_scale`   | Scale factor on parabolized Alfven/acoustic term in \f$ S_V \f$ | real | `1.0` |
+| `b_pre`      | Solver or `<pre type="mg">` definition for magnetic block \f$ J_{BB} \f$ | xml | `gmres(2)+BJ(1,ilu)` |
+| `v_pre`      | Solver or `<pre type="mg">` definition for velocity Schur \f$ S_V \f$ | xml | MG on \f$ S_V \f$ |
+| `s_pre`      | Solver definition for scalar block \f$ J_{SS} \f$ (when active) | xml | `gmres(2)+BJ(-1,ilu)` |
+
 \subsection doc_solvers_basic_mg Multi-Grid Preconditioner
 
 Multi-grid V-cycle preconditioning is provided through \ref oft_native_solvers::oft_ml_precond

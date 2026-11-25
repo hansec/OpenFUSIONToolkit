@@ -345,3 +345,19 @@ def test_hex_lin_r1_p4_mpi(petsc_flag):
     #assert alfven_setup(1,2,4,3,'0,0,2,2,2',linear=True,petsc=petsc_flag,hex_mesh=True)
     assert alfven_setup(1,2,4,4,'0,0,0,0,2',linear=True,petsc=petsc_flag,hex_mesh=True)
     assert validate_alfven(berr_exp,verr_exp,linear=True)
+
+#============================================================================
+# Vertex-star patch smoother in p-multigrid
+def test_nl_r1_p2_patch():
+    '''Nonlinear Alfven wave with vertex-star patch smoother in p-multigrid, serial.'''
+    berr_exp = 3.279583E-02
+    verr_exp = 2.842441E-02
+    assert alfven_setup(1,1,2,1,xml_file='oft_in_xmhd_mg_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp)
+@pytest.mark.mpi
+def test_nl_r1_p2_patch_mpi():
+    '''Nonlinear Alfven wave with vertex-star patch smoother in p-multigrid, two MPI processes.'''
+    berr_exp = 3.279583E-02
+    verr_exp = 2.842441E-02
+    assert alfven_setup(1,2,2,2,xml_file='oft_in_xmhd_mg_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp)

@@ -346,3 +346,54 @@ def test_hex_lin_r1_p4_mpi(petsc_flag):
     #assert alfven_setup(1,2,4,3,'0,0,2,2,2',linear=True,petsc=petsc_flag,hex_mesh=True)
     assert alfven_setup(1,2,4,4,'0,0,0,0,2',linear=True,petsc=petsc_flag,hex_mesh=True)
     assert validate_alfven(berr_exp,verr_exp,linear=True)
+
+#============================================================================
+# Vertex-star patch smoother in p-multigrid
+def test_nl_r1_p2_patch():
+    '''Nonlinear Alfven wave with vertex-star patch smoother in p-multigrid, serial.'''
+    berr_exp = 4.267311E-02
+    verr_exp = 2.124323E-02
+    assert alfven_setup(1,1,2,1,xml_file='oft_in_xmhd_mg_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp)
+@pytest.mark.mpi
+def test_nl_r1_p2_patch_mpi():
+    '''Nonlinear Alfven wave with vertex-star patch smoother in p-multigrid, two MPI processes.'''
+    berr_exp = 4.267311E-02
+    verr_exp = 2.124323E-02
+    assert alfven_setup(1,2,2,2,xml_file='oft_in_xmhd_mg_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp)
+
+#============================================================================
+# Block-Schur p-MG preconditioner tests (including vertex-star patch smoother on J_BB)
+@pytest.mark.linear
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_schur_lin_r1_p2(petsc_flag):
+    '''Linearized Alfven wave with physics-based Block-Schur p-MG preconditioner, serial.'''
+    berr_exp = 4.267325E-02
+    verr_exp = 2.124325E-02
+    assert alfven_setup(1,1,2,1,linear=True,petsc=petsc_flag,xml_file='oft_in_xmhd_schur.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+@pytest.mark.mpi
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_schur_lin_r1_p2_mpi(petsc_flag):
+    '''Linearized Alfven wave with physics-based Block-Schur p-MG preconditioner, two MPI processes.'''
+    berr_exp = 4.267325E-02
+    verr_exp = 2.124325E-02
+    assert alfven_setup(1,2,2,2,linear=True,petsc=petsc_flag,xml_file='oft_in_xmhd_schur.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+def test_schur_patch_lin_r1_p2():
+    '''Linearized Alfven wave with Block-Schur p-MG and vertex-star patch smoother on J_BB, serial.'''
+    berr_exp = 4.267325E-02
+    verr_exp = 2.124325E-02
+    assert alfven_setup(1,1,2,1,linear=True,petsc=False,xml_file='oft_in_xmhd_schur_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+@pytest.mark.mpi
+def test_schur_patch_lin_r1_p2_mpi():
+    '''Linearized Alfven wave with Block-Schur p-MG and vertex-star patch smoother on J_BB, two MPI processes.'''
+    berr_exp = 4.267325E-02
+    verr_exp = 2.124325E-02
+    assert alfven_setup(1,2,2,2,linear=True,petsc=False,xml_file='oft_in_xmhd_schur_patch.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
