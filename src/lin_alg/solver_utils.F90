@@ -776,6 +776,7 @@ TYPE(xml_node), INTENT(in) :: pre_node !< Preconditioner XML element
 class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
 !---
 integer(i4) :: i,ierr,nnodes
+real(r8) :: coarse_damp
 class(oft_ml_precond), pointer :: this_ml
 LOGICAL :: symmetric,up_present,down_present,coarse_present
 CHARACTER(LEN=:), ALLOCATABLE :: dir_type
@@ -822,12 +823,20 @@ IF(ierr==0)THEN
   coarse_present=.TRUE.
   CALL xml_get_element(tmp_node,"solver",coarse_node,ierr)
 END IF
+!---Read optional coarse-grid correction damping factor
+coarse_damp=1.d0
+CALL xml_read_attribute(pre_node,"coarse_damp",coarse_damp,iostat=ierr)
+IF(ierr/=0)THEN
+  CALL xml_get_element(pre_node,"coarse_damp",tmp_node,ierr)
+  IF(ierr==0)CALL xml_read_content(tmp_node,coarse_damp,iostat=ierr)
+END IF
 !---Set smoother
 ALLOCATE(oft_ml_precond::pre)
 SELECT TYPE(pre)
   TYPE IS(oft_ml_precond)
     this_ml=>pre
     CALL xml_read_attribute(pre_node,"report",pre%report_err,iostat=ierr)
+    pre%coarse_damp=coarse_damp
   CLASS DEFAULT
     CALL oft_abort('Error in precon allocation!','create_petsc_mlpre',__FILE__)
 END SELECT
@@ -860,6 +869,7 @@ DO i=nlevels-1,1,-1
     CALL oft_abort('Failed to allocate "this_ml".','create_petsc_mlpre',__FILE__)
   !---Setup MG smoother
   this_ml%ml_vecspace=>ml_vecspace
+  this_ml%coarse_damp=coarse_damp
   this_ml%level=ABS(levels(i))
   IF(levels(i)<0)CYCLE
   IF(i==1.AND.coarse_present)THEN

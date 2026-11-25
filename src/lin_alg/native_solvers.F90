@@ -217,6 +217,7 @@ type, public, extends(oft_solver) :: oft_ml_precond
   integer(i4) :: report_err = 0 !< Report errors after each cycle (0: no, 1: total, 2: block-wise)
   integer(i4) :: level !< Current level in ML context
   integer(i4) :: minlevel !< Lowest level
+  real(r8) :: coarse_damp = 1.d0 !< Damping factor applied to coarse-grid correction
   real(r8) :: timings(4) = 0.d0 !< Timing for each stage
   class(oft_solver), pointer :: smooth_up => NULL() !< Smoother for up-cycle
   class(oft_solver), pointer :: smooth_down => NULL() !< Smoother for down-cycle
@@ -1836,8 +1837,8 @@ if(associated(self%base_solve))then
   !---Interpolate Solution
   CALL self%ml_vecspace%interp(self%ucors,self%p)
   if(associated(self%bc))call self%bc%apply(self%p)
-  !---Add coarse correction
-  call u%add(1.d0,1.d0,self%p)
+  !---Add coarse correction (with optional damping)
+  call u%add(1.d0,self%coarse_damp,self%p)
   self%timings(4)=self%timings(4)+mytimer%tock()
 end if
 !---Reset RHS

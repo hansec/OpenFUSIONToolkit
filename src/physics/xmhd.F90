@@ -402,6 +402,7 @@ CLASS(oft_solver), POINTER :: xmhd_pre => NULL() !< Preconditioner object
 LOGICAL :: xmhd_use_schur = .FALSE. !< Use physics-based Block-Schur preconditioner
 LOGICAL :: xmhd_schur_has_s = .FALSE. !< Active scalar fields in Block-Schur
 REAL(r8) :: xmhd_schur_sv_scale = 1.d0 !< Scaling factor on parabolized Alfven/acoustic term in S_V
+REAL(r8) :: xmhd_coarse_shift = 0.d0 !< Mass-matrix shift sigma on coarse MG levels (J_c -> J_c + sigma*M_c)
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_schur_B !< ML container for B (Bc+Bg) sub-block
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_schur_V !< ML container for V (Vx,Vy,Vz) sub-block
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_schur_S !< ML container for scalar sub-block
@@ -504,6 +505,8 @@ CONTAINS
 !! | `xmhd_monitor_div=F` | Monitor divergence error | bool |
 !! | `xmhd_mfnk=F`      | Use Matrix-Free NL solve | bool |
 !! | `nl_update=2`      | Update the preconditioner when a matrix-free NL solve takes at least this many iterations | int |
+!! | `vel_scale=-1`     | Velocity scaling factor (<0 for automatic Alfven-balanced \f$ (\mu_0 n_0 m_i)^{-1/2} \f$) | real |
+!! | `xmhd_coarse_shift=0` | Mass-matrix shift \f$ \sigma \f$ applied to coarse MG levels (\f$ J_c \leftarrow J_c + \sigma M_c \f$) | real |
 !
 !------------------------------------------------------------------------------
 SUBROUTINE xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
@@ -527,7 +530,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   eta_temp,nu_par,nu_visc,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
-  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,vel_scale
+  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start,vel_scale,xmhd_coarse_shift
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -572,6 +575,12 @@ IF(ASSOCIATED(oft_env%xml))THEN
           xmhd_use_schur=.TRUE.
           CALL xml_get_element(xmhd_pre_node,"sv_scale",sv_node,ierr)
           IF(ierr==0)CALL xml_read_content(sv_node,xmhd_schur_sv_scale,iostat=ierr)
+        ELSE IF(TRIM(pre_type)=="mg")THEN
+          CALL xml_read_attribute(xmhd_pre_node,"coarse_shift",xmhd_coarse_shift,iostat=ierr)
+          IF(ierr/=0)THEN
+            CALL xml_get_element(xmhd_pre_node,"coarse_shift",sv_node,ierr)
+            IF(ierr==0)CALL xml_read_content(sv_node,xmhd_coarse_shift,iostat=ierr)
+          END IF
         END IF
         DEALLOCATE(pre_type)
       END IF
@@ -1749,7 +1758,7 @@ integer(i4) :: ii,i,ip,j,m,n,jr,jc,jp,nrows,jtmp(1),vi,vj,vl,vm,vk,vlc,ns_f
 integer(i4), allocatable, target :: j_lag(:),j_hgrad(:),j_hcurl(:)
 integer(i4), parameter :: lev_cevita(3,6)=RESHAPE([1,2,3, 1,3,2, 2,3,1, 2,1,3, 3,1,2, 3,2,1],[3,6])
 integer(KIND=omp_lock_kind), allocatable, dimension(:) :: tlocks,tlocks_b,tlocks_v,tlocks_s
-real(r8) :: f,diff,chi_temp(4),bmag,det,uvec(3),umat(3,3),nu_tmp(2),ten1(3,3)
+real(r8) :: f,diff,chi_temp(4),bmag,det,det_m,mass_fac,uvec(3),umat(3,3),nu_tmp(2),ten1(3,3)
 real(r8) :: c_sv,c_cs,b2_sv,bg_r,bg_c,u_sv
 real(r8), allocatable, target :: lag_rop(:),lag_gop(:,:),hgrad_rop(:,:)
 real(r8), allocatable, target :: hcurl_rop(:,:),hcurl_cop(:,:)
@@ -1779,6 +1788,8 @@ IF(xmhd_use_schur)THEN
 END IF
 quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad !oft_hcurl%quad
 tgam_fac=temp_gamma - 1.d0
+mass_fac=1.d0
+IF((xmhd_level<xmhd_nlevels).AND.(xmhd_coarse_shift>0.d0))mass_fac=1.d0+xmhd_coarse_shift
 !------------------------------------------------------------------------------
 ! Reset matrices
 !------------------------------------------------------------------------------
@@ -1811,7 +1822,7 @@ END IF
 !------------------------------------------------------------------------------
 ! Construct matrix
 !------------------------------------------------------------------------------
-!$omp parallel private(det,j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop, &
+!$omp parallel private(det,det_m,j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop, &
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,jc,bhat,he,v0_mag,dvT,eta_curr,u,uvec,umat, &
 !$omp mtmp,mtmp_solid,mtmp_sv,mtmp_b,mtmp_s,chi_temp,bmag,c1,c2,c3,c4,divv,nu_tmp,ten1,cgop,fulltmp, &
 !$omp lag_gopt,pt,diff_tmp,hgrad_ropt,hcurl_ropt,hcurl_copt,uten,i,ii,iloc,iloc_b,iloc_v,iloc_s,u0, &
@@ -1890,6 +1901,7 @@ do ii=1,mesh%tloc_c(ip)%n
       call oft_hcurl_get_cgops(goptmp,cgop)
     end if
     det=vol*quad%wts(m)
+    det_m=det*mass_fac
     !---Lagrange basis functions
     CALL oft_lag_eval_all(oft_lagrange,i,quad%pts(:,m),lag_rop)
     CALL oft_lag_geval_all(oft_lagrange,i,quad%pts(:,m),lag_gop,goptmp)
@@ -1964,12 +1976,12 @@ do ii=1,mesh%tloc_c(ip)%n
           mtmp(1,1)%m(jr,jc) = mtmp(1,1)%m(jr,jc) &
             + (hcurl_ropt(jr,1)*hcurl_rop(1,jc) &
             +  hcurl_ropt(jr,2)*hcurl_rop(2,jc) &
-            +  hcurl_ropt(jr,3)*hcurl_rop(3,jc))*det &
+            +  hcurl_ropt(jr,3)*hcurl_rop(3,jc))*det_m &
             + DOT_PRODUCT(hcurl_copt(jr,:),uvec)
         end do
       end do
       do jc=1,oft_hgrad%nce
-        uvec=hgrad_rop(:,jc)*det
+        uvec=hgrad_rop(:,jc)*det_m
         !$omp simd
         do jr=1,oft_hcurl%nce
           mtmp(1,2)%m(jr,jc) = mtmp(1,2)%m(jr,jc) &
@@ -1977,7 +1989,7 @@ do ii=1,mesh%tloc_c(ip)%n
         end do
       end do
       do jc=1,oft_hcurl%nce
-        uvec=hcurl_rop(:,jc)*det
+        uvec=hcurl_rop(:,jc)*det_m
         !$omp simd
         do jr=1,oft_hgrad%nce
           mtmp(2,1)%m(jr,jc) = mtmp(2,1)%m(jr,jc) &
@@ -1985,7 +1997,7 @@ do ii=1,mesh%tloc_c(ip)%n
         end do
       end do
       do jc=1,oft_hgrad%nce
-        uvec=hgrad_rop(:,jc)*det
+        uvec=hgrad_rop(:,jc)*det_m
         !$omp simd
         do jr=1,oft_hgrad%nce
           mtmp(2,2)%m(jr,jc) = mtmp(2,2)%m(jr,jc) &
@@ -2017,7 +2029,7 @@ do ii=1,mesh%tloc_c(ip)%n
           mtmp(1,1)%m(jr,jc) = mtmp(1,1)%m(jr,jc) &
             + (hcurl_ropt(jr,1)*hcurl_rop(1,jc) &
             +  hcurl_ropt(jr,2)*hcurl_rop(2,jc) &
-            +  hcurl_ropt(jr,3)*hcurl_rop(3,jc))*det &
+            +  hcurl_ropt(jr,3)*hcurl_rop(3,jc))*det_m &
             + DOT_PRODUCT(hcurl_copt(jr,:),uvec)
         end do
       end do
@@ -2056,7 +2068,7 @@ do ii=1,mesh%tloc_c(ip)%n
           mtmp(1,2)%m(jr,jc) = mtmp(1,2)%m(jr,jc) &
             + (hcurl_ropt(jr,1)*hgrad_rop(1,jc) &
             +  hcurl_ropt(jr,2)*hgrad_rop(2,jc) &
-            +  hcurl_ropt(jr,3)*hgrad_rop(3,jc))*det &
+            +  hcurl_ropt(jr,3)*hgrad_rop(3,jc))*det_m &
             + DOT_PRODUCT(hcurl_copt(jr,:),uvec)
         end do
       end do
@@ -2118,7 +2130,7 @@ do ii=1,mesh%tloc_c(ip)%n
 ! Compute dB_g/dt(B_c) matrix (2,1)
 !------------------------------------------------------------------------------
       do jc=1,oft_hcurl%nce
-        uvec=hcurl_rop(:,jc)*det
+        uvec=hcurl_rop(:,jc)*det_m
         !$omp simd
         do jr=1,oft_hgrad%nce
           mtmp(2,1)%m(jr,jc) = mtmp(2,1)%m(jr,jc) &
@@ -2129,7 +2141,7 @@ do ii=1,mesh%tloc_c(ip)%n
 ! Compute dB_g/dt(B_g) matrix (2,2)
 !------------------------------------------------------------------------------
       do jc=1,oft_hgrad%nce
-        uvec=hgrad_rop(:,jc)*det
+        uvec=hgrad_rop(:,jc)*det_m
         !$omp simd
         do jr=1,oft_hgrad%nce
           mtmp(2,2)%m(jr,jc) = mtmp(2,2)%m(jr,jc) &
@@ -2184,7 +2196,7 @@ do ii=1,mesh%tloc_c(ip)%n
     c2 = nu_tmp(2)*c2
     !---Advection and mass
     do jc=1,oft_lagrange%nce
-      u =  lag_rop(jc)*det
+      u =  lag_rop(jc)*det_m
       IF(xmhd_advec)THEN
         u = u + DOT_PRODUCT(u0%V,lag_gop(:,jc))*jac_dt*det
         umat = dvT*lag_rop(jc)*jac_dt*det
@@ -2405,7 +2417,7 @@ do ii=1,mesh%tloc_c(ip)%n
 ! Compute dn/dt(n) matrix (6,6)
 !------------------------------------------------------------------------------
       do jc=1,oft_lagrange%nce
-        u = DOT_PRODUCT(u0%V,lag_gop(:,jc))*c2 + divv*lag_rop(jc)*c2 + lag_rop(jc)*det
+        u = DOT_PRODUCT(u0%V,lag_gop(:,jc))*c2 + divv*lag_rop(jc)*c2 + lag_rop(jc)*det_m
         uvec = diff_tmp*c2*lag_gop(:,jc)
         IF(xmhd_upwind)uvec = uvec + u0%V*(DOT_PRODUCT(u0%V,lag_gop(:,jc)))*c3
         !$omp simd
@@ -2533,7 +2545,7 @@ do ii=1,mesh%tloc_c(ip)%n
       END IF
       do jc=1,oft_lagrange%nce
         u = (lag_rop(jc)*c2 + DOT_PRODUCT(u0%V,lag_gop(:,jc)))*jac_dt*det
-        u = u + lag_rop(jc)*det
+        u = u + lag_rop(jc)*det_m
         !---Thermal conduction
         uvec = ((chi_temp(1)-chi_temp(2))*DOT_PRODUCT(lag_gop(:,jc),bhat)*bhat &
           + chi_temp(2)*lag_gop(:,jc))*c3
@@ -2624,7 +2636,7 @@ do ii=1,mesh%tloc_c(ip)%n
       END IF
       do jc=1,oft_lagrange%nce
         u = (lag_rop(jc)*c2 + DOT_PRODUCT(umat(:,1),lag_gop(:,jc)))*jac_dt*det
-        u = u + lag_rop(jc)*det
+        u = u + lag_rop(jc)*det_m
         !---Thermal conduction
         uvec = ((chi_temp(3)-chi_temp(4))*DOT_PRODUCT(lag_gop(:,jc),bhat)*bhat &
           + chi_temp(4)*lag_gop(:,jc))*c3

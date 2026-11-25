@@ -85,6 +85,19 @@ all MG levels so that p-MG / h-MG can be applied cleanly to the sub-blocks.
 | `v_pre`      | Solver or `<pre type="mg">` definition for velocity Schur \f$ S_V \f$ | xml | MG on \f$ S_V \f$ |
 | `s_pre`      | Solver definition for scalar block \f$ J_{SS} \f$ (when active) | xml | `gmres(2)+BJ(-1,ilu)` |
 
+\subsection doc_solvers_basic_mg Multi-Grid Preconditioner
+
+Multi-grid V-cycle preconditioning is provided through \ref oft_native_solvers::oft_ml_precond
+"oft_ml_precond".
+
+**XML Spec:** `<pre type="mg">`
+
+| Option        | Description | Type | Default |
+|---------------|-------------|------|---------|
+| `report`      | Print per-stage residual diagnostics (0=off, 1=total, 2=per-block) | int (attr) | `0` |
+| `coarse_damp` | Damping factor \f$ \omega_c \f$ applied to coarse-grid correction | real (attr/elem) | `1.0` |
+| `coarse_shift`| (xMHD only) Mass-matrix shift \f$ \sigma \f$ on coarse levels (\f$ J_c \leftarrow J_c + \sigma M_c \f$) | real (attr/elem) | `0.0` |
+
 \subsection doc_solvers_basic_schwarz Additive Schwarz
 
 This method is currently only supported with the PETSc backend through
