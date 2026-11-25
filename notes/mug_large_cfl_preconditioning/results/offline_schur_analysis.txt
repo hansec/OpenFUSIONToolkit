@@ -1,0 +1,48 @@
+### dump dt=1.E-5
+sizes B V S 1856 768 512
+||P_BB-J_BB||/||J_BB|| = 7.048895058454546e-18
+||P_SS-J_SS|| = 0.0
+||dW_approx||/||dW_exact|| = 2.235443470389999  rel diff 1.50072252822828
+eig(Sv^-1 Sex): min|.|=2.229e-01 max|.|=1.000e+00  real range [2.229e-01, 1.000e+00]  max|imag| 1.93e-07
+   |eig| quantiles 1/10/50/90/99%: [0.311 0.525 0.935 1.    1.   ]
+eig(M_pb^-1 J): |lambda-1| max=7.771e-01, |lambda| range [2.229e-01, 1.000e+00], n(|lambda-1|>0.5)=68 of 3136
+GMRES its (dense, tol 1e-8):
+ blockdiag(J)= 22
+  PB V-Schur continuum S_V (code)  = 24
+  PB V-Schur exact                 = 1
+  PB V-Schur diag(J_BB)            = 13
+  PB B-Schur diag(J_VV)            = 9
+  PB B-Schur |rowsum|(J_VV)        = 9
+  eig(SB_diag^-1 SB_ex): |.| range [7.574e-01, 1.217e+00], real [7.574e-01, 1.217e+00]
+### dump dt=1.E-4
+sizes B V S 1856 768 512
+||P_BB-J_BB||/||J_BB|| = 3.919111813666821e-18
+||P_SS-J_SS|| = 0.0
+||dW_approx||/||dW_exact|| = 2.235496871009218  rel diff 1.5007791712426017
+eig(Sv^-1 Sex): min|.|=3.138e-03 max|.|=1.001e+00  real range [3.138e-03, 1.001e+00]  max|imag| 5.03e-04
+   |eig| quantiles 1/10/50/90/99%: [0.012 0.134 0.751 1.    1.   ]
+eig(M_pb^-1 J): |lambda-1| max=9.969e-01, |lambda| range [3.138e-03, 1.001e+00], n(|lambda-1|>0.5)=284 of 3136
+GMRES its (dense, tol 1e-8):
+ blockdiag(J)= 500
+  PB V-Schur continuum S_V (code)  = 166
+  PB V-Schur exact                 = 1
+  PB V-Schur diag(J_BB)            = 54
+  PB B-Schur diag(J_VV)            = 26
+  PB B-Schur |rowsum|(J_VV)        = 25
+  eig(SB_diag^-1 SB_ex): |.| range [3.214e-01, 2.829e+00], real [3.214e-01, 2.829e+00]
+### dump dt=1.E-3
+sizes B V S 1856 768 512
+||P_BB-J_BB||/||J_BB|| = 5.458064765347456e-18
+||P_SS-J_SS|| = 0.0
+||dW_approx||/||dW_exact|| = 2.237000570190592  rel diff 1.5025614199289787
+eig(Sv^-1 Sex): min|.|=3.179e-05 max|.|=1.014e+00  real range [3.179e-05, 1.014e+00]  max|imag| 2.61e-02
+   |eig| quantiles 1/10/50/90/99%: [0.    0.12  0.74  1.    1.002]
+eig(M_pb^-1 J): |lambda-1| max=1.000e+00, |lambda| range [3.179e-05, 1.014e+00], n(|lambda-1|>0.5)=291 of 3136
+GMRES its (dense, tol 1e-8):
+ blockdiag(J)= 500
+  PB V-Schur continuum S_V (code)  = 500
+  PB V-Schur exact                 = 2
+  PB V-Schur diag(J_BB)            = 500
+  PB B-Schur diag(J_VV)            = 30
+  PB B-Schur |rowsum|(J_VV)        = 31
+  eig(SB_diag^-1 SB_ex): |.| range [2.627e-01, 3.741e+00], real [2.627e-01, 3.741e+00]

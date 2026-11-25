@@ -1,0 +1,5 @@
+s1a_a0                                   rc=0 steps=2 lits=[65, 72] nlits=[1, 1] dt_end=0.0001 wall=2.6s rss=93MB err=[0.84779008962286850 0.84690258559001486] 
+s1a_a0.25                                rc=0 steps=2 lits=[34, 35] nlits=[1, 1] dt_end=0.0001 wall=1.8s rss=93MB err=[0.84779008952990820 0.84690258556214471] 
+s1a_a1                                   rc=0 steps=2 lits=[35, 38] nlits=[1, 1] dt_end=0.0001 wall=1.9s rss=93MB err=[0.84779008924634969 0.84690258568638122] 
+s1a_a4                                   rc=0 steps=2 lits=[46, 46] nlits=[1, 1] dt_end=0.0001 wall=2.2s rss=94MB err=[0.84779008955980761 0.84690258597832835] 
+s1a_a-1                                  rc=0 steps=2 lits=[87, 94] nlits=[1, 1] dt_end=0.0001 wall=2.8s rss=94MB err=[0.84779009094439328 0.84690258523072148] 

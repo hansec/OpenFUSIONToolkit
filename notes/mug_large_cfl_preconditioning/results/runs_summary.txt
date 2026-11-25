@@ -1,0 +1,114 @@
+runs/dbg_pb4ilu                   steps=2 lits=[44, 11] nlits=[1, 1] dt=['5.00E-05', '2.78E-05'] err=[0.84778983180964995 0.84690250874916850] 
+    xml: <oft><xmhd><pb_pre dump="T" type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>8</its><nrits>8</nrits> <pre type="block_jacobi"><nlocal>-1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/dump_1.E-4                   steps=1 lits=[35] nlits=[1] dt=['1.00E-04'] err=[0.84779008956622393 0.84690258557549158] 
+    xml: <oft><xmhd><pb_pre dump="T" type="1" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/dump_1.E-5                   steps=1 lits=[12] nlits=[1] dt=['1.00E-05'] err=[1.9036330108815096 1.9035108798062368] 
+    xml: <oft><xmhd><pb_pre dump="T" type="1" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_bjov_1.E-3                steps=3 lits=[97, 120, 213] nlits=[1, 1, 2] dt=['2.50E-04', '2.78E-04', '3.16E-04'] err=[1.2476431035208395 1.2469648810484335] 
+    xml: <oft><xmhd><pre type="gmres"><its>2</its><nrits>2</nrits><pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs/s1_bjov_1.E-4                steps=3 lits=[29, 30, 29] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831547967420315 1.9831395196392023] 
+    xml: <oft><xmhd><pre type="gmres"><its>2</its><nrits>2</nrits><pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs/s1_bjov_1.E-5                steps=3 lits=[7, 6, 6] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854139567628797 1.7851873665574505] 
+    xml: <oft><xmhd><pre type="gmres"><its>2</its><nrits>2</nrits><pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs/s1_bjov_8.E-7                steps=3 lits=[5, 4, 4] nlits=[1, 1, 1] dt=['8.00E-07', '8.00E-07', '8.00E-07'] err=[1.9985432423524725 1.9985237507615106] 
+    xml: <oft><xmhd><pre type="gmres"><its>2</its><nrits>2</nrits><pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs/s1_lu_1.E-3                  steps=3 lits=[3, 2, 17] nlits=[2, 1, 2] dt=['1.00E-03', '1.00E-03', '1.00E-03'] err=[0.38108421192321684 0.38148991068269777] 
+    xml: <oft><xmhd><pre type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs/s1_lu_1.E-4                  steps=3 lits=[1, 1, 4] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831547975827970 1.9831395175338487] 
+    xml: <oft><xmhd><pre type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs/s1_lu_1.E-5                  steps=3 lits=[1, 1, 2] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854139565671641 1.7851873664698288] 
+    xml: <oft><xmhd><pre type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs/s1_lu_8.E-7                  steps=3 lits=[1, 1, 1] nlits=[1, 1, 1] dt=['8.00E-07', '8.00E-07', '8.00E-07'] err=[1.9985432449920435 1.9985237508133802] 
+    xml: <oft><xmhd><pre type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs/s1_pblu1_1.E-3               steps=3 lits=[86, 53, 173] nlits=[2, 1, 2] dt=['1.00E-03', '1.00E-03', '1.00E-03'] err=[0.38108421202096010 0.38148991072058119] 
+    xml: <oft><xmhd><pb_pre type="1" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu1_1.E-4               steps=3 lits=[35, 38, 39] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831547966454031 1.9831395195558785] 
+    xml: <oft><xmhd><pb_pre type="1" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu1_1.E-5               steps=3 lits=[12, 11, 11] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854139569615641 1.7851873662725384] 
+    xml: <oft><xmhd><pb_pre type="1" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu1_8.E-7               steps=3 lits=[3, 2, 2] nlits=[1, 1, 1] dt=['8.00E-07', '8.00E-07', '8.00E-07'] err=[1.9985432450873966 1.9985237509057419] 
+    xml: <oft><xmhd><pb_pre type="1" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu2_1.E-3               steps=3 lits=[92, 54, 288] nlits=[2, 1, 2] dt=['1.00E-03', '1.00E-03', '1.00E-03'] err=[0.38108421210138094 0.38148991069870891] 
+    xml: <oft><xmhd><pb_pre type="2" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu2_1.E-4               steps=3 lits=[37, 38, 43] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831547965944816 1.9831395183182319] 
+    xml: <oft><xmhd><pb_pre type="2" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu2_1.E-5               steps=3 lits=[12, 12, 12] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854139572407712 1.7851873659782385] 
+    xml: <oft><xmhd><pb_pre type="2" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu2_8.E-7               steps=3 lits=[3, 2, 2] nlits=[1, 1, 1] dt=['8.00E-07', '8.00E-07', '8.00E-07'] err=[1.9985432527012721 1.9985237527378519] 
+    xml: <oft><xmhd><pb_pre type="2" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu3_1.E-3               steps=3 lits=[210, 162, 190] nlits=[2, 1, 2] dt=['1.00E-03', '1.00E-03', '5.00E-04'] err=[0.50342413537858610 0.50335773379858484] 
+    xml: <oft><xmhd><pb_pre type="3" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu3_1.E-4               steps=3 lits=[86, 86, 97] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831547965839453 1.9831395198139858] 
+    xml: <oft><xmhd><pb_pre type="3" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu3_1.E-5               steps=3 lits=[18, 18, 18] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854139570546843 1.7851873664333273] 
+    xml: <oft><xmhd><pb_pre type="3" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1_pblu3_8.E-7               steps=3 lits=[4, 4, 4] nlits=[1, 1, 1] dt=['8.00E-07', '8.00E-07', '8.00E-07'] err=[1.9985432449920260 1.9985237508125240] 
+    xml: <oft><xmhd><pb_pre type="3" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1a_a-1                      steps=2 lits=[87, 94] nlits=[1, 1] dt=['1.00E-04', '1.00E-04'] err=[0.84779009094439328 0.84690258523072148] 
+    xml: <oft><xmhd><pb_pre type="1" alfven="-1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1a_a0                       steps=2 lits=[65, 72] nlits=[1, 1] dt=['1.00E-04', '1.00E-04'] err=[0.84779008962286850 0.84690258559001486] 
+    xml: <oft><xmhd><pb_pre type="1" alfven="0.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1a_a0.25                    steps=2 lits=[34, 35] nlits=[1, 1] dt=['1.00E-04', '1.00E-04'] err=[0.84779008952990820 0.84690258556214471] 
+    xml: <oft><xmhd><pb_pre type="1" alfven="0.25" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1a_a1                       steps=2 lits=[35, 38] nlits=[1, 1] dt=['1.00E-04', '1.00E-04'] err=[0.84779008924634969 0.84690258568638122] 
+    xml: <oft><xmhd><pb_pre type="1" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s1a_a4                       steps=2 lits=[46, 46] nlits=[1, 1] dt=['1.00E-04', '1.00E-04'] err=[0.84779008955980761 0.84690258597832835] 
+    xml: <oft><xmhd><pb_pre type="1" alfven="4.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s2_pb4lu_1.E-3               steps=3 lits=[31, 19, 40] nlits=[2, 1, 2] dt=['1.00E-03', '1.00E-03', '1.00E-03'] err=[0.38108421129313774 0.38148989412058454] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s2_pb4lu_1.E-4               steps=3 lits=[14, 15, 15] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831548126273573 1.9831395265247005] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s2_pb4lu_1.E-5               steps=3 lits=[5, 5, 5] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854139780583007 1.7851874057179389] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s2_pb4lu_8.E-7               steps=3 lits=[2, 1, 1] nlits=[1, 1, 1] dt=['8.00E-07', '8.00E-07', '8.00E-07'] err=[1.9985436863202601 1.9985237508159177] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>1</its><nrits>1</nrits><pre type="block_jacobi"><nlocal>1</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s3_mgJ_1.E-3                 steps=3 lits=[36, 44, 80] nlits=[1, 1, 2] dt=['1.25E-04', '1.39E-04', '1.58E-04'] err=[1.9180715671098900 1.9179223371121972] 
+    xml: <oft><xmhd><pre type="mg"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pre></xmhd></oft>
+runs/s3_mgJ_1.E-4                 steps=3 lits=[28, 28, 28] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831547967585221 1.9831395196601065] 
+    xml: <oft><xmhd><pre type="mg"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pre></xmhd></oft>
+runs/s3_mgJ_1.E-5                 steps=3 lits=[6, 5, 5] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854139562145017 1.7851873664672837] 
+    xml: <oft><xmhd><pre type="mg"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pre></xmhd></oft>
+runs/s3_mgJk_1.E-3                steps=3 lits=[37, 46, 80] nlits=[1, 1, 2] dt=['1.25E-04', '1.39E-04', '1.58E-04'] err=[1.9180725648729051 1.9179233361816628] 
+    xml: <oft><xmhd><pre type="mg" kcycle="2"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pre></xmhd></oft>
+runs/s3_mgJk_1.E-4                steps=3 lits=[28, 28, 28] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831547966900822 1.9831395196755452] 
+    xml: <oft><xmhd><pre type="mg" kcycle="2"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pre></xmhd></oft>
+runs/s3_mgJk_1.E-5                steps=3 lits=[6, 5, 5] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854139564530038 1.7851873665973994] 
+    xml: <oft><xmhd><pre type="mg" kcycle="2"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pre></xmhd></oft>
+runs/s3_pb4bj2_1.E-3              steps=3 lits=[118, 79, 130] nlits=[2, 1, 2] dt=['1.00E-03', '1.00E-03', '1.00E-03'] err=[0.38108420896999784 0.38148995514753192] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s3_pb4bj2_1.E-4              steps=3 lits=[23, 23, 24] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831550228171844 1.9831393848313250] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s3_pb4bj2_1.E-5              steps=3 lits=[6, 6, 5] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854141400467300 1.7851873394264934] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s3_pb4bj5_1.E-3              steps=3 lits=[61, 44, 92] nlits=[2, 1, 2] dt=['1.00E-03', '1.00E-03', '1.00E-03'] err=[0.38108421126854691 0.38148991232347285] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>5</its><nrits>5</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s3_pb4bj5_1.E-4              steps=3 lits=[16, 17, 17] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831551138356189 1.9831398798684319] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>5</its><nrits>5</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s3_pb4bj5_1.E-5              steps=3 lits=[5, 5, 5] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854139782820178 1.7851874055326336] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>5</its><nrits>5</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs/s3_pb4mg_1.E-3               steps=3 lits=[122, 179, 37] nlits=[1, 1, 1] dt=['2.50E-04', '2.78E-04', '1.58E-04'] err=[1.5128293656831577 1.5124140652381668] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pb_pre></xmhd></oft>
+runs/s3_pb4mg_1.E-4               steps=3 lits=[23, 24, 24] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831550494371293 1.9831397973209550] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pb_pre></xmhd></oft>
+runs/s3_pb4mg_1.E-5               steps=3 lits=[6, 5, 5] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854141994192334 1.7851874153179763] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pb_pre></xmhd></oft>
+runs/s3_pb4mgk_1.E-3              steps=3 lits=[96, 159, 37] nlits=[1, 1, 1] dt=['2.50E-04', '2.78E-04', '1.58E-04'] err=[1.5127937511229852 1.5123783134619366] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0" kcycle="2"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pb_pre></xmhd></oft>
+runs/s3_pb4mgk_1.E-4              steps=3 lits=[23, 24, 24] nlits=[1, 1, 1] dt=['1.00E-04', '1.00E-04', '1.00E-04'] err=[1.9831550494213968 1.9831397973563660] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0" kcycle="2"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pb_pre></xmhd></oft>
+runs/s3_pb4mgk_1.E-5              steps=3 lits=[6, 5, 5] nlits=[1, 1, 1] dt=['1.00E-05', '1.00E-05', '1.00E-05'] err=[1.7854141994096531 1.7851874153786469] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0" kcycle="2"><smoother direction="up"><solver type="gmres"><its>2</its><nrits>2</nrits> <pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></solver></smoother></pb_pre></xmhd></oft>
+runs_sph/base_bjov64_1e-6             steps=0 lits=[] nlits=[] dt=[] err=[] 
+    xml: <oft><xmhd><pre type="gmres"><its>8</its><nrits>8</nrits><pre type="block_jacobi"><nlocal>64</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs_sph/base_bjov_1e-6               steps=0 lits=[] nlits=[] dt=[] err=[] 
+    xml: <oft><xmhd><pre type="gmres"><its>8</its><nrits>8</nrits><pre type="block_jacobi"><nlocal>8</nlocal><loverlap>T</loverlap><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs_sph/base_ilu_1e-5                steps=3 lits=[149, 179, 208] nlits=[2, 2, 2] dt=['1.25E-06', '1.39E-06', '1.58E-06'] err=[] 
+    xml: <oft><xmhd><pre type="gmres"><its>8</its><nrits>8</nrits><pre type="block_jacobi"><nlocal>-1</nlocal><solver type="ilu"></solver></pre></pre></xmhd></oft>
+runs_sph/ex_ilu                       steps=3 lits=[136, 117, 118] nlits=[2, 2, 2] dt=['1.00E-06', '1.00E-06', '1.00E-06'] err=[] 
+    xml: <oft> <xmhd> <pre type="gmres"> <its>8</its> <nrits>8</nrits> <pre type="block_jacobi"> <nlocal>-1</nlocal> <solver type="ilu"></solver> </pre> </pre> </xmhd> </oft>
+runs_sph/lu1024_bj_1e-5               steps=3 lits=[132, 178, 205] nlits=[2, 2, 2] dt=['1.25E-06', '1.39E-06', '1.58E-06'] err=[] 
+    xml: <oft><xmhd><pre type="gmres"><its>8</its><nrits>8</nrits><pre type="block_jacobi"><nlocal>1024</nlocal><solver type="lu"></solver></pre></pre></xmhd></oft>
+runs_sph/lu1024_pb_bj_1e-5            steps=1 lits=[159] nlits=[2] dt=['2.50E-06'] err=[] 
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>8</its><nrits>8</nrits> <pre type="block_jacobi"><nlocal>1024</nlocal><solver type="lu"></solver></pre></solver></pb_pre></xmhd></oft>
+runs_sph/pb4_ilu_1e-5                 steps=0 lits=[] nlits=[] dt=[] err=[] FAILED
+    xml: <oft><xmhd><pb_pre type="4" alfven="1.0" sound="1.0"><solver type="gmres"><its>8</its><nrits>8</nrits> <pre type="block_jacobi"><nlocal>-1</nlocal><solver type="ilu"></solver></pre></solver></pb_pre></xmhd></oft>
