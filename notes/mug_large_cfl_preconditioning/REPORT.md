@@ -14,7 +14,8 @@ Status: **paused**. This document records what was tried and what was learned, s
 | Is there a Schur approximation that is dt-robust? | **Yes: eliminate V instead of B ("B-Schur", type 4).** S_X = J_XX − J_XV·diag(J_VV)⁻¹·J_VX. With exact inner solves on the cube, dense GMRES needs 9 / 26 / 30 iterations at dt 1e-5 / 1e-4 / 1e-3, against 13 / 54 / 500 (iteration cap) for the best velocity-Schur variant. In MUG with LU inner solves: 5 / 14–15 / 19–40 outer iterations per step. |
 | Is it practical yet? | **Not for production-size problems.** S_X has 2.6× the nonzeros of J. Cheap inner solvers lose much of the gain (block-Jacobi 16–92 its; p-MG fails at dt=1e-3), and ILU(0) hits a zero pivot on S_X for the spheromak. On the spheromak at dt=1e-5 with LU on 1024 blocks, type 4 held dt=2.5e-6 against 1.25e-6 for the baseline, but used 6.3 GB and was too slow (one step in 50 min). |
 | Would a NIMROD-style semi-implicit term (in the time discretization) help? | **Conditional yes (§7a, offline, cube only).** Stable with scale factor s ≥ 1.25 up to CFL ~1900; the continuum operator matches the discrete one within 8–17% on the physical Alfvén modes (the large over-estimates are on spurious modes); resolved-mode phase accuracy is within a few % of CN. Non-uniform equilibria and nonlinear terms are untested. |
-| Recommended next step | An **auxiliary-space (Hiptmair–Xu / AMS-type) solver for S_X**, which is curl–curl-like with a large gradient near-null space. Alternative: a matrix-free exact-Schur variant (planned "type 5"). |
+| Can the SI operator live inside the normal CN/BDF2 step? | **Yes; implemented (§7b, `xmhd_si`).** It is the increment s·(dt/2)²·W·(Vⁿ⁺¹−Vⁿ). With it, PB type 1 is dt-independent in linear cube runs to CFL ~190 (8–14 its vs 13–39), and the spheromak runs at **dt = 1e-5 without dt cuts** (115 its, 762 s per 3 steps), where s=0 is cut to 2.5e-6. Cost: a time error about 2.5× CN's at s=1 (cube). Nonlinear CFL ≳ 100 is then limited by MUG's lagged Newton Jacobian; spheromak accuracy is not yet measured. |
+| Recommended next step | Use the **SI increment term (§7b)** with PB type 1; validate its accuracy cost on the spheromak and improve the inner solver on P (an **auxiliary-space (Hiptmair–Xu / AMS-type) solver** for the B block), which is curl–curl-like with a large gradient near-null space. Alternative: a matrix-free exact-Schur variant (planned "type 5"). |
 
 ---
 
@@ -303,8 +304,77 @@ Practical attraction: the SI V operator is SPD and near-elliptic, and is **alrea
 
 ---
 
+## 7b. Semi-implicit increment term inside the CN/BDF2 step — Phase B, implemented
+
+**Idea (user's suggestion).** Rather than a separate staggered integrator, put the SI operator *inside* MUG's existing time step, as a stabilizing term for the B–V coupling of under-resolved modes while every other term keeps its normal treatment (as is already done when dissipation is moved to backward Euler). MUG's step is A(+dt/2)·uⁿ⁺¹ = A(−dt/2)·uⁿ, so a momentum term proportional to `self%dt**2` has the same sign at both time levels and automatically becomes the increment **s·(dt/2)²·W·(Vⁿ⁺¹ − Vⁿ)**. That addition is O(dt²)-consistent. The B–V coupling stays implicit.
+
+**Implementation** (`src/physics/xmhd.F90`, commits `9c001a8` and the follow-up consistency commit):
+- New `xmhd_options`: `xmhd_si` (s, magnetic part), `xmhd_si_sound` (pressure part), `xmhd_si_full` (include the sign-indefinite J0× and ∇p0 terms; default F keeps W positive semidefinite). All default off, and the non-slow MUG suite is unchanged (166 passed, 56 skipped).
+- `xmhd_si_local` (new) assembles the parabolized operator into a local matrix. It is shared by the `pb_pre` P matrix and the Jacobian.
+- **Nonlinear runs (CN):**
+  - The residual (`xmhd_errmatrix_apply`) adds s·self%dt²·W_ref·V.
+  - W_ref is evaluated at the start-of-step state (`up`, via the module pointer `xmhd_si_ref`), so the term is exactly linear in V and an exact increment.
+  - The Jacobian adds s·jac_dt²·W_ref, built at the same reference state on the finest level (coarse preconditioner levels use the linearization state).
+  - A temporary finite-difference check showed the residual and the assembled Jacobian agree to about 1e-12 along velocity directions.
+- **Linear runs (BDF2/BE):** the term is a modified velocity mass M_V + s·jac_dt²·W(u_eq), added to both the Jacobian and `xmhd_massmatrix_apply` (BDF2 right-hand side).
+
+**Accuracy** (cube, regression-test setup, fixed final time T = 1e-4, exact LU solves; relative L2 waveform error of B; spatial floor about 4.27e-2; `results/si_accuracy.txt`):
+
+| dt (ω·dt of the test wave) | CN s=0 | CN s=0.5 | CN s=1 | CN s=2 | BDF2 s=0 | BDF2 s=1 |
+|---|---|---|---|---|---|---|
+| 8e-7 (0.025) | 4.267e-2 | 4.267e-2 | 4.267e-2 | 4.266e-2 | 4.267e-2 | 4.266e-2 |
+| 4e-6 (0.13) | 4.282e-2 | 4.318e-2 | 4.383e-2 | 4.577e-2 | 4.668e-2 | 5.126e-2 |
+| 1e-5 (0.31) | 4.933e-2 | 6.123e-2 | 7.577e-2 | 0.1088 | 0.1180 | 0.1687 |
+| 2e-5 (0.63) | 0.1057 | 0.1742 | 0.2441 | 0.3792 | 0.3270 | 0.5244 |
+
+The time-error part grows by about 2.5× at s=1 (CN, ω·dt = 0.31), close to the predicted (1/12 + 1.1/8)/(1/12) ≈ 2.65. Below ω·dt ≈ 0.1 the term is invisible.
+
+**Preconditioner robustness** (cube, `pb_pre` type 1 with LU blocks, outer iterations per step; `results/si_pb1_iterations_v1.txt`, `results/si_nonlinear.txt`):
+
+| dt (max Alfvén CFL) | linear BDF2 s=0 / 1 / 2 | nonlinear CN s=0 / 1 / 2 |
+|---|---|---|
+| 1e-5 (1.9) | 13–17 / 8–9 / 6–7 | 11–12 / 8 / 6–7 |
+| 1e-4 (19) | 29–33 / **11** / **9** | 35–39 / **11–12** / **9** |
+| 1e-3 (186) | 36–39 / **13–14** / **10–11** | see below |
+
+With the SI term the type-1 preconditioner is essentially **dt-independent in linear runs up to CFL ~190**. That matches the offline bound eig(P_V⁻¹·S) ≥ s/(1+s). The continuum S_V failed as a pure preconditioner (§5.1); it works once the same operator is part of the physics.
+
+**Nonlinear runs at CFL ~190: limited by Newton, not by the linear preconditioner.**
+- At dt = 1e-3 (6 steps), all settings show Newton trouble, s=0 included (dt cut to 5e-4).
+- With s ≥ 1 and MUG's default assembled-Jacobian Newton, Newton needs 3–5 iterations and dt is cut.
+- With matrix-free Newton (`xmhd_mfnk=T`), s=1 holds dt = 1e-3 (Newton 2–3), but with 52–152 Krylov iterations per step.
+- Diagnosis by temporary finite-difference checks (since removed):
+  - The SI term is exactly consistent.
+  - The mismatch is entirely in the pre-existing Lorentz block ∂R_V/∂B, and is about 100% in the V∥B0 rows. Those rows hold only O(δ) terms ((J×b)_z + (curl b × δB)_z) that depend on the *current* B.
+  - MUG builds the Jacobian at the start of the step, and at CFL ≳ 100 the perturbation changes by order one within one step, so those entries are stale. This affects s=0 as well; the SI term exposes it because Newton takes larger corrections.
+  - With the Jacobian refreshed at every Newton iteration (temporary test), s=1 held dt = 1e-3 with 2 Newton iterations per step.
+- Practical options: `xmhd_mfnk=T`, or an input option for the Newton Jacobian-refresh interval (`nksolver%up_freq` is hard-coded to 4 in `xmhd_run`).
+
+**Spheromak tilt** (serial, p=2, matrix-free Newton as in the example, `pb_pre` type 1 with inner GMRES(8) + block-Jacobi LU (1024 blocks) on P, 3 steps; `results/si_spheromak.txt`):
+
+| configuration | dt requested | outer its/step | Newton | dt taken | wall (3 steps) | peak RSS |
+|---|---|---|---|---|---|---|
+| example ILU preconditioner (reference, §5.7) | 1e-6 | 117–136 | 2 | 1e-6 | — | 1.36 GB |
+| PB type 1, s=0 | 1e-6 | 91–104 | 2 | 1e-6 | 622 s | 2.3 GB |
+| PB type 1, **s=1** | 1e-6 | **15** | 1 | 1e-6 | **130 s** | 2.3 GB |
+| PB type 1, **s=1** | 3e-6 | **31–32** | 1 | 3e-6 | 232 s | 2.3 GB |
+| PB type 1, s=0 | 1e-5 | 199–261 | 2 | **cut → 2.5e-6 … 3.2e-6** | 2376 s | 2.7 GB |
+| PB type 1, **s=1** | 1e-5 | **115–117** | 2 | **1e-5 (no cut)** | **762 s** | 2.3 GB |
+| PB type 1, s=1, inner GMRES(20) on P | 1e-5 | 66–69 | 2 | 1e-5 | 1065 s | 2.4 GB |
+
+**For the first time in this work, the spheromak runs at dt = 1e-5 without dt reduction.**
+- Per step it is about 3× cheaper than the s=0 run, which itself only manages about 2.8e-6, so about 10× more physical time per wall-clock second.
+- At 1e-6 it is about 4.8× faster than s=0 with the same preconditioner.
+- Iterations still grow with dt (15 → 32 → 115). That is consistent with the weak inner solve on P: block-Jacobi LU on a stiff, anisotropic V block and the H(curl) B block. A stronger inner solve (GMRES(20) instead of GMRES(8) on P) cuts the outer iterations to 66–69, but raises the wall time to 1065 s: the inner solver on P is now the bottleneck.
+
+**Not shown.** Spheromak accuracy: a tilt growth-rate comparison needs about 0.3 ms of physical time (2+ hours for the cheapest s=1 run, and a converged small-dt reference is out of reach in this sandbox). The cube gives the accuracy evidence; the spheromak growth rate vs dt and s is the most important open check.
+
+**Verdict.** The SI increment term is the most effective large-CFL measure found in this work. It is cheap, opt-in, consistent, and it makes the existing type-1 preconditioner dt-robust. The remaining limits are (i) the nonlinear Newton Jacobian lag at CFL ≳ 100 (pre-existing), (ii) the inner solver on P, and (iii) the unmeasured accuracy cost on realistic problems.
+
+---
+
 ## 8. Recommendations / future work (ranked)
-0. **Semi-implicit prototype (Phase B, §7a):** staggered V/X advance using the existing parabolized V operator; start with `xmhd_lin_run`, validate the spheromak tilt growth rate vs dt. Offline analysis says stable (s ≥ 1.25) and resolved-mode accurate on the cube; non-uniform equilibria are the open risk.
+0. **Semi-implicit increment term (§7b, implemented):** validate the accuracy cost on the spheromak tilt (growth rate vs dt for s = 0.5–2) and tune the inner solver on P at large dt (stronger V-block solve; auxiliary-space solver for the B block, item 1). Add an input option for the Newton Jacobian-refresh interval, or document `xmhd_mfnk=T`, for nonlinear runs at CFL ≳ 100. Add a regression test (linear cube, `xmhd_si=1`, PB type 1, iteration cap).
 1. **Auxiliary-space preconditioner for S_X** (Hiptmair–Xu / AMS-style). Hiptmair smoothing on the H(curl) block, plus nodal vector-Lagrange and scalar-Lagrange auxiliary corrections. OFT already has H1 and Lagrange hierarchies and discrete gradient operators. The B_g (grad H1) part of the composite B already exposes the gradient subspace, which may simplify this.
 2. **Type 5: matrix-free exact Schur.** The V solve is FGMRES on the exact S_V applied matrix-free (inner D_X solves), preconditioned by S_X or by continuum S_V. Robust, but the inner–outer cost needs measuring.
 3. **Port the continuum S_V path to `xmhd_lag.F90`** (nodal B, as in NIMROD), where §6.1 suggests it should work.
@@ -323,5 +393,6 @@ Practical attraction: the SI V operator is SPD and near-elliptic, and is **alrea
   - Spheromak: `python3 run_sph.py --tag T --kind {bj|pb_bj} --pbtype 4 --nlocal 1024 --inner lu --its 8 --inner_its 8 --dt 1.e-5 --nsteps 3`. Run it alongside `./watchdog.sh 12000000` to kill a run that exceeds 12 GB.
   - Matrix dump plus offline analysis: `python3 run_alfven.py --tag T --kind pb_lu --pbtype 1 --dump --nsteps 2 --dt 1.E-5`, then `python3 schur_analysis.py runs/T`.
   - Semi-implicit study (§7a): dump at dt = 1.E-5, 2.E-5, 4.E-5 (as above, tags `sidump_<dt>`), then `python3 si_analysis.py runs/sidump_1.E-5 runs/sidump_2.E-5 runs/sidump_4.E-5 [--scan_s 1,1.25]`. It takes about 10–20 minutes on 2 cores (dense eigensolves of size about 2600).
+  - SI increment term (§7b): add `--si 1` to `run_alfven.py` or `run_sph.py` (and `--linear` / `--mfnk` as needed), for example `python3 run_alfven.py --tag T --kind pb_lu --pbtype 1 --dt 1.E-4 --nsteps 6 --si 1`. In an input file: `xmhd_si=1.` in `xmhd_options`, together with `<pb_pre type="1">` in the XML.
   - `python3 summarize.py runs runs_sph` prints the per-run summary lines (`results/runs_summary.txt`).
 - **Resources:** the sandbox had about 14 GB RAM and 2 cores. The spheromak LU block-Jacobi with nlocal ≤ 64 does not fit.

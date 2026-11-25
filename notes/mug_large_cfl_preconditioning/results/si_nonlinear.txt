@@ -1,0 +1,20 @@
+### Final implementation (frozen start-of-step reference in residual and Jacobian). PB type 1 (LU blocks), 6 steps.
+### nlA = assembled-Jacobian Newton (MUG default); nlMF = matrix-free Newton (xmhd_mfnk=T); err omitted
+nlA_dt1.E-5_s0                           rc=0 steps=6 lits=[12, 11, 11, 11, 11, 11] nlits=[1, 1, 1, 1, 1, 1] dt_end=1e-05 wall=1.8s rss=92MB 
+nlMF_dt1.E-5_s0                          rc=0 steps=6 lits=[12, 11, 11, 12, 11, 11] nlits=[1, 1, 1, 1, 1, 1] dt_end=1e-05 wall=1.9s rss=93MB 
+nlA_dt1.E-5_s1                           rc=0 steps=6 lits=[8, 8, 8, 8, 8, 8] nlits=[1, 1, 1, 1, 1, 1] dt_end=1e-05 wall=1.9s rss=93MB 
+nlMF_dt1.E-5_s1                          rc=0 steps=6 lits=[8, 8, 8, 8, 8, 8] nlits=[1, 1, 1, 1, 1, 1] dt_end=1e-05 wall=1.8s rss=93MB 
+nlA_dt1.E-5_s2                           rc=0 steps=6 lits=[7, 6, 6, 7, 7, 7] nlits=[1, 1, 1, 1, 1, 1] dt_end=1e-05 wall=1.7s rss=92MB 
+nlMF_dt1.E-5_s2                          rc=0 steps=6 lits=[7, 6, 6, 7, 7, 7] nlits=[1, 1, 1, 1, 1, 1] dt_end=1e-05 wall=1.7s rss=93MB 
+nlA_dt1.E-4_s0                           rc=0 steps=6 lits=[35, 38, 39, 38, 39, 38] nlits=[1, 1, 1, 1, 1, 1] dt_end=0.0001 wall=3.3s rss=93MB 
+nlMF_dt1.E-4_s0                          rc=0 steps=6 lits=[36, 39, 41, 39, 39, 39] nlits=[1, 1, 1, 1, 1, 1] dt_end=0.0001 wall=3.6s rss=93MB 
+nlA_dt1.E-4_s1                           rc=0 steps=6 lits=[11, 11, 11, 12, 12, 12] nlits=[1, 1, 1, 1, 1, 1] dt_end=0.0001 wall=1.9s rss=93MB 
+nlMF_dt1.E-4_s1                          rc=0 steps=6 lits=[11, 12, 12, 12, 12, 12] nlits=[1, 1, 1, 1, 1, 1] dt_end=0.0001 wall=2.1s rss=94MB 
+nlA_dt1.E-4_s2                           rc=0 steps=6 lits=[9, 16, 9, 9, 9, 9] nlits=[1, 2, 1, 1, 1, 1] dt_end=0.0001 wall=1.9s rss=93MB 
+nlMF_dt1.E-4_s2                          rc=0 steps=6 lits=[9, 9, 9, 10, 10, 9] nlits=[1, 1, 1, 1, 1, 1] dt_end=0.0001 wall=1.8s rss=93MB 
+nlA_dt1.E-3_s0                           rc=0 steps=6 lits=[86, 53, 258, 179, 231, 80] nlits=[2, 1, 2, 2, 2, 2] dt_end=0.0005 wall=10.5s rss=93MB 
+nlMF_dt1.E-3_s0                          rc=0 steps=6 lits=[92, 86, 97, 110, 218, 88] nlits=[2, 2, 2, 2, 2, 2] dt_end=0.000452 wall=13.7s rss=93MB 
+nlA_dt1.E-3_s1                           rc=0 steps=6 lits=[26, 116, 230, 53, 105, 668] nlits=[2, 5, 3, 4, 5, 5] dt_end=0.000632 wall=14.1s rss=94MB 
+nlMF_dt1.E-3_s1                          rc=0 steps=6 lits=[52, 151, 88, 150, 89, 152] nlits=[2, 3, 2, 3, 2, 3] dt_end=0.001 wall=8.8s rss=94MB 
+nlA_dt1.E-3_s2                           rc=0 steps=6 lits=[19, 89, 69, 132, 82, 310] nlits=[2, 5, 4, 5, 5, 3] dt_end=0.001 wall=7.9s rss=94MB 
+nlMF_dt1.E-3_s2                          rc=0 steps=6 lits=[62, 235, 441, 306, 31, 81] nlits=[2, 3, 3, 3, 2, 2] dt_end=0.000556 wall=16.2s rss=94MB 

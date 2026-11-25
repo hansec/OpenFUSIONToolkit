@@ -1,0 +1,15 @@
+### Spheromak tilt, serial, p=2, xmhd_mfnk=T, pb_pre type 1, inner GMRES(its)+BJ-LU(1024 blocks) on P, 3 steps
+pb1_s0_dt1.e-6                     rc=0 steps=3 lits=[91, 102, 104] nlits=[2, 2, 2] dt=['1.00E-06', '1.00E-06', '1.00E-06'] wall=622s rss=2256MB
+   peak kB: 2310620 
+pb1_s1_dt1.e-6                     rc=0 steps=3 lits=[15, 15, 15] nlits=[1, 1, 1] dt=['1.00E-06', '1.00E-06', '1.00E-06'] wall=130s rss=2220MB
+   peak kB: 2274116 
+pb1_s1_dt3.e-6                     rc=0 steps=3 lits=[32, 32, 31] nlits=[1, 1, 1] dt=['3.00E-06', '3.00E-06', '3.00E-06'] wall=232s rss=2239MB
+   peak kB: 2293192 
+pb1_s1_dt1.e-5                     rc=0 steps=3 lits=[115, 115, 117] nlits=[2, 2, 2] dt=['1.00E-05', '1.00E-05', '1.00E-05'] wall=762s rss=2250MB
+   peak kB: 2304280 
+pb1_s0_dt1.e-5                     rc=0 steps=3 lits=[199, 253, 261] nlits=[2, 2, 2] dt=['2.50E-06', '2.78E-06', '3.16E-06'] wall=2376s rss=2663MB
+   peak kB: 2727048 
+pb1_s1_dt1.e-5_in20                rc=0 steps=3 lits=[68, 69, 66] nlits=[2, 2, 2] dt=['1.00E-05', '1.00E-05', '1.00E-05'] wall=1065s rss=2309MB
+   peak kB: 2364868
+
+[exited with code 0]
