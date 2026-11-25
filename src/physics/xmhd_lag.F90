@@ -335,7 +335,7 @@ REAL(r8) :: k_boltz = elec_charge !< Boltzmann constant
 REAL(r8) :: temp_gamma = 5.d0/3.d0 !< Ratio of specific heats
 REAL(r8) :: kappa_par = 1.d0 !< Parallel thermal conductivity factor
 REAL(r8) :: kappa_perp = 1.d0 !< Perpendicular thermal conductivity factor
-REAL(r8), PUBLIC :: vel_scale = 1.d3 !< Velocity scale factor
+REAL(r8), PUBLIC :: vel_scale = -1.d0 !< Velocity scale factor (<0 for automatic Alfven-balanced scaling)
 REAL(r8), PUBLIC :: den_scale = -1.d0 !< Density scale factor
 REAL(r8), PUBLIC :: n2_scale = -1.d0 !< Hyper-diffusivity aux variable scale factor
 REAL(r8), PUBLIC :: j2_scale = -1.d0 !< Hyper-resistivity aux variable scale factor
@@ -461,7 +461,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   xmhd_visc_heat,xmhd_brag,xmhd_upwind,vbc,nbc,tbc,visc_type,dt,k_db,eta,eta_temp,nu_par, &
   nu_perp,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd,xmhd_nparts, &
   nclean,rst_ind,maxextrap,ittarget,mu_ion,me_factor,xmhd_prefreq,xmhd_mfnk,xmhd_diss_centered, &
-  xmhd_therm_equil,te_factor,d2_dens,eta_hyper,xmhd_lin_euler_start
+  xmhd_therm_equil,te_factor,d2_dens,eta_hyper,xmhd_lin_euler_start,vel_scale
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -592,6 +592,13 @@ IF(ASSOCIATED(initial_fields%Te))xmhd_two_temp=.TRUE.
 CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget)
 CALL xmhd_check_settings
 IF(den_scale<0.d0)den_scale=SQRT(initial_fields%Ne%dot(initial_fields%Ne)/REAL(initial_fields%Ne%ng,8))
+IF(vel_scale<0.d0)THEN
+  IF((den_scale>0.d0).AND.(m_ion>0.d0))THEN
+    vel_scale=1.d0/SQRT(mu0*den_scale*m_ion)
+  ELSE
+    vel_scale=1.d3
+  END IF
+END IF
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))THEN
   j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
@@ -1076,6 +1083,13 @@ IF(ASSOCIATED(equil_fields%Te).NEQV.ASSOCIATED(pert_fields%Te))CALL oft_abort( &
   "Te0 and dTe ICs are required for two temp.", "xmhd_lin_run", __FILE__)
 CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget)
 IF(den_scale<0.d0)den_scale=SQRT(equil_fields%Ne%dot(equil_fields%Ne)/REAL(equil_fields%Ne%ng,8))
+IF(vel_scale<0.d0)THEN
+  IF((den_scale>0.d0).AND.(m_ion>0.d0))THEN
+    vel_scale=1.d0/SQRT(mu0*den_scale*m_ion)
+  ELSE
+    vel_scale=1.d3
+  END IF
+END IF
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 !---Force heating and conduction terms to zero
