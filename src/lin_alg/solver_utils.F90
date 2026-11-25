@@ -775,9 +775,9 @@ class(oft_ml_vecspace), target, intent(in) :: ml_vecspace !< Multi-level vectors
 TYPE(xml_node), INTENT(in) :: pre_node !< Preconditioner XML element
 class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
 !---
-integer(i4) :: i,ierr,nnodes
+integer(i4) :: i,ierr,nnodes,kcycle
 class(oft_ml_precond), pointer :: this_ml
-LOGICAL :: symmetric,up_present,down_present,coarse_present
+LOGICAL :: symmetric,up_present,down_present,coarse_present,cscale
 CHARACTER(LEN=:), ALLOCATABLE :: dir_type
 TYPE(xml_node) :: up_node,down_node,coarse_node,solver_node,tmp_node
 TYPE(xml_node), POINTER :: current_node
@@ -828,6 +828,19 @@ SELECT TYPE(pre)
   TYPE IS(oft_ml_precond)
     this_ml=>pre
     CALL xml_read_attribute(pre_node,"report",pre%report_err,iostat=ierr)
+    !---Krylov-accelerated coarse correction options
+    kcycle=0
+    cscale=.FALSE.
+    IF(xml_hasAttribute(pre_node,"kcycle"))THEN
+      CALL xml_read_attribute(pre_node,"kcycle",kcycle,iostat=ierr)
+      IF(ierr/=0)CALL oft_xml_abort("Error reading `kcycle` attribute.","create_ml_xml",__FILE__)
+    END IF
+    IF(xml_hasAttribute(pre_node,"cscale"))THEN
+      CALL xml_read_attribute(pre_node,"cscale",cscale,iostat=ierr)
+      IF(ierr/=0)CALL oft_xml_abort("Error reading `cscale` attribute.","create_ml_xml",__FILE__)
+    END IF
+    pre%kcycle=kcycle
+    pre%cscale=cscale
   CLASS DEFAULT
     CALL oft_abort('Error in precon allocation!','create_petsc_mlpre',__FILE__)
 END SELECT
@@ -861,6 +874,11 @@ DO i=nlevels-1,1,-1
   !---Setup MG smoother
   this_ml%ml_vecspace=>ml_vecspace
   this_ml%level=ABS(levels(i))
+  this_ml%A=>Mats(i)%M
+  IF(i>1)THEN
+    this_ml%kcycle=kcycle
+    this_ml%cscale=cscale
+  END IF
   IF(levels(i)<0)CYCLE
   IF(i==1.AND.coarse_present)THEN
     CALL create_solver_xml(this_ml%smooth_up,coarse_node,this_ml%level)

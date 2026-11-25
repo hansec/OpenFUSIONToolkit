@@ -41,7 +41,7 @@ USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate,
   oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat
 USE oft_deriv_matrices, ONLY: oft_mf_matrix, oft_noop_matrix
 USE oft_native_la, ONLY: oft_native_matrix
-USE oft_solver_base, ONLY: oft_solver
+USE oft_solver_base, ONLY: oft_solver, solver_setup
 USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
 USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
 USE oft_solver_utils, ONLY: create_mlpre, create_solver_xml, &
@@ -140,6 +140,7 @@ type :: xmhd_ops
   LOGICAL, CONTIGUOUS, POINTER, DIMENSION(:) :: solid_node => NULL() !< Solid region flag
   INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: v_bc_type => NULL() !< Velocity BC flag
   CLASS(oft_matrix), POINTER :: J => NULL() !< Jacobian matrix
+  CLASS(oft_matrix), POINTER :: P => NULL() !< Block-diagonal physics-based preconditioning matrix (B, parabolized V, n/T blocks)
   CLASS(oft_matrix), POINTER :: interp => NULL() !< Interpolation matrix
   TYPE(oft_xmhd_errmatrix) :: A !< NL metric matrix
 end type xmhd_ops
@@ -235,6 +236,40 @@ abstract interface
   end subroutine xmhd_probe_apply
 end interface
 !------------------------------------------------------------------------------
+!> Physics-based (approximate block factorization) preconditioner for xMHD
+!!
+!! Fields are split into magnetic (B), velocity (V) and scalar (n, T) groups.
+!! Given a residual \f$ r = (r_B, r_V, r_S) \f$ the preconditioner applies
+!! - Predictor: \f$ x_{B,S}^* = D_{B,S}^{-1} r_{B,S} \f$
+!! - Velocity: \f$ x_V = S_V^{-1} (r_V - J_{VB} x_B^* - J_{VS} x_S^*) \f$
+!! - Corrector: \f$ x_{B,S} = D_{B,S}^{-1} (r_{B,S} - J_{BV,SV} x_V) \f$
+!!
+!! where \f$ D_B, D_S \f$ are the diagonal blocks of the Jacobian and \f$ S_V \f$
+!! is a parabolized approximation of the velocity Schur complement (velocity block plus
+!! \f$ \theta^2 \Delta t^2 \f$ times the linearized ideal MHD force operator). All three
+!! blocks are stored in one block-diagonal matrix (@ref xmhd_ops::P "P"), so each block
+!! solve is a solve with \f$ P \f$ on a vector with the other groups zeroed.
+!------------------------------------------------------------------------------
+type, extends(oft_solver) :: oft_xmhd_pb_precond
+  INTEGER(i4) :: pb_type = 1 !< Factorization type (1: full, 2: lower triangular, 3: block diagonal)
+  INTEGER(i4) :: nfields = 0 !< Number of fields in composite vector
+  INTEGER(i4), POINTER, DIMENSION(:) :: groups => NULL() !< Field group for each field (1: B, 2: V, 3: n/T)
+  CLASS(oft_matrix), POINTER :: J => NULL() !< Jacobian used for off-diagonal coupling
+  CLASS(oft_solver), POINTER :: pinv => NULL() !< Solver for block-diagonal matrix P
+  CLASS(oft_vector), POINTER :: r => NULL() !< Work vector
+  CLASS(oft_vector), POINTER :: t => NULL() !< Work vector
+  CLASS(oft_vector), POINTER :: x => NULL() !< Work vector
+  CLASS(oft_vector), POINTER :: xv => NULL() !< Work vector
+  CLASS(oft_vector), POINTER :: w => NULL() !< Work vector
+contains
+  !> Apply preconditioner
+  procedure :: apply => xmhd_pb_apply
+  !> Update inner solver after operator rebuild
+  procedure :: update => xmhd_pb_update
+  !> Destroy internal storage
+  procedure :: delete => xmhd_pb_delete
+end type oft_xmhd_pb_precond
+!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, PUBLIC, extends(oft_ml_fe_comp_vecspace) :: ml_xmhd_vecspace
@@ -250,6 +285,14 @@ end type ml_xmhd_vecspace
 INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
 TYPE(xml_node) :: xmhd_root_node !< xMHD XML node
 TYPE(xml_node) :: xmhd_pre_node !< preconditioner XML node
+TYPE(xml_node) :: xmhd_pb_node !< Physics-based preconditioner XML node
+LOGICAL :: xmhd_pb = .FALSE. !< Use physics-based block preconditioner (`pb_pre` XML element present)
+INTEGER(i4) :: xmhd_pb_type = 1 !< PB factorization type (1: full, 2: lower, 3: diagonal)
+REAL(r8) :: xmhd_pb_alfven = 1.d0 !< Scale factor for Alfven (magnetic) parabolization term
+REAL(r8) :: xmhd_pb_sound = 1.d0 !< Scale factor for sound (pressure) parabolization term
+LOGICAL :: xmhd_pb_dump = .FALSE. !< Save J and P matrices on first preconditioner update (debugging, serial native only)
+INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: xmhd_pb_mask !< Matrix block mask for P
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: xmhd_pb_groups !< Field group for each field (1: B, 2: V, 3: n/T)
 !---Equation control
 LOGICAL :: xmhd_jcb = .TRUE. !< Include JxB force on fluid
 LOGICAL :: xmhd_advec = .TRUE. !< Include fluid advection
@@ -342,6 +385,7 @@ TYPE(xmhd_ops), POINTER :: oft_xmhd_ops => NULL() !< Operator container
 TYPE(xmhd_ops), POINTER, DIMENSION(:) :: oft_xmhd_ops_ML => NULL() !< MG operator container
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_int => NULL() !< MG interpolation operators
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_J => NULL() !< MG Jacobian operators
+TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_P => NULL() !< MG physics-based preconditioning operators
 CLASS(oft_solver), POINTER :: xmhd_pre => NULL() !< Preconditioner object
 INTEGER(i4) :: gmres_maxits = 200
 INTEGER(i4) :: gmres_ninner = 20
@@ -494,6 +538,27 @@ IF(ASSOCIATED(oft_env%xml))THEN
   IF(ierr==0)THEN
     !---Look for pre node
     CALL xml_get_element(xmhd_root_node,"pre",xmhd_pre_node,ierr)
+    !---Look for physics-based preconditioner node
+    CALL xml_get_element(xmhd_root_node,"pb_pre",xmhd_pb_node,ierr)
+    IF(ierr==0)THEN
+      xmhd_pb=.TRUE.
+      IF(xml_hasAttribute(xmhd_pb_node,"type"))THEN
+        CALL xml_read_attribute(xmhd_pb_node,"type",xmhd_pb_type,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading pb_pre `type` attribute.","xmhd_read_settings",__FILE__)
+      END IF
+      IF(xml_hasAttribute(xmhd_pb_node,"alfven"))THEN
+        CALL xml_read_attribute(xmhd_pb_node,"alfven",xmhd_pb_alfven,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading pb_pre `alfven` attribute.","xmhd_read_settings",__FILE__)
+      END IF
+      IF(xml_hasAttribute(xmhd_pb_node,"dump"))THEN
+        CALL xml_read_attribute(xmhd_pb_node,"dump",xmhd_pb_dump,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading pb_pre `dump` attribute.","xmhd_read_settings",__FILE__)
+      END IF
+      IF(xml_hasAttribute(xmhd_pb_node,"sound"))THEN
+        CALL xml_read_attribute(xmhd_pb_node,"sound",xmhd_pb_sound,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading pb_pre `sound` attribute.","xmhd_read_settings",__FILE__)
+      END IF
+    END IF
   END IF
 END IF
 !------------------------------------------------------------------------------
@@ -843,7 +908,9 @@ solver%pm=oft_env%pm
 !------------------------------------------------------------------------------
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
-IF(nlevels==1)THEN
+IF(xmhd_pb)THEN
+  CALL xmhd_create_pb(solver%pre)
+ELSE IF(nlevels==1)THEN
   IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
@@ -1406,7 +1473,9 @@ solver%pm=oft_env%pm
 !------------------------------------------------------------------------------
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
-IF(nlevels==1)THEN
+IF(xmhd_pb)THEN
+  CALL xmhd_create_pb(solver%pre)
+ELSE IF(nlevels==1)THEN
   IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
@@ -1635,7 +1704,11 @@ END FUNCTION xmhd_elem_size
 !------------------------------------------------------------------------------
 subroutine xmhd_build_ops(fullin)
 class(fem_interp), intent(inout) :: fullin !< Interpolator to evaluate fields
-type(oft_local_mat), allocatable, dimension(:,:) :: mtmp,mtmp_solid
+type(oft_local_mat), allocatable, dimension(:,:) :: mtmp,mtmp_solid,ptmp,ptmp_solid
+integer(KIND=omp_lock_kind), allocatable, dimension(:) :: plocks
+logical :: build_pb
+real(r8) :: pb_ca,pb_cs,pb_p0,pb_dp0(3),pb_qc(3),pb_jq(3),pb_bq
+real(r8), allocatable :: pb_bdg(:)
 type(oft_1d_int), allocatable, dimension(:) :: iloc
 integer(i4) :: ii,i,ip,j,m,n,jr,jc,jp,nrows,jtmp(1),vi,vj,vl,vm,vk,vlc
 integer(i4), allocatable, target :: j_lag(:),j_hgrad(:),j_hcurl(:)
@@ -1660,14 +1733,18 @@ IF(oft_debug_print(2))write(*,'(4X,A,I4)')'Building xMHD Jacobian: ',xmhd_level
 Jac=>oft_xmhd_ops%J
 quad=>xmhd_ML_hcurl%levels(xmhd_ML_hcurl%nlevels)%fe%quad !oft_hcurl%quad
 tgam_fac=temp_gamma - 1.d0
+build_pb=.FALSE.
+IF(xmhd_pb)build_pb=ASSOCIATED(oft_xmhd_ops%P)
 !------------------------------------------------------------------------------
 ! Reset matrices
 !------------------------------------------------------------------------------
 CALL Jac%zero
+IF(build_pb)CALL oft_xmhd_ops%P%zero
 !--Setup thread locks
-ALLOCATE(tlocks(xmhd_rep%nfields))
+ALLOCATE(tlocks(xmhd_rep%nfields),plocks(xmhd_rep%nfields))
 DO i=1,xmhd_rep%nfields
   call omp_init_lock(tlocks(i))
+  call omp_init_lock(plocks(i))
 END DO
 !------------------------------------------------------------------------------
 ! Construct matrix
@@ -1675,7 +1752,8 @@ END DO
 !$omp parallel private(det,j_lag,j_hgrad,j_hcurl,lag_rop,lag_gop,hgrad_rop,hcurl_rop, &
 !$omp hcurl_cop,curved,goptmp,vol,j,m,jr,jc,bhat,he,v0_mag,dvT,eta_curr,u,uvec,umat, &
 !$omp mtmp,mtmp_solid,chi_temp,bmag,c1,c2,c3,c4,divv,nu_tmp,ten1,cgop,fulltmp,lag_gopt,pt,diff_tmp, &
-!$omp hgrad_ropt,hcurl_ropt,hcurl_copt,uten,i,ii,iloc,u0,c_gyro,krok_delta,vi,vj,vl,vm,vk,vlc)
+!$omp hgrad_ropt,hcurl_ropt,hcurl_copt,uten,i,ii,iloc,u0,c_gyro,krok_delta,vi,vj,vl,vm,vk,vlc, &
+!$omp ptmp,ptmp_solid,pb_ca,pb_cs,pb_p0,pb_dp0,pb_qc,pb_jq,pb_bq,pb_bdg)
 !---Thread local arrays
 allocate(j_lag(oft_lagrange%nce),j_hgrad(oft_hgrad%nce),j_hcurl(oft_hcurl%nce))
 allocate(lag_rop(oft_lagrange%nce),lag_gop(3,oft_lagrange%nce))
@@ -1687,6 +1765,13 @@ allocate(mtmp(xmhd_rep%nfields,xmhd_rep%nfields),mtmp_solid(xmhd_rep%nfields,xmh
 CALL xmhd_rep%mat_setup_local(mtmp, xmhd_mat_mask)
 mtmp_solid(1,1)%m=>mtmp(1,1)%m; mtmp_solid(1,2)%m=>mtmp(1,2)%m
 mtmp_solid(2,1)%m=>mtmp(2,1)%m; mtmp_solid(2,2)%m=>mtmp(2,2)%m
+IF(build_pb)THEN
+  allocate(ptmp(xmhd_rep%nfields,xmhd_rep%nfields),ptmp_solid(xmhd_rep%nfields,xmhd_rep%nfields))
+  CALL xmhd_rep%mat_setup_local(ptmp, xmhd_pb_mask)
+  ptmp_solid(1,1)%m=>ptmp(1,1)%m; ptmp_solid(1,2)%m=>ptmp(1,2)%m
+  ptmp_solid(2,1)%m=>ptmp(2,1)%m; ptmp_solid(2,2)%m=>ptmp(2,2)%m
+  allocate(pb_bdg(oft_lagrange%nce))
+END IF
 allocate(iloc(xmhd_rep%nfields))
 iloc(1)%v=>j_hcurl
 iloc(2)%v=>j_hgrad
@@ -1719,6 +1804,7 @@ do ii=1,mesh%tloc_c(ip)%n
   call oft_hcurl%ncdofs(i,j_hcurl)
   !---Zero local matrix
   CALL xmhd_rep%mat_zero_local(mtmp)
+  IF(build_pb)CALL xmhd_rep%mat_zero_local(ptmp)
 !------------------------------------------------------------------------------
 ! Quadrature Loop
 !------------------------------------------------------------------------------
@@ -2483,82 +2569,66 @@ do ii=1,mesh%tloc_c(ip)%n
     END IF
     END IF
 !------------------------------------------------------------------------------
+! Parabolized velocity Schur complement for physics-based preconditioning
+!   S_V(phi,v) += (theta dt)^2/(n m_i) [ (1/mu0) Q(phi).Q(v) - (1/mu0) phi.(J0 x Q(v))
+!                 + (div phi)(gamma p0 div v + v.grad p0) ]
+!   with Q(v) = curl(v x B0) ~ (B0.grad)v - B0 (div v)  (grad(B0) terms dropped)
+!------------------------------------------------------------------------------
+    IF(build_pb)THEN
+      pb_ca = 0.d0
+      IF(xmhd_jcb)pb_ca = xmhd_pb_alfven*jac_dt*jac_dt*det/(u0%N*m_ion*mu0)
+      pb_cs = 0.d0
+      IF(xmhd_adv_temp.OR.xmhd_adv_den)pb_cs = xmhd_pb_sound*jac_dt*jac_dt*det/(u0%N*m_ion)
+      pb_p0 = u0%N*k_boltz*(u0%Ti+u0%Te)
+      pb_dp0 = k_boltz*((u0%Ti+u0%Te)*u0%dN + u0%N*(u0%dTi+u0%dTe))
+      DO jc=1,oft_lagrange%nce
+        pb_bdg(jc) = DOT_PRODUCT(u0%B,lag_gop(:,jc))
+      END DO
+      DO vm=1,3
+        DO jc=1,oft_lagrange%nce
+          !---Q for column basis function (component vm)
+          pb_qc = -u0%B*lag_gop(vm,jc)
+          pb_qc(vm) = pb_qc(vm) + pb_bdg(jc)
+          pb_bq = DOT_PRODUCT(u0%B,pb_qc)
+          pb_jq = cross_product(u0%J,pb_qc)
+          DO vj=1,3
+            u = pb_cs*(temp_gamma*pb_p0*lag_gop(vm,jc) + lag_rop(jc)*pb_dp0(vm))
+            !$omp simd
+            DO jr=1,oft_lagrange%nce
+              ptmp(2+vj,2+vm)%m(jr,jc) = ptmp(2+vj,2+vm)%m(jr,jc) &
+                + pb_ca*(pb_bdg(jr)*pb_qc(vj) - lag_gop(vj,jr)*pb_bq - lag_rop(jr)*pb_jq(vj)) &
+                + lag_gop(vj,jr)*u
+            END DO
+          END DO
+        END DO
+      END DO
+    END IF
+!------------------------------------------------------------------------------
 ! End quadrature loop
 !------------------------------------------------------------------------------
   end do
-  !------------------------------------------------------------------------------
-  ! Apply BCs to local matrices
-  !------------------------------------------------------------------------------
-  DO m=1,xmhd_rep%nfields
-    IF(ASSOCIATED(mtmp(3,m)%m).AND.(m/=3))mtmp(3,m)%m = mtmp(3,m)%m/vel_scale
-    IF(ASSOCIATED(mtmp(m,3)%m).AND.(m/=3))mtmp(m,3)%m = mtmp(m,3)%m*vel_scale
-    IF(ASSOCIATED(mtmp(4,m)%m).AND.(m/=4))mtmp(4,m)%m = mtmp(4,m)%m/vel_scale
-    IF(ASSOCIATED(mtmp(m,4)%m).AND.(m/=4))mtmp(m,4)%m = mtmp(m,4)%m*vel_scale
-    IF(ASSOCIATED(mtmp(5,m)%m).AND.(m/=5))mtmp(5,m)%m = mtmp(5,m)%m/vel_scale
-    IF(ASSOCIATED(mtmp(m,5)%m).AND.(m/=5))mtmp(m,5)%m = mtmp(m,5)%m*vel_scale
-    IF(ASSOCIATED(mtmp(6,m)%m).AND.(m/=6))mtmp(6,m)%m = mtmp(6,m)%m/den_scale
-    IF(ASSOCIATED(mtmp(m,6)%m).AND.(m/=6))mtmp(m,6)%m = mtmp(m,6)%m*den_scale
-    IF((n2_ind>0).AND.(m/=n2_ind))THEN
-      IF(ASSOCIATED(mtmp(n2_ind,m)%m))mtmp(n2_ind,m)%m = mtmp(n2_ind,m)%m/n2_scale
-      IF(ASSOCIATED(mtmp(m,n2_ind)%m))mtmp(m,n2_ind)%m = mtmp(m,n2_ind)%m*n2_scale
-    END IF
-    IF((j2_ind>0).AND.(m/=j2_ind))THEN
-      IF(ASSOCIATED(mtmp(j2_ind,m)%m))mtmp(j2_ind,m)%m = mtmp(j2_ind,m)%m/j2_scale
-      IF(ASSOCIATED(mtmp(m,j2_ind)%m))mtmp(m,j2_ind)%m = mtmp(m,j2_ind)%m*j2_scale
-    END IF
-  END DO
-  !------------------------------------------------------------------------------
-  ! Apply BCs to local matrices
-  !------------------------------------------------------------------------------
-  CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%b1_bc(j_hcurl),1)
-  CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%b2_bc(j_hgrad),2)
-  CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%n_bc(j_lag),6)
-  CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%t_bc(j_lag),7)
-  IF(xmhd_two_temp)CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%t_bc(j_lag),te_ind)
-  !---Velocity BC
-  IF(ANY(oft_xmhd_ops%v_bc_type(j_lag)>1))THEN
-    DO jr=1,oft_lagrange%nce
-      IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
-        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),oft_xmhd_ops%v_bc_type(j_lag(jr)),umat)
-        DO m=1,xmhd_rep%nfields
-          IF(ASSOCIATED(mtmp(3,m)%m))THEN
-            DO jc=1,SIZE(mtmp(3,m)%m,2)
-              !---Unpack
-              uvec(1)=mtmp(3,m)%m(jr,jc)
-              uvec(2)=mtmp(4,m)%m(jr,jc)
-              uvec(3)=mtmp(5,m)%m(jr,jc)
-              !---Apply BC
-              uvec = MATMUL(umat,uvec)
-              !---Repack
-              mtmp(3,m)%m(jr,jc)=uvec(1)
-              mtmp(4,m)%m(jr,jc)=uvec(2)
-              mtmp(5,m)%m(jr,jc)=uvec(3)
-            END DO
-          END IF
-        END DO
-      END IF
+  !---Physics-based preconditioning matrix: diagonal blocks of J (+ parabolization)
+  IF(build_pb)THEN
+    DO jr=1,xmhd_rep%nfields
+      DO jc=1,xmhd_rep%nfields
+        IF(xmhd_pb_mask(jr,jc)/=1)CYCLE
+        IF(.NOT.ASSOCIATED(mtmp(jr,jc)%m))CYCLE
+        ptmp(jr,jc)%m = ptmp(jr,jc)%m + mtmp(jr,jc)%m
+      END DO
     END DO
+    CALL xmhd_local_bcs(ptmp,j_lag,j_hgrad,j_hcurl)
   END IF
-  CALL xmhd_rep%mat_zero_local_rows(mtmp,(oft_xmhd_ops%v_bc_type(j_lag)==1),3)
-  CALL xmhd_rep%mat_zero_local_rows(mtmp,(ABS(oft_xmhd_ops%v_bc_type(j_lag))==1),4)
-  CALL xmhd_rep%mat_zero_local_rows(mtmp,(ABS(oft_xmhd_ops%v_bc_type(j_lag))==1),5)
-  !---Handle rotational periodicity
-  IF(mesh%periodic%revolved)THEN
-    CALL lagrange_vector_packblock(oft_lagrange,mtmp(3:5,3:5),j_lag)
-    DO m=1,xmhd_rep%nfields
-      IF(m>=3.AND.m<=5)CYCLE
-      IF(ASSOCIATED(mtmp(m,3)%m))CALL lagrange_vector_packcols(oft_lagrange,mtmp(m,3:5),j_lag)
-      IF(ASSOCIATED(mtmp(3,m)%m))CALL lagrange_vector_packrows(oft_lagrange,mtmp(3:5,m),j_lag)
-    END DO
-  END IF
+  CALL xmhd_local_bcs(mtmp,j_lag,j_hgrad,j_hcurl)
 !------------------------------------------------------------------------------
 ! Add local contribution to full matrix
 !------------------------------------------------------------------------------
   IF(xmhd_hall.AND.xmhd_two_temp)NULLIFY(mtmp(1,7)%m)
   IF(reg_solid(mesh%reg(i)))THEN
     CALL xmhd_rep%mat_add_local(Jac,mtmp_solid,iloc,tlocks)
+    IF(build_pb)CALL xmhd_rep%mat_add_local(oft_xmhd_ops%P,ptmp_solid,iloc,plocks)
   ELSE
     CALL xmhd_rep%mat_add_local(Jac,mtmp,iloc,tlocks)
+    IF(build_pb)CALL xmhd_rep%mat_add_local(oft_xmhd_ops%P,ptmp,iloc,plocks)
   END IF
 end do
 END DO
@@ -2571,21 +2641,121 @@ NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !---Destroy local matrix
 CALL xmhd_rep%mat_destroy_local(mtmp)
 deallocate(mtmp,mtmp_solid,iloc)
+IF(build_pb)THEN
+  CALL xmhd_rep%mat_destroy_local(ptmp)
+  deallocate(ptmp,ptmp_solid,pb_bdg)
+END IF
 !$omp end parallel
 !--Destroy thread locks
 DO i=1,xmhd_rep%nfields
   CALL omp_destroy_lock(tlocks(i))
+  CALL omp_destroy_lock(plocks(i))
 END DO
-DEALLOCATE(tlocks)
+DEALLOCATE(tlocks,plocks)
 !------------------------------------------------------------------------------
 ! Set BC diagnoals
 !------------------------------------------------------------------------------
 IF(oft_debug_print(2))write(*,'(4X,A)')'Setting BCs'
-CALL fem_dirichlet_diag(oft_hcurl,Jac,oft_xmhd_ops%b1_bc,1)
-CALL fem_dirichlet_diag(oft_hgrad,Jac,oft_xmhd_ops%b2_bc,2)
-CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%n_bc,6)
-CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%t_bc,7)
-IF(xmhd_two_temp)CALL fem_dirichlet_diag(oft_lagrange,Jac,oft_xmhd_ops%t_bc,te_ind)
+CALL xmhd_bc_diag(Jac)
+IF(build_pb)CALL xmhd_bc_diag(oft_xmhd_ops%P)
+!------------------------------------------------------------------------------
+! Final assembly
+!------------------------------------------------------------------------------
+call oft_xmhd_create(tmp)
+call Jac%assemble(tmp)
+IF(build_pb)call oft_xmhd_ops%P%assemble(tmp)
+call tmp%delete
+DEALLOCATE(tmp)
+DEBUG_STACK_POP
+end subroutine xmhd_build_ops
+!------------------------------------------------------------------------------
+!> Apply scaling and boundary conditions to local (cell) xMHD matrices
+!------------------------------------------------------------------------------
+subroutine xmhd_local_bcs(mloc,j_lag,j_hgrad,j_hcurl)
+TYPE(oft_local_mat), INTENT(inout) :: mloc(:,:) !< Local matrices [nfields,nfields]
+INTEGER(i4), INTENT(in) :: j_lag(:) !< Lagrange DOF indices for cell
+INTEGER(i4), INTENT(in) :: j_hgrad(:) !< H^1 DOF indices for cell
+INTEGER(i4), INTENT(in) :: j_hcurl(:) !< H(Curl) DOF indices for cell
+INTEGER(i4) :: m,jr,jc
+REAL(r8) :: uvec(3),umat(3,3)
+  !------------------------------------------------------------------------------
+  ! Apply BCs to local matrices
+  !------------------------------------------------------------------------------
+  DO m=1,xmhd_rep%nfields
+    IF(ASSOCIATED(mloc(3,m)%m).AND.(m/=3))mloc(3,m)%m = mloc(3,m)%m/vel_scale
+    IF(ASSOCIATED(mloc(m,3)%m).AND.(m/=3))mloc(m,3)%m = mloc(m,3)%m*vel_scale
+    IF(ASSOCIATED(mloc(4,m)%m).AND.(m/=4))mloc(4,m)%m = mloc(4,m)%m/vel_scale
+    IF(ASSOCIATED(mloc(m,4)%m).AND.(m/=4))mloc(m,4)%m = mloc(m,4)%m*vel_scale
+    IF(ASSOCIATED(mloc(5,m)%m).AND.(m/=5))mloc(5,m)%m = mloc(5,m)%m/vel_scale
+    IF(ASSOCIATED(mloc(m,5)%m).AND.(m/=5))mloc(m,5)%m = mloc(m,5)%m*vel_scale
+    IF(ASSOCIATED(mloc(6,m)%m).AND.(m/=6))mloc(6,m)%m = mloc(6,m)%m/den_scale
+    IF(ASSOCIATED(mloc(m,6)%m).AND.(m/=6))mloc(m,6)%m = mloc(m,6)%m*den_scale
+    IF((n2_ind>0).AND.(m/=n2_ind))THEN
+      IF(ASSOCIATED(mloc(n2_ind,m)%m))mloc(n2_ind,m)%m = mloc(n2_ind,m)%m/n2_scale
+      IF(ASSOCIATED(mloc(m,n2_ind)%m))mloc(m,n2_ind)%m = mloc(m,n2_ind)%m*n2_scale
+    END IF
+    IF((j2_ind>0).AND.(m/=j2_ind))THEN
+      IF(ASSOCIATED(mloc(j2_ind,m)%m))mloc(j2_ind,m)%m = mloc(j2_ind,m)%m/j2_scale
+      IF(ASSOCIATED(mloc(m,j2_ind)%m))mloc(m,j2_ind)%m = mloc(m,j2_ind)%m*j2_scale
+    END IF
+  END DO
+  !------------------------------------------------------------------------------
+  ! Apply BCs to local matrices
+  !------------------------------------------------------------------------------
+  CALL xmhd_rep%mat_zero_local_rows(mloc,oft_xmhd_ops%b1_bc(j_hcurl),1)
+  CALL xmhd_rep%mat_zero_local_rows(mloc,oft_xmhd_ops%b2_bc(j_hgrad),2)
+  CALL xmhd_rep%mat_zero_local_rows(mloc,oft_xmhd_ops%n_bc(j_lag),6)
+  CALL xmhd_rep%mat_zero_local_rows(mloc,oft_xmhd_ops%t_bc(j_lag),7)
+  IF(xmhd_two_temp)CALL xmhd_rep%mat_zero_local_rows(mloc,oft_xmhd_ops%t_bc(j_lag),te_ind)
+  !---Velocity BC
+  IF(ANY(oft_xmhd_ops%v_bc_type(j_lag)>1))THEN
+    DO jr=1,oft_lagrange%nce
+      IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
+        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),oft_xmhd_ops%v_bc_type(j_lag(jr)),umat)
+        DO m=1,xmhd_rep%nfields
+          IF(ASSOCIATED(mloc(3,m)%m))THEN
+            DO jc=1,SIZE(mloc(3,m)%m,2)
+              !---Unpack
+              uvec(1)=mloc(3,m)%m(jr,jc)
+              uvec(2)=mloc(4,m)%m(jr,jc)
+              uvec(3)=mloc(5,m)%m(jr,jc)
+              !---Apply BC
+              uvec = MATMUL(umat,uvec)
+              !---Repack
+              mloc(3,m)%m(jr,jc)=uvec(1)
+              mloc(4,m)%m(jr,jc)=uvec(2)
+              mloc(5,m)%m(jr,jc)=uvec(3)
+            END DO
+          END IF
+        END DO
+      END IF
+    END DO
+  END IF
+  CALL xmhd_rep%mat_zero_local_rows(mloc,(oft_xmhd_ops%v_bc_type(j_lag)==1),3)
+  CALL xmhd_rep%mat_zero_local_rows(mloc,(ABS(oft_xmhd_ops%v_bc_type(j_lag))==1),4)
+  CALL xmhd_rep%mat_zero_local_rows(mloc,(ABS(oft_xmhd_ops%v_bc_type(j_lag))==1),5)
+  !---Handle rotational periodicity
+  IF(mesh%periodic%revolved)THEN
+    CALL lagrange_vector_packblock(oft_lagrange,mloc(3:5,3:5),j_lag)
+    DO m=1,xmhd_rep%nfields
+      IF(m>=3.AND.m<=5)CYCLE
+      IF(ASSOCIATED(mloc(m,3)%m))CALL lagrange_vector_packcols(oft_lagrange,mloc(m,3:5),j_lag)
+      IF(ASSOCIATED(mloc(3,m)%m))CALL lagrange_vector_packrows(oft_lagrange,mloc(3:5,m),j_lag)
+    END DO
+  END IF
+end subroutine xmhd_local_bcs
+!------------------------------------------------------------------------------
+!> Set diagonal entries for Dirichlet boundary conditions in an assembled xMHD matrix
+!------------------------------------------------------------------------------
+subroutine xmhd_bc_diag(Mat)
+CLASS(oft_matrix), INTENT(inout) :: Mat !< Matrix to modify (J or P layout)
+INTEGER(i4) :: i,j,jr,jc,jtmp(1)
+REAL(r8) :: umat(3,3)
+CALL fem_dirichlet_diag(oft_hcurl,Mat,oft_xmhd_ops%b1_bc,1)
+CALL fem_dirichlet_diag(oft_hgrad,Mat,oft_xmhd_ops%b2_bc,2)
+CALL fem_dirichlet_diag(oft_lagrange,Mat,oft_xmhd_ops%n_bc,6)
+CALL fem_dirichlet_diag(oft_lagrange,Mat,oft_xmhd_ops%t_bc,7)
+IF(xmhd_two_temp)CALL fem_dirichlet_diag(oft_lagrange,Mat,oft_xmhd_ops%t_bc,te_ind)
 !---Velocity BC
 IF(xmhd_vbcdir)THEN
   DO i=1,oft_lagrange%nbe
@@ -2598,23 +2768,15 @@ IF(xmhd_vbcdir)THEN
     CALL lagrange_vector_transmat(oft_lagrange,umat,j)
     DO jr=1,3
       DO jc=1,3
-        CALL Jac%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr+2,jc+2)
+        CALL Mat%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr+2,jc+2)
       END DO
     END DO
   END DO
 END IF
-CALL fem_dirichlet_diag(oft_lagrange,Jac,(oft_xmhd_ops%v_bc_type==1),3)
-CALL fem_dirichlet_diag(oft_lagrange,Jac,(ABS(oft_xmhd_ops%v_bc_type)==1),4)
-CALL fem_dirichlet_diag(oft_lagrange,Jac,(ABS(oft_xmhd_ops%v_bc_type)==1),5)
-!------------------------------------------------------------------------------
-! Final assembly
-!------------------------------------------------------------------------------
-call oft_xmhd_create(tmp)
-call Jac%assemble(tmp)
-call tmp%delete
-DEALLOCATE(tmp)
-DEBUG_STACK_POP
-end subroutine xmhd_build_ops
+CALL fem_dirichlet_diag(oft_lagrange,Mat,(oft_xmhd_ops%v_bc_type==1),3)
+CALL fem_dirichlet_diag(oft_lagrange,Mat,(ABS(oft_xmhd_ops%v_bc_type)==1),4)
+CALL fem_dirichlet_diag(oft_lagrange,Mat,(ABS(oft_xmhd_ops%v_bc_type)==1),5)
+end subroutine xmhd_bc_diag
 !------------------------------------------------------------------------------
 !> Setup and allocate operators used in xMHD advance
 !------------------------------------------------------------------------------
@@ -2708,6 +2870,25 @@ ELSE
   IF(xmhd_two_temp)xmhd_mat_mask(te_ind,te_ind)=2
 END IF
 !------------------------------------------------------------------------------
+! Setup block-diagonal mask for physics-based preconditioner
+!------------------------------------------------------------------------------
+IF(xmhd_pb)THEN
+  ALLOCATE(xmhd_pb_groups(xmhd_rep%nfields))
+  xmhd_pb_groups=3
+  xmhd_pb_groups(1:2)=1
+  IF(j2_ind>0)xmhd_pb_groups(j2_ind)=1
+  xmhd_pb_groups(3:5)=2
+  ALLOCATE(xmhd_pb_mask(xmhd_rep%nfields,xmhd_rep%nfields))
+  xmhd_pb_mask=0
+  DO i=1,xmhd_rep%nfields
+    DO j=1,xmhd_rep%nfields
+      IF(xmhd_pb_groups(i)==xmhd_pb_groups(j))xmhd_pb_mask(i,j)=xmhd_mat_mask(i,j)
+    END DO
+  END DO
+  xmhd_pb_mask(3:5,3:5)=1 ! Parabolization couples all velocity components
+  allocate(ml_P(xmhd_ML_hcurl%nlevels-xmhd_minlev+1))
+END IF
+!------------------------------------------------------------------------------
 ! Create matrix objects for each level
 !------------------------------------------------------------------------------
 levelin=xmhd_level
@@ -2716,6 +2897,10 @@ do level=levelin,xmhd_minlev,-1
   ops=>oft_xmhd_ops
   CALL xmhd_rep%mat_create(ops%J,xmhd_mat_mask)
   ml_J(level-xmhd_minlev+1)%m=>ops%J
+  IF(xmhd_pb)THEN
+    CALL xmhd_rep%mat_create(ops%P,xmhd_pb_mask)
+    ml_P(level-xmhd_minlev+1)%m=>ops%P
+  END IF
   !---Set element coloring
   IF(xmhd_nparts(level)>1)THEN
     SELECT TYPE(this=>ops%J)
@@ -2734,6 +2919,11 @@ do level=levelin,xmhd_minlev,-1
           CALL comp_fem_partition(xmhd_rep,this%color,j)
         END IF
     END SELECT
+    !---Use same partitioning for physics-based preconditioning matrix
+    IF(xmhd_pb.AND.ASSOCIATED(ops%J%color))THEN
+      ALLOCATE(ops%P%color(ops%P%nr))
+      ops%P%color=ops%J%color
+    END IF
   END IF
 end do
 IF(mesh%periodic%revolved)THEN
@@ -4629,6 +4819,179 @@ if(ASSOCIATED(fullcctmp))deallocate(fullcctmp)
 call full_interp%delete()
 call xmhd_set_level(levelin)
 end subroutine xmhd_set_ops
+!------------------------------------------------------------------------------
+!> Create physics-based block preconditioner from the `pb_pre` XML element
+!!
+!! For a single level the `pb_pre` element may contain a `solver` element defining
+!! the solver for the block-diagonal matrix P. For multiple levels its contents
+!! follow the MG preconditioner definition (`smoother`, `coarse`) and are applied
+!! to the P matrices on each level.
+!------------------------------------------------------------------------------
+subroutine xmhd_create_pb(pre)
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Preconditioner object
+INTEGER(i4) :: i,ierr,nlevels
+INTEGER(i4), ALLOCATABLE :: levels(:)
+TYPE(xml_node) :: solver_node
+TYPE(oft_xmhd_pb_precond), POINTER :: pb
+IF(.NOT.ASSOCIATED(oft_xmhd_ops%P))CALL oft_abort('PB matrices not allocated','xmhd_create_pb',__FILE__)
+ALLOCATE(pb)
+pb%pb_type=xmhd_pb_type
+pb%nfields=xmhd_rep%nfields
+ALLOCATE(pb%groups(pb%nfields))
+pb%groups=xmhd_pb_groups
+pb%J=>oft_xmhd_ops%J
+pb%A=>oft_xmhd_ops%J
+nlevels=xmhd_nlevels-xmhd_minlev+1
+IF(nlevels==1)THEN
+  CALL xml_get_element(xmhd_pb_node,"solver",solver_node,ierr)
+  IF(ierr==0)THEN
+    CALL create_solver_xml(pb%pinv,solver_node)
+  ELSE
+    CALL create_diag_pre(pb%pinv)
+  END IF
+ELSE
+  ALLOCATE(levels(nlevels))
+  levels=(/(i,i=xmhd_minlev,xmhd_nlevels)/)
+  xmhd_ml_vecspace%ML_FE_rep=>ML_xmhd_rep
+  CALL create_mlpre(pb%pinv,ml_P,levels,nlevels=nlevels, &
+    ml_vecspace=xmhd_ml_vecspace, &
+    stype=2,nu=nu_xmhd(xmhd_minlev:xmhd_nlevels),xml_root=xmhd_pb_node)
+  DEALLOCATE(levels)
+END IF
+pb%pinv%A=>oft_xmhd_ops%P
+pre=>pb
+IF(oft_env%head_proc)THEN
+  WRITE(*,'(2X,A,I2,A,2ES11.3)')'Using physics-based block preconditioner (type ', &
+    pb%pb_type,'), Alfven/sound scale =',xmhd_pb_alfven,xmhd_pb_sound
+END IF
+end subroutine xmhd_create_pb
+!------------------------------------------------------------------------------
+!> Zero all field blocks of a composite vector that are (not) in a given group
+!------------------------------------------------------------------------------
+subroutine xmhd_pb_zero_groups(self,vec,group,keep)
+CLASS(oft_xmhd_pb_precond), INTENT(in) :: self !< Preconditioner object
+CLASS(oft_vector), INTENT(inout) :: vec !< Vector to modify
+INTEGER(i4), INTENT(in) :: group !< Field group
+LOGICAL, INTENT(in) :: keep !< If true keep only `group`, otherwise zero `group`
+INTEGER(i4) :: i
+DO i=1,self%nfields
+  IF((self%groups(i)==group).NEQV.keep)CALL vec%set(0.d0,iblock=i)
+END DO
+end subroutine xmhd_pb_zero_groups
+!------------------------------------------------------------------------------
+!> Apply physics-based block preconditioner
+!------------------------------------------------------------------------------
+recursive subroutine xmhd_pb_apply(self,u,g)
+CLASS(oft_xmhd_pb_precond), INTENT(inout) :: self !< Preconditioner object
+CLASS(oft_vector), INTENT(inout) :: u !< Guess (input), Solution (output)
+CLASS(oft_vector), INTENT(inout) :: g !< RHS (input), Residual (output)
+REAL(r8) :: uu
+DEBUG_STACK_PUSH
+IF(.NOT.self%initialized)THEN
+  CALL u%new(self%r)
+  CALL u%new(self%t)
+  CALL u%new(self%x)
+  CALL u%new(self%xv)
+  CALL u%new(self%w)
+  CALL solver_setup(self)
+END IF
+!---Residual for initial guess
+CALL self%r%add(0.d0,1.d0,g)
+uu=u%dot(u)
+IF(uu>0.d0)THEN
+  CALL self%J%apply(u,self%w)
+  CALL self%r%add(1.d0,-1.d0,self%w)
+END IF
+self%pinv%full_residual=.FALSE.
+IF(self%pb_type==3)THEN
+  !---Block diagonal: x = P^{-1} r
+  CALL self%t%add(0.d0,1.d0,self%r)
+  CALL self%x%set(0.d0)
+  CALL self%pinv%apply(self%x,self%t)
+ELSE
+  !---Predictor: x_{B,S} = D^{-1} r_{B,S}
+  CALL self%t%add(0.d0,1.d0,self%r)
+  CALL xmhd_pb_zero_groups(self,self%t,2,.FALSE.)
+  CALL self%x%set(0.d0)
+  CALL self%pinv%apply(self%x,self%t)
+  CALL xmhd_pb_zero_groups(self,self%x,2,.FALSE.)
+  !---Velocity: x_V = S_V^{-1} (r_V - J_{V,BS} x_{B,S})
+  CALL self%J%apply(self%x,self%w)
+  CALL self%t%add(0.d0,1.d0,self%r)
+  CALL self%t%add(1.d0,-1.d0,self%w)
+  CALL xmhd_pb_zero_groups(self,self%t,2,.TRUE.)
+  CALL self%xv%set(0.d0)
+  CALL self%pinv%apply(self%xv,self%t)
+  CALL xmhd_pb_zero_groups(self,self%xv,2,.TRUE.)
+  !---Corrector: x_{B,S} = D^{-1} (r_{B,S} - J_{BS,V} x_V)
+  IF(self%pb_type==1)THEN
+    CALL self%J%apply(self%xv,self%w)
+    CALL self%t%add(0.d0,1.d0,self%r)
+    CALL self%t%add(1.d0,-1.d0,self%w)
+    CALL xmhd_pb_zero_groups(self,self%t,2,.FALSE.)
+    CALL self%x%set(0.d0)
+    CALL self%pinv%apply(self%x,self%t)
+    CALL xmhd_pb_zero_groups(self,self%x,2,.FALSE.)
+  END IF
+  CALL self%x%add(1.d0,1.d0,self%xv)
+END IF
+self%pinv%full_residual=.TRUE.
+!---Update solution and residual
+CALL u%add(1.d0,1.d0,self%x)
+IF(self%full_residual)THEN
+  CALL self%J%apply(self%x,self%w)
+  CALL g%add(0.d0,1.d0,self%r)
+  CALL g%add(1.d0,-1.d0,self%w)
+END IF
+DEBUG_STACK_POP
+end subroutine xmhd_pb_apply
+!------------------------------------------------------------------------------
+!> Update physics-based block preconditioner after operator rebuild
+!------------------------------------------------------------------------------
+recursive subroutine xmhd_pb_update(self,new_pattern)
+CLASS(oft_xmhd_pb_precond), INTENT(inout) :: self !< Preconditioner object
+LOGICAL, OPTIONAL, INTENT(in) :: new_pattern !< Update matrix non-zero pattern? (optional)
+INTEGER(i4) :: i,io_unit
+IF(ASSOCIATED(self%pinv))CALL self%pinv%update(new_pattern)
+!---Save matrices for offline analysis
+IF(xmhd_pb_dump)THEN
+  xmhd_pb_dump=.FALSE.
+  SELECT TYPE(this=>self%J)
+    CLASS IS(oft_native_matrix)
+      CALL this%save('xmhd_pb_J.h5','J')
+      IF(oft_env%head_proc)THEN
+        OPEN(NEWUNIT=io_unit,FILE='xmhd_pb_fields.txt')
+        DO i=1,this%ni
+          WRITE(io_unit,*)i,this%i_map(i)%offset,this%i_map(i)%n,self%groups(i)
+        END DO
+        CLOSE(io_unit)
+      END IF
+  END SELECT
+  SELECT TYPE(this=>oft_xmhd_ops%P)
+    CLASS IS(oft_native_matrix)
+      CALL this%save('xmhd_pb_P.h5','P')
+  END SELECT
+END IF
+end subroutine xmhd_pb_update
+!------------------------------------------------------------------------------
+!> Destroy physics-based block preconditioner
+!------------------------------------------------------------------------------
+recursive subroutine xmhd_pb_delete(self,propogate)
+CLASS(oft_xmhd_pb_precond), INTENT(inout) :: self !< Preconditioner object
+LOGICAL, OPTIONAL, INTENT(in) :: propogate !< Propagate to child solvers? (optional)
+IF(ASSOCIATED(self%pinv))THEN
+  CALL self%pinv%delete(propogate)
+  DEALLOCATE(self%pinv)
+END IF
+IF(self%initialized)THEN
+  CALL self%r%delete; CALL self%t%delete; CALL self%x%delete
+  CALL self%xv%delete; CALL self%w%delete
+  DEALLOCATE(self%r,self%t,self%x,self%xv,self%w)
+  self%initialized=.FALSE.
+END IF
+IF(ASSOCIATED(self%groups))DEALLOCATE(self%groups)
+NULLIFY(self%J)
+end subroutine xmhd_pb_delete
 !------------------------------------------------------------------------------
 !> Create new xMHD solution vector
 !------------------------------------------------------------------------------

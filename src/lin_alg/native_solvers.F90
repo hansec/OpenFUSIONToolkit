@@ -226,6 +226,12 @@ type, public, extends(oft_solver) :: oft_ml_precond
   class(oft_vector), pointer :: ucors => NULL() !< Temporary coarse vector
   class(oft_vector), pointer :: gcors => NULL() !< Temporary coarse vector
   class(oft_ml_vecspace), pointer :: ml_vecspace => NULL() !< Multi-level vector space
+  integer(i4) :: kcycle = 0 !< Number of flexible Krylov steps for coarse correction (K-cycle, 0 -> V-cycle)
+  logical :: cscale = .FALSE. !< Scale coarse correction to minimize fine-level residual
+  type(oft_vector_ptr), pointer, dimension(:) :: kv => NULL() !< K-cycle Krylov basis (coarse level)
+  type(oft_vector_ptr), pointer, dimension(:) :: kz => NULL() !< K-cycle preconditioned basis (coarse level)
+  class(oft_vector), pointer :: kw => NULL() !< K-cycle work vector (coarse level)
+  class(oft_vector), pointer :: ap => NULL() !< Correction scaling work vector (fine level)
 contains
   !> Apply smoother
   procedure :: apply => ml_precond_apply
@@ -1834,16 +1840,24 @@ if(associated(self%base_solve))then
   self%timings(2)=self%timings(2)+mytimer%tock()
   CALL mytimer%tick
   !---Apply lower level smoother
-  self%base_solve%full_residual=.FALSE.
-  call self%base_solve%apply(self%ucors,self%gcors)
-  self%base_solve%full_residual=.TRUE.
+  IF(self%kcycle>0)THEN
+    CALL kcycle_correction
+  ELSE
+    self%base_solve%full_residual=.FALSE.
+    call self%base_solve%apply(self%ucors,self%gcors)
+    self%base_solve%full_residual=.TRUE.
+  END IF
   self%timings(3)=self%timings(3)+mytimer%tock()
   CALL mytimer%tick
   !---Interpolate Solution
   CALL self%ml_vecspace%interp(self%ucors,self%p)
   if(associated(self%bc))call self%bc%apply(self%p)
   !---Add coarse correction
-  call u%add(1.d0,1.d0,self%p)
+  IF(self%cscale)THEN
+    CALL scale_correction
+  ELSE
+    call u%add(1.d0,1.d0,self%p)
+  END IF
   self%timings(4)=self%timings(4)+mytimer%tock()
 end if
 !---Reset RHS
@@ -1869,6 +1883,136 @@ IF(self%report_err>0)CALL print_residual('Out:')
 !---Complete
 DEBUG_STACK_POP
 contains
+!------------------------------------------------------------------------------
+!> Compute coarse correction using `kcycle` steps of flexible GMRES on the
+!! coarse operator, preconditioned by the next coarser cycle (Notay & Vassilevski K-cycle)
+!------------------------------------------------------------------------------
+subroutine kcycle_correction
+class(oft_matrix), pointer :: Ac
+integer(i4) :: j,k,nk,nused
+real(r8) :: beta,tmp,hr
+real(r8), allocatable :: hmat(:,:),cs(:),sn(:),sres(:),y(:)
+!---Get coarse operator (fall back to plain coarse solve if unavailable)
+NULLIFY(Ac)
+SELECT TYPE(this=>self%base_solve)
+  CLASS IS(oft_ml_trans)
+    NULLIFY(Ac)
+  CLASS IS(oft_ml_precond)
+    IF(ASSOCIATED(this%A))THEN
+      Ac=>this%A
+    ELSE IF(ASSOCIATED(this%smooth_up))THEN
+      Ac=>this%smooth_up%A
+    ELSE IF(ASSOCIATED(this%smooth_down))THEN
+      Ac=>this%smooth_down%A
+    END IF
+  CLASS DEFAULT
+    IF(ASSOCIATED(self%base_solve%A))Ac=>self%base_solve%A
+END SELECT
+IF(.NOT.ASSOCIATED(Ac))THEN
+  self%base_solve%full_residual=.FALSE.
+  call self%base_solve%apply(self%ucors,self%gcors)
+  self%base_solve%full_residual=.TRUE.
+  RETURN
+END IF
+nk=self%kcycle
+!---Allocate Krylov storage on first use
+IF(.NOT.ASSOCIATED(self%kv))THEN
+  ALLOCATE(self%kv(nk),self%kz(nk))
+  DO j=1,nk
+    CALL self%ml_vecspace%vec_create(self%kv(j)%f,self%level-1)
+    CALL self%ml_vecspace%vec_create(self%kz(j)%f,self%level-1)
+  END DO
+  CALL self%ml_vecspace%vec_create(self%kw,self%level-1)
+END IF
+ALLOCATE(hmat(nk+1,nk),cs(nk),sn(nk),sres(nk+1),y(nk))
+hmat=0.d0; cs=0.d0; sn=0.d0; sres=0.d0; y=0.d0
+CALL self%ucors%set(0.d0)
+beta=SQRT(clamp_nonneg(self%gcors%dot(self%gcors)))
+IF(beta<=0.d0)THEN
+  DEALLOCATE(hmat,cs,sn,sres,y)
+  RETURN
+END IF
+CALL self%kv(1)%f%add(0.d0,1.d0/beta,self%gcors)
+sres(1)=beta
+nused=0
+DO j=1,nk
+  !---Precondition with next coarser cycle
+  CALL self%kw%add(0.d0,1.d0,self%kv(j)%f)
+  CALL self%kz(j)%f%set(0.d0)
+  self%base_solve%full_residual=.FALSE.
+  CALL self%base_solve%apply(self%kz(j)%f,self%kw)
+  self%base_solve%full_residual=.TRUE.
+  !---Arnoldi step (modified Gram-Schmidt)
+  CALL Ac%apply(self%kz(j)%f,self%kw)
+  DO k=1,j
+    hmat(k,j)=self%kw%dot(self%kv(k)%f)
+    CALL self%kw%add(1.d0,-hmat(k,j),self%kv(k)%f)
+  END DO
+  hmat(j+1,j)=SQRT(clamp_nonneg(self%kw%dot(self%kw)))
+  IF((j<nk).AND.(hmat(j+1,j)>0.d0))CALL self%kv(j+1)%f%add(0.d0,1.d0/hmat(j+1,j),self%kw)
+  !---Apply previous Givens rotations
+  DO k=1,j-1
+    tmp=cs(k)*hmat(k,j)+sn(k)*hmat(k+1,j)
+    hmat(k+1,j)=-sn(k)*hmat(k,j)+cs(k)*hmat(k+1,j)
+    hmat(k,j)=tmp
+  END DO
+  !---New rotation
+  hr=SQRT(hmat(j,j)**2+hmat(j+1,j)**2)
+  IF(hr<=0.d0)EXIT
+  cs(j)=hmat(j,j)/hr
+  sn(j)=hmat(j+1,j)/hr
+  hmat(j,j)=hr
+  hmat(j+1,j)=0.d0
+  sres(j+1)=-sn(j)*sres(j)
+  sres(j)=cs(j)*sres(j)
+  nused=j
+  IF(ABS(sres(j+1))<=0.d0)EXIT
+END DO
+!---Back substitution and update
+DO j=nused,1,-1
+  y(j)=sres(j)
+  DO k=j+1,nused
+    y(j)=y(j)-hmat(j,k)*y(k)
+  END DO
+  y(j)=y(j)/hmat(j,j)
+END DO
+DO j=1,nused
+  CALL self%ucors%add(1.d0,y(j),self%kz(j)%f)
+END DO
+DEALLOCATE(hmat,cs,sn,sres,y)
+end subroutine kcycle_correction
+!------------------------------------------------------------------------------
+!> Add coarse correction scaled by the factor that minimizes the fine-level
+!! residual, alpha = (r,Ap)/(Ap,Ap)
+!------------------------------------------------------------------------------
+subroutine scale_correction
+class(oft_matrix), pointer :: Af
+real(r8) :: alpha,apap
+NULLIFY(Af)
+IF(ASSOCIATED(self%A))THEN
+  Af=>self%A
+ELSE IF(ASSOCIATED(self%smooth_down))THEN
+  Af=>self%smooth_down%A
+ELSE IF(ASSOCIATED(self%smooth_up))THEN
+  Af=>self%smooth_up%A
+END IF
+IF(.NOT.ASSOCIATED(Af))THEN
+  call u%add(1.d0,1.d0,self%p)
+  RETURN
+END IF
+IF(.NOT.ASSOCIATED(self%ap))CALL u%new(self%ap)
+!---Current residual (g already holds residual after down-smoothing)
+IF(.NOT.ASSOCIATED(self%smooth_down))THEN
+  CALL Af%apply(u,self%ap)
+  CALL g%add(1.d0,-1.d0,self%ap)
+END IF
+CALL Af%apply(self%p,self%ap)
+apap=self%ap%dot(self%ap)
+alpha=1.d0
+IF(apap>0.d0)alpha=g%dot(self%ap)/apap
+IF(self%report_err>0.AND.oft_env%head_proc)WRITE(*,'(2X,A,I4,ES14.6)')'Coarse scale',self%level,alpha
+call u%add(1.d0,alpha,self%p)
+end subroutine scale_correction
 subroutine print_residual(stage)
 character(LEN=*), intent(in) :: stage
 class(oft_vector), pointer :: gtmp
@@ -1919,6 +2063,7 @@ end subroutine ml_precond_update
 recursive subroutine ml_precond_delete(self,propogate)
 class(oft_ml_precond), intent(inout) :: self !< Solver object
 LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 if(ASSOCIATED(self%smooth_up))then
   call self%smooth_up%delete(propogate)
@@ -1939,6 +2084,20 @@ end if
 ! IF(ASSOCIATED(self%interp))NULLIFY(self%interp)
 ! IF(ASSOCIATED(self%inject))NULLIFY(self%inject)
 ! IF(ASSOCIATED(self%vec_create))NULLIFY(self%vec_create)
+IF(ASSOCIATED(self%kv))THEN
+  DO i=1,SIZE(self%kv)
+    CALL self%kv(i)%f%delete
+    CALL self%kz(i)%f%delete
+    DEALLOCATE(self%kv(i)%f,self%kz(i)%f)
+  END DO
+  DEALLOCATE(self%kv,self%kz)
+  CALL self%kw%delete
+  DEALLOCATE(self%kw)
+END IF
+IF(ASSOCIATED(self%ap))THEN
+  CALL self%ap%delete
+  DEALLOCATE(self%ap)
+END IF
 IF(ASSOCIATED(self%ml_vecspace))NULLIFY(self%ml_vecspace)
 IF(ASSOCIATED(self%bc))NULLIFY(self%bc)
 IF(self%initialized)THEN
