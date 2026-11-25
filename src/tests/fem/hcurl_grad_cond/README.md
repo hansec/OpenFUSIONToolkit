@@ -7,7 +7,7 @@ This directory records a study of the conditioning of MUG's B-field block. The s
 
 It holds this report, the offline analysis scripts, the MUG run drivers, and the raw results. None of it is part of the regression suite. The only compiled piece is the diagnostic driver `../diag_hcurl_grad_cond.F90`, which writes the matrices and block structures that the scripts read.
 
-**No basis or solver sources were changed.** Branch: `claude/pmg-hcurl-basis-conditioning`.
+**No basis or solver sources were changed by this study.** The branch does merge the existing vertex-star `type="patch"` smoother from `claude/pmg-structure-aware-smoothers` so that it could be evaluated (§12). Branch: `claude/pmg-hcurl-basis-conditioning`.
 
 ## Contents
 
@@ -23,6 +23,7 @@ It holds this report, the offline analysis scripts, the MUG run drivers, and the
 - [9. Interpretation](#9-interpretation)
 - [10. Caveats](#10-caveats)
 - [11. Reproducing](#11-reproducing)
+- [12. Evaluation of the existing vertex-star patch smoother](#12-evaluation-of-the-existing-vertex-star-patch-smoother)
 
 ## Summary and recommendation
 
@@ -48,8 +49,9 @@ It holds this report, the offline analysis scripts, the MUG run drivers, and the
    - cell overlap 1 where memory allows, otherwise cell overlap 0 or `loverlap` (§5).
 
    Plain block Jacobi, METIS-partitioned or entity-aligned, is 3–5× worse.
+5. **The existing all-field patch smoother (§12) is a good small-dt smoother but fails at large dt.** At dt ≤ 1e-5 it matches the overlapping-Schwarz iteration counts with 2.5–9× less memory. At dt = 1e-4 the time-step controller has to cut dt 4–8×, and at H(Curl) p = 3 the run fails. Using it only as the down-smoother adds nothing at large dt. This matches the parent report and points to B-only stars in a field split as the next step.
 
-### Proposed follow-up (not started; needs approval)
+### Follow-up (step 1 done, see §12; steps 2–4 need approval)
 
 **A vertex-star smoother already exists.** It is on branch `claude/pmg-structure-aware-smoothers`:
 - implementation commit `2c4919e`: native preconditioner `type="patch"` in `src/lin_alg/oft_patch_solvers.F90`, plus the vertex-star builder `comp_fem_vertex_patches` in `src/fem/fem_utils.F90`, attached on every MUG MG level;
@@ -439,3 +441,107 @@ The global iis transform is not computed for ref p = 3 (n > 9000).
 4. The MUG drivers are in `mug/`. They expect the test executables (`test_alfven`, `test_alfven_lag`) or the spheromak example binary next to the run directories.
 
 Raw outputs are in `results/`.
+
+## 12. Evaluation of the existing vertex-star patch smoother
+
+### What was merged
+
+Branch `claude/pmg-structure-aware-smoothers` (implementation commit `2c4919e`) was merged into this branch (merge commit `4e5a75b`). It brings:
+- `src/lin_alg/oft_patch_solvers.F90`: native preconditioner `<pre type="patch">`, with dense-LU overlapping patches applied additively, multiplicatively or symmetrically (`<mode>symmetric</mode>`);
+- `comp_fem_vertex_patches` in `src/fem/fem_utils.F90`, attached as `ops%J%patch_info` on every MG level in `xmhd.F90` and `xmhd_lag.F90`.
+
+The patches are vertex stars over **all fields** (B, V, n, T together), not the B-only stars of §8.
+
+Conflicts with the cell-adjacency Schwarz work were resolved by keeping both sides:
+- `oft_matrix` carries both `cell_ovl` and `patch_info`;
+- `solver_utils.F90` has both `add_schwarz` and `patch` cases;
+- `mat_delete` nullifies `cell_ovl` and calls `matrix_delete_patches`;
+- MUG builds both the cell-overlap structure and the vertex patches;
+- both sets of tests are registered in `tests/lin_alg` and `tests/physics/MUG`;
+- `mug_command` in `mug_testing.py` takes both `mg_xml` and `xml`.
+
+### Regression tests after the merge
+
+Run from `builds/build_release/tests` with `OMP_NUM_THREADS=2`:
+
+| tests | result |
+|---|---|
+| `lin_alg/test_native_patch.py` | 11 passed |
+| `lin_alg/test_native_schwarz.py` | 6 passed (196 s) |
+| `physics/MUG/test_alfven*.py -k patch` (H(Curl) and Lagrange) | 4 passed |
+| `physics/MUG/test_MUG_schwarz.py` | 16 passed |
+
+The first `test_native_schwarz.py` run had one failure, `test_schwarz_periodic[mpi4]`, which hit the 240 s timeout. It ran at the same time as a 12.5 GB MUG run. Run alone, all 6 tests pass. (MPI tests in this container need `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1`.)
+
+### Alfvén cube runs
+
+Same setup as §5:
+- refined cube, 768 tets;
+- 2 mesh levels, so MG levels p = 1..p;
+- 8 parts per level;
+- 6 steps;
+- `lin_tol=1e-9`, `nl_tol=1e-5`.
+
+Smoothers (driver `mug/alfven/sweep3.py`):
+
+| name | configuration |
+|---|---|
+| `patch` | p-MG, GMRES(2) smoother with symmetric patch, down and up |
+| `patch1` | one-level GMRES(2) + symmetric patch (no MG) |
+| `hyb0` | p-MG, patch down, GMRES(2) + cell Schwarz overlap 0 up |
+| `hyb1` | p-MG, patch down, GMRES(2) + cell Schwarz overlap 1 up |
+| `hybov` | p-MG, patch down, GMRES(2) + block Jacobi `nlocal=8` with `loverlap` up (the configuration in the patch report) |
+
+Peak RSS is the peak of the child process (`mug/alfven/memrun.py`). **When a linear solve fails, MUG's time-step controller cuts dt and retries**, so iteration counts at dt = 1e-4 must be read with the mean dt actually taken. Entries are average linear iterations per step, and peak RSS in GB.
+
+**H(Curl) B:**
+
+| dt | p | `patch` | `patch1` | `hyb0` | `hyb1` | `hybov` |
+|---|---|---|---|---|---|---|
+| 8e-7 | 2 | 1.0, 0.37 | 1.2, 0.34 | 1.0, 0.99 | 1.0, 2.68 | 1.0, 1.12 |
+| 8e-7 | 3 | 1.0, 2.02 | 1.2, 1.77 | 1.0, 5.00 | 1.0, 12.5 | 1.0, 5.15 |
+| 1e-5 | 2 | 3.0, 0.37 | 4.7, 0.34 | 2.8, 1.00 | 2.0, 2.73 | 2.0, 1.11 |
+| 1e-5 | 3 | 3.0, 2.04 | 7.2, 1.77 | 3.0, 5.07 | 2.0, 12.6 | 3.0, 5.09 |
+| 1e-4 | 2 | 3.8 **at dt≈1.2e-5** | 5.7 **at dt≈1.2e-5** | 124.5 (dt≈9.3e-5) | 11.5, 7.47 | 35.7, 2.16 |
+| 1e-4 | 3 | **NL solver failed** | **NL solver failed** | 67.8 **at dt≈5.6e-5**, 9.26 | UMFPACK failed (13.5) | UMFPACK failed (10.4) |
+
+**Vector-Lagrange B:**
+
+| dt | p | `patch` | `patch1` | `hyb0` | `hyb1` | `hybov` |
+|---|---|---|---|---|---|---|
+| 8e-7 | 2 | 1.0, 0.22 | 1.2, 0.21 | 1.0, 0.68 | 1.0, 1.68 | 1.0, 0.72 |
+| 8e-7 | 3 | 1.0, 1.26 | 1.2, 1.09 | 1.0, 3.96 | 1.0, 11.1 | 1.0, 3.94 |
+| 1e-5 | 2 | 3.7, 0.22 | 5.2, 0.21 | 2.2, 0.67 | 2.0, 1.66 | 2.0, 0.72 |
+| 1e-5 | 3 | 3.0, 1.26 | 6.5, 1.09 | 3.0, 3.95 | 2.0, 11.1 | 2.2, 4.00 |
+| 1e-4 | 2 | 31.5 **at dt≈2.5e-5** | 99 **at dt≈2.6e-5** | 48.3, 0.68 | 10.0, 1.70 | 23.3, 0.70 |
+| 1e-4 | 3 | 39.7 (max 123) **at dt≈1.7e-5** | 22.0 **at dt≈1.5e-5** | 53.2, 3.93 | 10.3, 11.1 | 26.7, 3.93 |
+
+For reference, the §5 baselines at dt = 1e-4, p = 2 (H(Curl) / Lagrange) are cell ov0 122 / 48 and cell ov1 11.5 / 9.8. `hyb0` and `hyb1` reproduce them almost exactly. Raw output: `results/patch_alfven.txt`.
+
+### Findings
+
+1. **Small dt (8e-7 and 1e-5): the patch smoother works well and is cheap.**
+   - p-MG with patch takes 1–3.7 iterations per step, close to cell overlap 1 (1–2) and equal to cell overlap 0 and `loverlap` (1–3).
+   - Its peak memory is 2.5–3× lower than the overlap-0/`loverlap` hybrids and 6–9× lower than cell overlap 1. At H(Curl) p = 3 it uses 2.0 GB vs 5.0 and 12.5 GB.
+   - It is also faster in wall time than every hybrid.
+   - The p-MG coarse correction matters: one-level patch needs 1.4–2.4× more iterations at dt = 1e-5.
+   - Both B representations behave the same way.
+2. **Large dt (1e-4): the all-field patch smoother fails, as the parent report found.**
+   - Every pure-patch run (MG or one-level, both representations) had its time step cut by the controller, to 12–26% of the requested dt. The low iteration counts in those rows are at that much smaller dt.
+   - At H(Curl) p = 3 the nonlinear solver fails and the run aborts.
+   - With Lagrange B at p = 3, iterations at the reduced dt still reach 123 in one step.
+   - This is consistent with the coupled B–V star blocks becoming nearly singular at CFL ≳ 1.
+3. **Using patch only as the down-smoother does not help at large dt.**
+   - `hyb0` and `hyb1` give the same iteration counts as cell overlap 0 and 1 alone (§5), so the up-smoother sets the rate.
+   - The patch adds memory and set-up time without reducing iterations.
+   - `hyb0` at H(Curl) p = 3 still needed a dt cut to about 5.6e-5.
+   - `hybov` is worse than the §5 `loverlap` baseline. The two are not the same configuration: `hybov` uses 8 local blocks per part, §5 used 1.
+   - At H(Curl) p = 3, `hyb1` and `hybov` fail in the UMFPACK factorization of the overlapping blocks, as cell overlap 1 already did in §5.
+4. **What this means for the B block.**
+   - The small-dt success agrees with §8: stars hold the coupled gradient/rotational pairs.
+   - The large-dt failure is in the coupled problem; it is not seen in the B-only star analysis, which stayed robust up to CFL 10.
+   - This is not yet proof that B-only stars survive in MUG at dt = 1e-4: the Alfvén (B–V) coupling dominates there (§5), and a B-only star smoother leaves it to the V-block smoother and the outer Krylov method.
+
+### Next step (needs approval)
+
+Implement **B-only vertex stars inside a field split**: stars restricted to the B DOFs (both Bc and Bg fields), with V, n and T smoothed by block Jacobi or cell Schwarz, applied multiplicatively or additively. The current `comp_fem_vertex_patches` builds all-field patches, so this needs a code change: a field mask in the patch builder, or a field-split wrapper. Then rerun this sweep at dt = 1e-5 and 1e-4, plus the spheromak case. If B-only stars also fail at dt = 1e-4, the bottleneck is the Alfvén coupling and needs a physics-based (Schur or auxiliary) preconditioner rather than a better B smoother.

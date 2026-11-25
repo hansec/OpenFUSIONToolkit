@@ -1,0 +1,122 @@
+hcurl_L2_p2_dt8.E-7_patch                ok=True steps=6 avg_lin=1.0 max_lin=1 rss=0.37GB wall=11s
+hcurl_L2_p2_dt8.E-7_patch1               ok=True steps=6 avg_lin=1.2 max_lin=2 rss=0.34GB wall=7s
+hcurl_L2_p2_dt8.E-7_hyb0                 ok=True steps=6 avg_lin=1.0 max_lin=1 rss=0.99GB wall=19s
+hcurl_L2_p2_dt8.E-7_hyb1                 ok=True steps=6 avg_lin=1.0 max_lin=1 rss=2.68GB wall=62s
+hcurl_L2_p2_dt8.E-7_hybov                ok=True steps=6 avg_lin=1.0 max_lin=1 rss=1.12GB wall=20s
+hcurl_L2_p3_dt8.E-7_patch                ok=True steps=6 avg_lin=1.0 max_lin=1 rss=2.02GB wall=58s
+hcurl_L2_p3_dt8.E-7_patch1               ok=True steps=6 avg_lin=1.2 max_lin=2 rss=1.77GB wall=49s
+hcurl_L2_p3_dt8.E-7_hyb0                 ok=True steps=6 avg_lin=1.0 max_lin=1 rss=5.00GB wall=88s
+hcurl_L2_p3_dt8.E-7_hyb1                 ok=True steps=6 avg_lin=1.0 max_lin=1 rss=12.53GB wall=222s
+hcurl_L2_p3_dt8.E-7_hybov                ok=True steps=6 avg_lin=1.0 max_lin=1 rss=5.15GB wall=73s
+hcurl_L2_p2_dt1.E-5_patch                ok=True steps=6 avg_lin=3.0 max_lin=3 rss=0.37GB wall=6s
+hcurl_L2_p2_dt1.E-5_patch1               ok=True steps=6 avg_lin=4.7 max_lin=5 rss=0.34GB wall=7s
+hcurl_L2_p2_dt1.E-5_hyb0                 ok=True steps=6 avg_lin=2.8 max_lin=3 rss=1.00GB wall=11s
+hcurl_L2_p2_dt1.E-5_hyb1                 ok=True steps=6 avg_lin=2.0 max_lin=2 rss=2.73GB wall=26s
+hcurl_L2_p2_dt1.E-5_hybov                ok=True steps=6 avg_lin=2.0 max_lin=2 rss=1.11GB wall=11s
+hcurl_L2_p3_dt1.E-5_patch                ok=True steps=6 avg_lin=3.0 max_lin=3 rss=2.04GB wall=39s
+hcurl_L2_p3_dt1.E-5_patch1               ok=True steps=6 avg_lin=7.2 max_lin=8 rss=1.77GB wall=45s
+hcurl_L2_p3_dt1.E-5_hyb0                 ok=True steps=6 avg_lin=3.0 max_lin=3 rss=5.07GB wall=68s
+hcurl_L2_p3_dt1.E-5_hyb1                 ok=True steps=6 avg_lin=2.0 max_lin=2 rss=12.58GB wall=166s
+hcurl_L2_p3_dt1.E-5_hybov                ok=True steps=6 avg_lin=3.0 max_lin=3 rss=5.09GB wall=65s
+hcurl_L2_p2_dt1.E-4_patch                ok=True steps=6 avg_lin=3.8 max_lin=5 rss=0.37GB wall=98s
+hcurl_L2_p2_dt1.E-4_patch1               ok=True steps=6 avg_lin=5.7 max_lin=7 rss=0.34GB wall=87s
+hcurl_L2_p2_dt1.E-4_hyb0                 ok=True steps=6 avg_lin=124.5 max_lin=137 rss=1.53GB wall=225s
+hcurl_L2_p2_dt1.E-4_hyb1                 ok=True steps=6 avg_lin=11.5 max_lin=12 rss=7.47GB wall=257s
+hcurl_L2_p2_dt1.E-4_hybov                ok=True steps=6 avg_lin=35.7 max_lin=37 rss=2.16GB wall=110s
+hcurl_L2_p3_dt1.E-4_patch                ok=False steps=0 avg_lin=nan max_lin=- rss=2.02GB wall=569s
+hcurl_L2_p3_dt1.E-4_patch1               ok=False steps=0 avg_lin=nan max_lin=- rss=1.75GB wall=446s
+hcurl_L2_p3_dt1.E-4_hyb0                 ok=True steps=6 avg_lin=67.8 max_lin=86 rss=9.26GB wall=1308s
+hcurl_L2_p3_dt1.E-4_hyb1                 ok=False steps=0 avg_lin=nan max_lin=- rss=13.51GB wall=171s
+hcurl_L2_p3_dt1.E-4_hybov                ok=False steps=0 avg_lin=nan max_lin=- rss=10.41GB wall=113s
+lag_L2_p2_dt8.E-7_patch                  ok=True steps=6 avg_lin=1.0 max_lin=1 rss=0.22GB wall=3s
+lag_L2_p2_dt8.E-7_patch1                 ok=True steps=6 avg_lin=1.2 max_lin=2 rss=0.21GB wall=3s
+lag_L2_p2_dt8.E-7_hyb0                   ok=True steps=6 avg_lin=1.0 max_lin=1 rss=0.68GB wall=7s
+lag_L2_p2_dt8.E-7_hyb1                   ok=True steps=6 avg_lin=1.0 max_lin=1 rss=1.68GB wall=13s
+lag_L2_p2_dt8.E-7_hybov                  ok=True steps=6 avg_lin=1.0 max_lin=1 rss=0.72GB wall=6s
+lag_L2_p3_dt8.E-7_patch                  ok=True steps=6 avg_lin=1.0 max_lin=1 rss=1.26GB wall=19s
+lag_L2_p3_dt8.E-7_patch1                 ok=True steps=6 avg_lin=1.2 max_lin=2 rss=1.09GB wall=16s
+lag_L2_p3_dt8.E-7_hyb0                   ok=True steps=6 avg_lin=1.0 max_lin=1 rss=3.96GB wall=38s
+lag_L2_p3_dt8.E-7_hyb1                   ok=True steps=6 avg_lin=1.0 max_lin=1 rss=11.05GB wall=120s
+lag_L2_p3_dt8.E-7_hybov                  ok=True steps=6 avg_lin=1.0 max_lin=1 rss=3.94GB wall=40s
+lag_L2_p2_dt1.E-5_patch                  ok=True steps=6 avg_lin=3.7 max_lin=4 rss=0.22GB wall=4s
+lag_L2_p2_dt1.E-5_patch1                 ok=True steps=6 avg_lin=5.2 max_lin=6 rss=0.21GB wall=4s
+lag_L2_p2_dt1.E-5_hyb0                   ok=True steps=6 avg_lin=2.2 max_lin=3 rss=0.67GB wall=7s
+lag_L2_p2_dt1.E-5_hyb1                   ok=True steps=6 avg_lin=2.0 max_lin=2 rss=1.66GB wall=15s
+lag_L2_p2_dt1.E-5_hybov                  ok=True steps=6 avg_lin=2.0 max_lin=2 rss=0.72GB wall=6s
+lag_L2_p3_dt1.E-5_patch                  ok=True steps=6 avg_lin=3.0 max_lin=3 rss=1.26GB wall=25s
+lag_L2_p3_dt1.E-5_patch1                 ok=True steps=6 avg_lin=6.5 max_lin=7 rss=1.09GB wall=27s
+lag_L2_p3_dt1.E-5_hyb0                   ok=True steps=6 avg_lin=3.0 max_lin=3 rss=3.95GB wall=47s
+lag_L2_p3_dt1.E-5_hyb1                   ok=True steps=6 avg_lin=2.0 max_lin=2 rss=11.05GB wall=129s
+lag_L2_p3_dt1.E-5_hybov                  ok=True steps=6 avg_lin=2.2 max_lin=3 rss=4.00GB wall=43s
+lag_L2_p2_dt1.E-4_patch                  ok=True steps=6 avg_lin=31.5 max_lin=58 rss=0.22GB wall=47s
+lag_L2_p2_dt1.E-4_patch1                 ok=True steps=6 avg_lin=99.0 max_lin=139 rss=0.21GB wall=51s
+lag_L2_p2_dt1.E-4_hyb0                   ok=True steps=6 avg_lin=48.3 max_lin=50 rss=0.68GB wall=37s
+lag_L2_p2_dt1.E-4_hyb1                   ok=True steps=6 avg_lin=10.0 max_lin=10 rss=1.70GB wall=25s
+lag_L2_p2_dt1.E-4_hybov                  ok=True steps=6 avg_lin=23.3 max_lin=24 rss=0.70GB wall=22s
+lag_L2_p3_dt1.E-4_patch                  ok=True steps=6 avg_lin=39.7 max_lin=123 rss=1.26GB wall=387s
+lag_L2_p3_dt1.E-4_patch1                 ok=True steps=6 avg_lin=22.0 max_lin=50 rss=1.09GB wall=348s
+lag_L2_p3_dt1.E-4_hyb0                   ok=True steps=6 avg_lin=53.2 max_lin=55 rss=3.93GB wall=265s
+lag_L2_p3_dt1.E-4_hyb1                   ok=True steps=6 avg_lin=10.3 max_lin=11 rss=11.06GB wall=226s
+lag_L2_p3_dt1.E-4_hybov                  ok=True steps=6 avg_lin=26.7 max_lin=27 rss=3.93GB wall=167s
+
+# Actual time steps (the controller cuts dt when a linear solve fails)
+run_hcurl_L2_p2_dt8.E-7_patch        steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p2_dt8.E-7_patch1       steps=6 avg_lin=1.2 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p2_dt8.E-7_hyb0         steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p2_dt8.E-7_hyb1         steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p2_dt8.E-7_hybov        steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p3_dt8.E-7_patch        steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p3_dt8.E-7_patch1       steps=6 avg_lin=1.2 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p3_dt8.E-7_hyb0         steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p3_dt8.E-7_hyb1         steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p3_dt8.E-7_hybov        steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_hcurl_L2_p2_dt1.E-5_patch        steps=6 avg_lin=3.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p2_dt1.E-5_patch1       steps=6 avg_lin=4.7 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p2_dt1.E-5_hyb0         steps=6 avg_lin=2.8 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p2_dt1.E-5_hyb1         steps=6 avg_lin=2.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p2_dt1.E-5_hybov        steps=6 avg_lin=2.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p3_dt1.E-5_patch        steps=6 avg_lin=3.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p3_dt1.E-5_patch1       steps=6 avg_lin=7.2 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p3_dt1.E-5_hyb0         steps=6 avg_lin=3.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p3_dt1.E-5_hyb1         steps=6 avg_lin=2.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p3_dt1.E-5_hybov        steps=6 avg_lin=3.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_hcurl_L2_p2_dt1.E-4_patch        steps=6 avg_lin=3.8 mean_dt=1.21e-05 min_dt=9.06e-06 ratio=0.12
+run_hcurl_L2_p2_dt1.E-4_patch1       steps=6 avg_lin=5.7 mean_dt=1.20e-05 min_dt=8.98e-06 ratio=0.12
+run_hcurl_L2_p2_dt1.E-4_hyb0         steps=6 avg_lin=124.5 mean_dt=9.29e-05 min_dt=8.60e-05 ratio=0.93
+run_hcurl_L2_p2_dt1.E-4_hyb1         steps=6 avg_lin=11.5 mean_dt=1.00e-04 min_dt=1.00e-04 ratio=1.00
+run_hcurl_L2_p2_dt1.E-4_hybov        steps=6 avg_lin=35.7 mean_dt=1.00e-04 min_dt=1.00e-04 ratio=1.00
+run_hcurl_L2_p3_dt1.E-4_patch FAILED
+run_hcurl_L2_p3_dt1.E-4_patch1 FAILED
+run_hcurl_L2_p3_dt1.E-4_hyb0         steps=6 avg_lin=67.8 mean_dt=5.63e-05 min_dt=5.00e-05 ratio=0.56
+run_hcurl_L2_p3_dt1.E-4_hyb1 FAILED
+run_hcurl_L2_p3_dt1.E-4_hybov FAILED
+run_lag_L2_p2_dt8.E-7_patch          steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p2_dt8.E-7_patch1         steps=6 avg_lin=1.2 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p2_dt8.E-7_hyb0           steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p2_dt8.E-7_hyb1           steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p2_dt8.E-7_hybov          steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p3_dt8.E-7_patch          steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p3_dt8.E-7_patch1         steps=6 avg_lin=1.2 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p3_dt8.E-7_hyb0           steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p3_dt8.E-7_hyb1           steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p3_dt8.E-7_hybov          steps=6 avg_lin=1.0 mean_dt=8.00e-07 min_dt=8.00e-07 ratio=1.00
+run_lag_L2_p2_dt1.E-5_patch          steps=6 avg_lin=3.7 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p2_dt1.E-5_patch1         steps=6 avg_lin=5.2 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p2_dt1.E-5_hyb0           steps=6 avg_lin=2.2 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p2_dt1.E-5_hyb1           steps=6 avg_lin=2.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p2_dt1.E-5_hybov          steps=6 avg_lin=2.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p3_dt1.E-5_patch          steps=6 avg_lin=3.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p3_dt1.E-5_patch1         steps=6 avg_lin=6.5 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p3_dt1.E-5_hyb0           steps=6 avg_lin=3.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p3_dt1.E-5_hyb1           steps=6 avg_lin=2.0 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p3_dt1.E-5_hybov          steps=6 avg_lin=2.2 mean_dt=1.00e-05 min_dt=1.00e-05 ratio=1.00
+run_lag_L2_p2_dt1.E-4_patch          steps=6 avg_lin=31.5 mean_dt=2.47e-05 min_dt=1.69e-05 ratio=0.25
+run_lag_L2_p2_dt1.E-4_patch1         steps=6 avg_lin=99.0 mean_dt=2.59e-05 min_dt=2.50e-05 ratio=0.26
+run_lag_L2_p2_dt1.E-4_hyb0           steps=6 avg_lin=48.3 mean_dt=1.00e-04 min_dt=1.00e-04 ratio=1.00
+run_lag_L2_p2_dt1.E-4_hyb1           steps=6 avg_lin=10.0 mean_dt=1.00e-04 min_dt=1.00e-04 ratio=1.00
+run_lag_L2_p2_dt1.E-4_hybov          steps=6 avg_lin=23.3 mean_dt=1.00e-04 min_dt=1.00e-04 ratio=1.00
+run_lag_L2_p3_dt1.E-4_patch          steps=6 avg_lin=39.7 mean_dt=1.73e-05 min_dt=1.25e-05 ratio=0.17
+run_lag_L2_p3_dt1.E-4_patch1         steps=6 avg_lin=22.0 mean_dt=1.51e-05 min_dt=1.13e-05 ratio=0.15
+run_lag_L2_p3_dt1.E-4_hyb0           steps=6 avg_lin=53.2 mean_dt=1.00e-04 min_dt=1.00e-04 ratio=1.00
+run_lag_L2_p3_dt1.E-4_hyb1           steps=6 avg_lin=10.3 mean_dt=1.00e-04 min_dt=1.00e-04 ratio=1.00
+run_lag_L2_p3_dt1.E-4_hybov          steps=6 avg_lin=26.7 mean_dt=1.00e-04 min_dt=1.00e-04 ratio=1.00
