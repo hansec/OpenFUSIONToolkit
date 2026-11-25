@@ -315,8 +315,9 @@ On the tiny mesh the 8 overlapping RAS blocks nearly cover the whole mesh, so ρ
 | 2 | 10 | iih | 1.32e5 | 4.80e4 | 1.42e5 | 6743 | .9997 | 1.08 | 1.08 |
 | 2 | 10 | iis | 3.62e4 | 1.71e4 | 3.50e4 | 17.2 | .920 | 1.02 | 1.02 |
 | 2 | 10 | iisl | 1.79e5 | 5.19e4 | 1.77e5 | 645 | .997 | 1.06 | 1.06 |
+| 3 | 0 | i | 1651 | 299 | 1251 | 37.5 | .943 | .948 | – |
 
-Refined mesh, p = 3 (bases i, iii and iisl only): still running when this version was committed. Results will be added to `results/rebase_ref_p3.txt` and to this table.
+Refined mesh, p = 3: only the current basis at CFL 0 was computed. The run was then killed for exceeding memory (9.5 GB of dense local factors on the 8 RAS blocks of about 10⁴ DOFs each, while other jobs were also running). The other bases were not attempted again. The p = 3 row confirms the p = 2 picture: κ_bj and κ_ent grow with p, while ρ_2g,bj and ρ_2g,ras stay at about 0.94–0.95.
 
 ### Findings
 

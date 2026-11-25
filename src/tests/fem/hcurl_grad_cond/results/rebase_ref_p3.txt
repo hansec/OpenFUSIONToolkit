@@ -1,0 +1,11 @@
+  built i p=1 in 0.0s
+  built iih p=1 in 0.1s
+  built iis p=1 in 0.1s
+  built iisl p=1 in 0.0s
+  built i p=2 in 0.0s
+  built iih p=2 in 9.4s
+  built iis p=2 in 17.1s
+  built iisl p=2 in 5.5s
+  built i p=3 in 0.0s
+  built iisl p=3 in 55.0s
+ref p=3 cfl=0 i     k_diag=1651 k_bj=299.3 rho_bj=2.139 k_ent=1251 k_2lev=37.54 rho_2g_bjw=0.9429 xc=0.03373 rho_2g_ras=0.948  (2288s)
