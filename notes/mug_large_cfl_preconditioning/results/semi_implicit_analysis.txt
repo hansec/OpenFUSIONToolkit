@@ -1,0 +1,88 @@
+### si_analysis.py runs/sidump_1.E-5 runs/sidump_2.E-5 runs/sidump_4.E-5 (default s scan; sections 1-4)
+== 1. Affine check: ||J(dt3) - (M + jdt3 L)|| / ||J(dt3)|| = 3.486e-04
+   W consistency across dumps: ||W2-W1||/||W1|| = 2.117e-04, ||W3-W1||/||W1|| = 5.632e-04
+   constrained DOFs dropped: 544 of 3136
+   sizes: V 768, X 1824;  ||M_VX||/||M|| = 3.60e-02;  ||W - W^T||/||W|| = 1.00e-04
+== Semi-discrete spectrum: max |Im mu| (fastest wave) = 1.863e+05 rad/s; max Re mu = 1.09e+01
+== 2. W (continuum SI operator) vs Kr = -L_VX M_X^-1 L_XV (exact discrete ideal operator)
+   ||Kr - Kr^T||/||Kr|| = 4.48e-04;  ||W||/||Kr|| = 2.235
+   eig(W): [-1.827e+00, 2.748e+08];  eig(Kr): [-3.625e+00, 1.545e+08]  (negative parts are round-off relative to max)
+   max discrete ideal frequency = 1.863e+05 rad/s (full-system max |Im mu| = 1.863e+05)
+   Per-mode overestimate s_eff = (y W y)/(y Kr y) for discrete normal modes, binned by w/wmax:
+     w/wmax in [0.020,0.05): n=   2  s_eff min 8.124  median 8.433  max 8.74
+     w/wmax in [0.050,0.10): n=   4  s_eff min 6.623  median 67.332  max 426
+     w/wmax in [0.100,0.20): n=  43  s_eff min 1.084  median 3.405  max 46.7
+     w/wmax in [0.200,0.40): n= 109  s_eff min 1.079  median 5.423  max 31.2
+     w/wmax in [0.400,0.70): n= 193  s_eff min 1.124  median 3.260  max 12.3
+     w/wmax in [0.700,1.01): n= 144  s_eff min 1.205  median 2.204  max 3.4
+     w/wmax < 1e-3 (discrete null space, e.g. flows the H(curl) field cannot feel): n=273; their continuum freq sqrt(yWy/yMy)/wmax: median 0.001, max 1.583
+== 3. Spectral radius of one-step map (stable if <= 1)
+   dt        CFL     CN        SI s=0     SI s=0.5   SI s=1     SI s=1.25  SI s=1.5   SI s=2     SI s=4     
+   1e-05     1.9     1.000109  1.000109   1.000109   1.000109   1.000109   1.000109   1.000109   1.000109   
+   1e-04     18.6    1.001089  345.111825 4.954856   1.001089   1.001089   1.001089   1.001089   1.001089   
+   1e-03     186.3   1.010949  34387.1486415.813133   1.010932   1.010928   1.010924   1.010915   1.010883   
+   1e-02     1863.3  1.115160  3185062.7657255.962803   1.451394   1.103362   1.102844   1.101909   1.099179   
+== 4. Ideal-mode dispersion: median numerical/true frequency ratio, binned by w*dt (theta_max: SI stable iff <= 4)
+   dt=1e-05 s=1     theta_max=1.453 | wdt[0.01,0.3) n=18 SI 0.843 CN 0.994 | wdt[0.3,1) n=229 SI 0.812 CN 0.964 | wdt[1,3) n=248 SI 0.756 CN 0.880 |
+   dt=1e-05 s=1.25  theta_max=1.275 | wdt[0.01,0.3) n=18 SI 0.807 CN 0.994 | wdt[0.3,1) n=229 SI 0.769 CN 0.964 | wdt[1,3) n=248 SI 0.726 CN 0.882 |
+   dt=1e-05 s=2     theta_max=0.967 | wdt[0.01,0.3) n=16 SI 0.739 CN 0.995 | wdt[0.3,1) n=229 SI 0.678 CN 0.965 | wdt[1,3) n=250 SI 0.644 CN 0.889 |
+   dt=1e-04 s=1     theta_max=3.739 | wdt[0.3,1) n=1 SI 0.567 CN 0.929 | wdt[1,3) n=15 SI 0.208 CN 0.756 | wdt[3,10) n=345 SI 0.170 CN 0.372 | wdt[10,30) n=134 SI 0.138 CN 0.234 |
+   dt=1e-04 s=1.25  theta_max=3.018 | wdt[1,3) n=17 SI 0.258 CN 0.758 | wdt[3,10) n=341 SI 0.151 CN 0.375 | wdt[10,30) n=137 SI 0.119 CN 0.234 |
+   dt=1e-04 s=2     theta_max=1.912 | wdt[1,3) n=18 SI 0.197 CN 0.760 | wdt[3,10) n=335 SI 0.120 CN 0.381 | wdt[10,30) n=142 SI 0.089 CN 0.235 |
+   dt=1e-03 s=1     theta_max=3.997 | wdt[0.01,0.3) n=61 SI 0.998 CN 1.000 | wdt[1,3) n=2 SI 0.101 CN 0.739 | wdt[3,10) n=21 SI 0.058 CN 0.340 | wdt[10,30) n=129 SI 0.042 CN 0.139 | wdt[30,100) n=331 SI 0.035 CN 0.061 | wdt[100,1e+09) n=12 SI 0.017 CN 0.028 |
+   dt=1e-03 s=1.25  theta_max=3.199 | wdt[0.01,0.3) n=61 SI 0.998 CN 1.000 | wdt[1,3) n=3 SI 0.064 CN 0.770 | wdt[3,10) n=26 SI 0.063 CN 0.372 | wdt[10,30) n=163 SI 0.044 CN 0.147 | wdt[30,100) n=296 SI 0.032 CN 0.065 | wdt[100,1e+09) n=7 SI 0.014 CN 0.029 |
+   dt=1e-03 s=2     theta_max=2.000 | wdt[0.01,0.3) n=61 SI 0.997 CN 1.000 | wdt[0.3,1) n=1 SI 0.084 CN 0.931 | wdt[1,3) n=6 SI 0.101 CN 0.746 | wdt[3,10) n=60 SI 0.060 CN 0.346 | wdt[10,30) n=239 SI 0.047 CN 0.155 | wdt[30,100) n=187 SI 0.028 CN 0.071 | wdt[100,1e+09) n=2 SI 0.009 CN 0.026 |
+   dt=1e-02 s=1     theta_max=4.146 | wdt[0.01,0.3) n=82 SI 0.914 CN 0.999 | wdt[0.3,1) n=36 SI 0.809 CN 0.986 | wdt[1,3) n=75 SI 0.343 CN 0.734 | wdt[3,10) n=299 SI 0.270 CN 0.426 | wdt[10,30) n=95 SI 0.146 CN 0.214 | wdt[30,100) n=11 SI 0.045 CN 0.074 | wdt[100,1e+09) n=5 SI 0.010 CN 0.010 |
+   dt=1e-02 s=1.25  theta_max=3.351 | wdt[0.01,0.3) n=83 SI 0.894 CN 0.999 | wdt[0.3,1) n=36 SI 0.771 CN 0.986 | wdt[1,3) n=96 SI 0.344 CN 0.762 | wdt[3,10) n=317 SI 0.271 CN 0.450 | wdt[10,30) n=59 SI 0.120 CN 0.219 | wdt[30,100) n=8 SI 0.041 CN 0.061 | wdt[100,1e+09) n=4 SI 0.007 CN 0.010 |
+   dt=1e-02 s=2     theta_max=2.226 | wdt[0.01,0.3) n=82 SI 0.848 CN 0.999 | wdt[0.3,1) n=43 SI 0.702 CN 0.986 | wdt[1,3) n=190 SI 0.367 CN 0.756 | wdt[3,10) n=256 SI 0.265 CN 0.519 | wdt[10,30) n=25 SI 0.082 CN 0.187 | wdt[30,100) n=3 SI 0.031 CN 0.064 | wdt[100,1e+09) n=4 SI 0.005 CN 0.010 |
+
+### same, --scan_s 1,1.25 (adds section 5: physical-mode accuracy)
+== 1. Affine check: ||J(dt3) - (M + jdt3 L)|| / ||J(dt3)|| = 3.486e-04
+   W consistency across dumps: ||W2-W1||/||W1|| = 2.117e-04, ||W3-W1||/||W1|| = 5.632e-04
+   constrained DOFs dropped: 544 of 3136
+   sizes: V 768, X 1824;  ||M_VX||/||M|| = 3.60e-02;  ||W - W^T||/||W|| = 1.00e-04
+== Semi-discrete spectrum: max |Im mu| (fastest wave) = 1.863e+05 rad/s; max Re mu = 1.09e+01
+== 2. W (continuum SI operator) vs Kr = -L_VX M_X^-1 L_XV (exact discrete ideal operator)
+   ||Kr - Kr^T||/||Kr|| = 4.48e-04;  ||W||/||Kr|| = 2.235
+   eig(W): [-1.827e+00, 2.748e+08];  eig(Kr): [-3.625e+00, 1.545e+08]  (negative parts are round-off relative to max)
+   max discrete ideal frequency = 1.863e+05 rad/s (full-system max |Im mu| = 1.863e+05)
+   Per-mode overestimate s_eff = (y W y)/(y Kr y) for discrete normal modes, binned by w/wmax:
+     w/wmax in [0.020,0.05): n=   2  s_eff min 8.124  median 8.433  max 8.74
+     w/wmax in [0.050,0.10): n=   4  s_eff min 6.623  median 67.332  max 426
+     w/wmax in [0.100,0.20): n=  43  s_eff min 1.084  median 3.405  max 46.7
+     w/wmax in [0.200,0.40): n= 109  s_eff min 1.079  median 5.423  max 31.2
+     w/wmax in [0.400,0.70): n= 193  s_eff min 1.124  median 3.260  max 12.3
+     w/wmax in [0.700,1.01): n= 144  s_eff min 1.205  median 2.204  max 3.4
+     w/wmax < 1e-3 (discrete null space, e.g. flows the H(curl) field cannot feel): n=273; their continuum freq sqrt(yWy/yMy)/wmax: median 0.001, max 1.583
+== 3. Spectral radius of one-step map (stable if <= 1)
+   dt        CFL     CN        SI s=1     SI s=1.25  
+   1e-05     1.9     1.000109  1.000109   1.000109   
+   1e-04     18.6    1.001089  1.001089   1.001089   
+   1e-03     186.3   1.010949  1.010932   1.010928   
+   1e-02     1863.3  1.115160  1.451394   1.103362   
+== 4. Ideal-mode dispersion: median numerical/true frequency ratio, binned by w*dt (theta_max: SI stable iff <= 4)
+   dt=1e-05 s=1     theta_max=1.453 | wdt[0.01,0.3) n=18 SI 0.843 CN 0.994 | wdt[0.3,1) n=229 SI 0.812 CN 0.964 | wdt[1,3) n=248 SI 0.756 CN 0.880 |
+   dt=1e-05 s=1.25  theta_max=1.275 | wdt[0.01,0.3) n=18 SI 0.807 CN 0.994 | wdt[0.3,1) n=229 SI 0.769 CN 0.964 | wdt[1,3) n=248 SI 0.726 CN 0.882 |
+   dt=1e-05 s=2     theta_max=0.967 | wdt[0.01,0.3) n=16 SI 0.739 CN 0.995 | wdt[0.3,1) n=229 SI 0.678 CN 0.965 | wdt[1,3) n=250 SI 0.644 CN 0.889 |
+   dt=1e-04 s=1     theta_max=3.739 | wdt[0.3,1) n=1 SI 0.567 CN 0.929 | wdt[1,3) n=15 SI 0.208 CN 0.756 | wdt[3,10) n=345 SI 0.170 CN 0.372 | wdt[10,30) n=134 SI 0.138 CN 0.234 |
+   dt=1e-04 s=1.25  theta_max=3.018 | wdt[1,3) n=17 SI 0.258 CN 0.758 | wdt[3,10) n=341 SI 0.151 CN 0.375 | wdt[10,30) n=137 SI 0.119 CN 0.234 |
+   dt=1e-04 s=2     theta_max=1.912 | wdt[1,3) n=18 SI 0.197 CN 0.760 | wdt[3,10) n=335 SI 0.120 CN 0.381 | wdt[10,30) n=142 SI 0.089 CN 0.235 |
+   dt=1e-03 s=1     theta_max=3.997 | wdt[0.01,0.3) n=61 SI 0.998 CN 1.000 | wdt[1,3) n=2 SI 0.101 CN 0.739 | wdt[3,10) n=21 SI 0.058 CN 0.340 | wdt[10,30) n=129 SI 0.042 CN 0.139 | wdt[30,100) n=331 SI 0.035 CN 0.061 | wdt[100,1e+09) n=12 SI 0.017 CN 0.028 |
+   dt=1e-03 s=1.25  theta_max=3.199 | wdt[0.01,0.3) n=61 SI 0.998 CN 1.000 | wdt[1,3) n=3 SI 0.064 CN 0.770 | wdt[3,10) n=26 SI 0.063 CN 0.372 | wdt[10,30) n=163 SI 0.044 CN 0.147 | wdt[30,100) n=296 SI 0.032 CN 0.065 | wdt[100,1e+09) n=7 SI 0.014 CN 0.029 |
+   dt=1e-03 s=2     theta_max=2.000 | wdt[0.01,0.3) n=61 SI 0.997 CN 1.000 | wdt[0.3,1) n=1 SI 0.084 CN 0.931 | wdt[1,3) n=6 SI 0.101 CN 0.746 | wdt[3,10) n=60 SI 0.060 CN 0.346 | wdt[10,30) n=239 SI 0.047 CN 0.155 | wdt[30,100) n=187 SI 0.028 CN 0.071 | wdt[100,1e+09) n=2 SI 0.009 CN 0.026 |
+   dt=1e-02 s=1     theta_max=4.146 | wdt[0.01,0.3) n=82 SI 0.914 CN 0.999 | wdt[0.3,1) n=36 SI 0.809 CN 0.986 | wdt[1,3) n=75 SI 0.343 CN 0.734 | wdt[3,10) n=299 SI 0.270 CN 0.426 | wdt[10,30) n=95 SI 0.146 CN 0.214 | wdt[30,100) n=11 SI 0.045 CN 0.074 | wdt[100,1e+09) n=5 SI 0.010 CN 0.010 |
+   dt=1e-02 s=1.25  theta_max=3.351 | wdt[0.01,0.3) n=83 SI 0.894 CN 0.999 | wdt[0.3,1) n=36 SI 0.771 CN 0.986 | wdt[1,3) n=96 SI 0.344 CN 0.762 | wdt[3,10) n=317 SI 0.271 CN 0.450 | wdt[10,30) n=59 SI 0.120 CN 0.219 | wdt[30,100) n=8 SI 0.041 CN 0.061 | wdt[100,1e+09) n=4 SI 0.007 CN 0.010 |
+   dt=1e-02 s=2     theta_max=2.226 | wdt[0.01,0.3) n=82 SI 0.848 CN 0.999 | wdt[0.3,1) n=43 SI 0.702 CN 0.986 | wdt[1,3) n=190 SI 0.367 CN 0.756 | wdt[3,10) n=256 SI 0.265 CN 0.519 | wdt[10,30) n=25 SI 0.082 CN 0.187 | wdt[30,100) n=3 SI 0.031 CN 0.064 | wdt[100,1e+09) n=4 SI 0.005 CN 0.010 |
+== 5. Physical modes with s_eff < 1.5: n=42; lowest w = 3.1407e+04 (pi*v_A = 3.1416e+04 for the test's v_A=1e4)
+   dt=1e-05 s=1     | w=3.14e+04 wdt=0.31 s_eff=1.17 SI/w=0.990 CN/w=0.992 | w=3.14e+04 wdt=0.31 s_eff=1.08 SI/w=0.991 CN/w=0.992 | w=6.27e+04 wdt=0.63 s_eff=1.50 SI/w=0.948 CN/w=0.969 | w=6.33e+04 wdt=0.63 s_eff=1.40 SI/w=0.951 CN/w=0.968 | w=7.08e+04 wdt=0.71 s_eff=1.11 SI/w=0.955 CN/w=0.961 | w=8.91e+04 wdt=0.89 s_eff=1.46 SI/w=0.905 CN/w=0.941 | w=9.53e+04 wdt=0.95 s_eff=1.47 SI/w=0.892 CN/w=0.933 | w=1.38e+05 wdt=1.38 s_eff=1.33 SI/w=0.827 CN/w=0.876
+   dt=1e-05 s=1.25  | w=3.14e+04 wdt=0.31 s_eff=1.17 SI/w=0.986 CN/w=0.992 | w=3.14e+04 wdt=0.31 s_eff=1.08 SI/w=0.988 CN/w=0.992 | w=6.27e+04 wdt=0.63 s_eff=1.50 SI/w=0.932 CN/w=0.969 | w=6.33e+04 wdt=0.63 s_eff=1.40 SI/w=0.936 CN/w=0.968 | w=7.08e+04 wdt=0.71 s_eff=1.11 SI/w=0.940 CN/w=0.961 | w=8.91e+04 wdt=0.89 s_eff=1.46 SI/w=0.879 CN/w=0.941 | w=9.53e+04 wdt=0.95 s_eff=1.47 SI/w=0.864 CN/w=0.933 | w=1.38e+05 wdt=1.38 s_eff=1.33 SI/w=0.785 CN/w=0.876
+   dt=1e-05 s=2     | w=3.14e+04 wdt=0.31 s_eff=1.17 SI/w=0.976 CN/w=0.992 | w=3.14e+04 wdt=0.31 s_eff=1.08 SI/w=0.978 CN/w=0.992 | w=6.27e+04 wdt=0.63 s_eff=1.50 SI/w=0.891 CN/w=0.969 | w=6.33e+04 wdt=0.63 s_eff=1.40 SI/w=0.896 CN/w=0.968 | w=7.08e+04 wdt=0.71 s_eff=1.11 SI/w=0.900 CN/w=0.961 | w=8.91e+04 wdt=0.89 s_eff=1.46 SI/w=0.814 CN/w=0.941 | w=9.53e+04 wdt=0.95 s_eff=1.47 SI/w=0.793 CN/w=0.933 | w=1.38e+05 wdt=1.38 s_eff=1.33 SI/w=0.691 CN/w=0.876
+   dt=1e-04 s=1     | w=3.14e+04 wdt=3.14 s_eff=1.17 SI/w=0.587 CN/w=0.639 | w=3.14e+04 wdt=3.14 s_eff=1.08 SI/w=0.611 CN/w=0.639 | w=6.27e+04 wdt=6.27 s_eff=1.50 SI/w=0.291 CN/w=0.403 | w=6.33e+04 wdt=6.33 s_eff=1.40 SI/w=0.302 CN/w=0.400 | w=7.08e+04 wdt=7.08 s_eff=1.11 SI/w=0.328 CN/w=0.366 | w=8.91e+04 wdt=8.91 s_eff=1.46 SI/w=0.214 CN/w=0.303 | w=9.53e+04 wdt=9.53 s_eff=1.47 SI/w=0.199 CN/w=0.286 | w=1.38e+05 wdt=13.76 s_eff=1.33 SI/w=0.150 CN/w=0.207
+   dt=1e-04 s=1.25  | w=3.14e+04 wdt=3.14 s_eff=1.17 SI/w=0.522 CN/w=0.639 | w=3.14e+04 wdt=3.14 s_eff=1.08 SI/w=0.543 CN/w=0.639 | w=6.27e+04 wdt=6.27 s_eff=1.50 SI/w=0.253 CN/w=0.403 | w=6.33e+04 wdt=6.33 s_eff=1.40 SI/w=0.261 CN/w=0.400 | w=7.08e+04 wdt=7.08 s_eff=1.11 SI/w=0.275 CN/w=0.366 | w=8.91e+04 wdt=8.91 s_eff=1.46 SI/w=0.184 CN/w=0.303 | w=9.53e+04 wdt=9.53 s_eff=1.47 SI/w=0.171 CN/w=0.286 | w=1.38e+05 wdt=13.76 s_eff=1.33 SI/w=0.128 CN/w=0.207
+   dt=1e-04 s=2     | w=3.14e+04 wdt=3.14 s_eff=1.17 SI/w=0.412 CN/w=0.639 | w=3.14e+04 wdt=3.14 s_eff=1.08 SI/w=0.428 CN/w=0.639 | w=6.27e+04 wdt=6.27 s_eff=1.50 SI/w=0.193 CN/w=0.403 | w=6.33e+04 wdt=6.33 s_eff=1.40 SI/w=0.198 CN/w=0.400 | w=7.08e+04 wdt=7.08 s_eff=1.11 SI/w=0.204 CN/w=0.366 | w=8.91e+04 wdt=8.91 s_eff=1.46 SI/w=0.139 CN/w=0.303 | w=9.53e+04 wdt=9.53 s_eff=1.47 SI/w=0.130 CN/w=0.286 | w=1.38e+05 wdt=13.76 s_eff=1.33 SI/w=0.095 CN/w=0.207
+   dt=1e-03 s=1     | w=3.14e+04 wdt=31.41 s_eff=1.17 SI/w=0.075 CN/w=0.096 | w=3.14e+04 wdt=31.43 s_eff=1.08 SI/w=0.082 CN/w=0.096 | w=6.27e+04 wdt=62.69 s_eff=1.50 SI/w=0.031 CN/w=0.049 | w=6.33e+04 wdt=63.32 s_eff=1.40 SI/w=0.032 CN/w=0.049 | w=7.08e+04 wdt=70.80 s_eff=1.11 SI/w=0.035 CN/w=0.044 | w=8.91e+04 wdt=89.12 s_eff=1.46 SI/w=0.022 CN/w=0.035 | w=9.53e+04 wdt=95.31 s_eff=1.47 SI/w=0.020 CN/w=0.033 | w=1.38e+05 wdt=137.62 s_eff=1.33 SI/w=0.015 CN/w=0.023
+   dt=1e-03 s=1.25  | w=3.14e+04 wdt=31.41 s_eff=1.17 SI/w=0.062 CN/w=0.096 | w=3.14e+04 wdt=31.43 s_eff=1.08 SI/w=0.066 CN/w=0.096 | w=6.27e+04 wdt=62.69 s_eff=1.50 SI/w=0.026 CN/w=0.049 | w=6.33e+04 wdt=63.32 s_eff=1.40 SI/w=0.027 CN/w=0.049 | w=7.08e+04 wdt=70.80 s_eff=1.11 SI/w=0.029 CN/w=0.044 | w=8.91e+04 wdt=89.12 s_eff=1.46 SI/w=0.019 CN/w=0.035 | w=9.53e+04 wdt=95.31 s_eff=1.47 SI/w=0.017 CN/w=0.033 | w=1.38e+05 wdt=137.62 s_eff=1.33 SI/w=0.013 CN/w=0.023
+   dt=1e-03 s=2     | w=3.14e+04 wdt=31.41 s_eff=1.17 SI/w=0.045 CN/w=0.096 | w=3.14e+04 wdt=31.43 s_eff=1.08 SI/w=0.047 CN/w=0.096 | w=6.27e+04 wdt=62.69 s_eff=1.50 SI/w=0.020 CN/w=0.049 | w=6.33e+04 wdt=63.32 s_eff=1.40 SI/w=0.020 CN/w=0.049 | w=7.08e+04 wdt=70.80 s_eff=1.11 SI/w=0.021 CN/w=0.044 | w=8.91e+04 wdt=89.12 s_eff=1.46 SI/w=0.014 CN/w=0.035 | w=9.53e+04 wdt=95.31 s_eff=1.47 SI/w=0.013 CN/w=0.033 | w=1.38e+05 wdt=137.62 s_eff=1.33 SI/w=0.010 CN/w=0.023
+   dt=1e-02 s=1     | w=3.14e+04 wdt=314.07 s_eff=1.17 SI/w=0.008 CN/w=0.010 | w=3.14e+04 wdt=314.32 s_eff=1.08 SI/w=0.008 CN/w=0.010 | w=6.27e+04 wdt=626.92 s_eff=1.50 SI/w=0.003 CN/w=0.005 | w=6.33e+04 wdt=633.20 s_eff=1.40 SI/w=0.003 CN/w=0.005 | w=7.08e+04 wdt=708.04 s_eff=1.11 SI/w=0.004 CN/w=0.004 | w=8.91e+04 wdt=891.17 s_eff=1.46 SI/w=0.002 CN/w=0.004 | w=9.53e+04 wdt=953.13 s_eff=1.47 SI/w=0.002 CN/w=0.003 | w=1.38e+05 wdt=1376.24 s_eff=1.33 SI/w=0.002 CN/w=0.002
+   dt=1e-02 s=1.25  | w=3.14e+04 wdt=314.07 s_eff=1.17 SI/w=0.006 CN/w=0.010 | w=3.14e+04 wdt=314.32 s_eff=1.08 SI/w=0.007 CN/w=0.010 | w=6.27e+04 wdt=626.92 s_eff=1.50 SI/w=0.003 CN/w=0.005 | w=6.33e+04 wdt=633.20 s_eff=1.40 SI/w=0.003 CN/w=0.005 | w=7.08e+04 wdt=708.04 s_eff=1.11 SI/w=0.003 CN/w=0.004 | w=8.91e+04 wdt=891.17 s_eff=1.46 SI/w=0.002 CN/w=0.004 | w=9.53e+04 wdt=953.13 s_eff=1.47 SI/w=0.002 CN/w=0.003 | w=1.38e+05 wdt=1376.24 s_eff=1.33 SI/w=0.001 CN/w=0.002
+   dt=1e-02 s=2     | w=3.14e+04 wdt=314.07 s_eff=1.17 SI/w=0.005 CN/w=0.010 | w=3.14e+04 wdt=314.32 s_eff=1.08 SI/w=0.005 CN/w=0.010 | w=6.27e+04 wdt=626.92 s_eff=1.50 SI/w=0.002 CN/w=0.005 | w=6.33e+04 wdt=633.20 s_eff=1.40 SI/w=0.002 CN/w=0.005 | w=7.08e+04 wdt=708.04 s_eff=1.11 SI/w=0.002 CN/w=0.004 | w=8.91e+04 wdt=891.17 s_eff=1.46 SI/w=0.001 CN/w=0.004 | w=9.53e+04 wdt=953.13 s_eff=1.47 SI/w=0.001 CN/w=0.003 | w=1.38e+05 wdt=1376.24 s_eff=1.33 SI/w=0.001 CN/w=0.002

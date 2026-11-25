@@ -41,6 +41,7 @@ def make_xml(
     mg=False,
     inner_its=None,
     inner="lu",
+    dump=False,
 ):
     attrs = ""
     if kcycle:
@@ -58,6 +59,8 @@ def make_xml(
     if kind.startswith("pb"):  # physics-based; inner = 'lu' | 'bj' | 'mg'
         pinner = kind.split("_")[1]
         a = f'<pb_pre type="{pbtype}" alfven="{alfven}" sound="{sound}"'
+        if dump:  # write J, P and field layout to HDF5 at the first preconditioner update (needs nsteps>=2)
+            a += ' dump="T"'
         if pinner == "lu":
             return f"<oft><xmhd>{a}>{lu()}</pb_pre></xmhd></oft>"
         if pinner == "bj":
@@ -102,6 +105,7 @@ def run(args):
         cscale=args.cscale,
         inner_its=args.inner_its,
         inner=args.inner,
+        dump=args.dump,
     )
     open(os.path.join(d, "oft_in.xml"), "w").write(xml)
     env = dict(os.environ, OMP_NUM_THREADS="2", OMPI_ALLOW_RUN_AS_ROOT="1", OMPI_ALLOW_RUN_AS_ROOT_CONFIRM="1")
@@ -161,4 +165,5 @@ if __name__ == "__main__":
     ap.add_argument("--timeout", type=int, default=3000)
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--inner", default="lu")
+    ap.add_argument("--dump", action="store_true")
     run(ap.parse_args())

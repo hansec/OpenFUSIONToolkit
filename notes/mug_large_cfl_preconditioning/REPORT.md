@@ -13,6 +13,7 @@ Status: **paused**. This document records what was tried and what was learned, s
 | Does the textbook "parabolized velocity Schur" preconditioner (NIMROD / M3D-C1 / PIXIE3D style) work for `xmhd.F90`? | **No.** Its iteration count stalls at about 35 per step at dt=1e-4 on the cube. The continuum operator over-estimates the discrete Schur complement (about 2.2× in norm). Its smallest eigenvalue relative to the exact Schur complement drops to 3e-5 at dt=1e-3. Cause: B lives in H(curl), and the continuum form ignores the discrete projection. |
 | Is there a Schur approximation that is dt-robust? | **Yes: eliminate V instead of B ("B-Schur", type 4).** S_X = J_XX − J_XV·diag(J_VV)⁻¹·J_VX. With exact inner solves on the cube, dense GMRES needs 9 / 26 / 30 iterations at dt 1e-5 / 1e-4 / 1e-3, against 13 / 54 / 500 (iteration cap) for the best velocity-Schur variant. In MUG with LU inner solves: 5 / 14–15 / 19–40 outer iterations per step. |
 | Is it practical yet? | **Not for production-size problems.** S_X has 2.6× the nonzeros of J. Cheap inner solvers lose much of the gain (block-Jacobi 16–92 its; p-MG fails at dt=1e-3), and ILU(0) hits a zero pivot on S_X for the spheromak. On the spheromak at dt=1e-5 with LU on 1024 blocks, type 4 held dt=2.5e-6 against 1.25e-6 for the baseline, but used 6.3 GB and was too slow (one step in 50 min). |
+| Would a NIMROD-style semi-implicit term (in the time discretization) help? | **Conditional yes (§7a, offline, cube only).** Stable with scale factor s ≥ 1.25 up to CFL ~1900; the continuum operator matches the discrete one within 8–17% on the physical Alfvén modes (the large over-estimates are on spurious modes); resolved-mode phase accuracy is within a few % of CN. Non-uniform equilibria and nonlinear terms are untested. |
 | Recommended next step | An **auxiliary-space (Hiptmair–Xu / AMS-type) solver for S_X**, which is curl–curl-like with a large gradient near-null space. Alternative: a matrix-free exact-Schur variant (planned "type 5"). |
 
 ---
@@ -242,7 +243,68 @@ The K-cycle accelerates a convergent or nearly convergent cycle. On the coupled 
 
 ---
 
+## 7a. Semi-implicit (NIMROD-style) feasibility study — Phase A, offline
+
+**Question:** instead of using the parabolized operator inside the *solver* (where §5.1 showed it fails), should MUG use it in the *time discretization*, as NIMROD and M3D-C1 do? In a semi-implicit (SI) advance the mismatch between the continuum operator and the exact discrete coupling becomes a time-discretization error rather than extra Krylov iterations, and every linear solve is near-elliptic: a V solve with M_V + s·jdt²·W (which is exactly the V block of the type-1 P matrix, already assembled) followed by B and n/T solves that are mass and diffusion dominated. Script: `scripts/si_analysis.py`; full output: `results/semi_implicit_analysis.txt`.
+
+**Method.**
+- Inputs: three cube dumps (type 1, `dump="T"`) at dt = 1e-5 / 2e-5 / 4e-5, none with dt cuts.
+- MUG's Jacobian is J(dt) = M + jdt·L with jdt = dt/2, so two dumps give the mass matrix M and the linearized operator L; the third checks the affine fit (residual 3.5e-4, the size of the state dependence between runs). The SI operator is W = (P_VV − J_VV)/jdt² (consistent across dumps to 6e-4). M_VX is set to 0, since the fitted value is fit residue.
+- Constrained (identity) rows are dropped (544 of 3136, mostly the frozen n/T fields: this test has `xmhd_adv_den/temp=F`, so there are no sound waves).
+- Exact discrete ideal operator in V space: Kr = −L_VX·M_X⁻¹·L_XV, so that M_V·V'' = −Kr·V.
+- SI scheme modelled (staggered, leapfrog-like; V at half steps, X = all non-V fields, explicit in the V equation):
+  - (M_V + jdt·L_VV + s·jdt²·W)·V⁺ = (M_V − jdt·L_VV + s·jdt²·W)·V⁻ − dt·L_VX·X
+  - (M_X + jdt·L_XX)·X⁺ = (M_X − jdt·L_XX)·X − dt·L_XV·V⁺
+  - s is the SI scale factor (the existing `alfven` attribute).
+- Compared against MUG's actual Crank–Nicolson map (M + jdt·L)⁻¹(M − jdt·L).
+
+**Results.**
+1. **Stability (full one-step map, including dissipation).** Spectral radius:
+
+   | dt (max CFL) | CN | SI s=0 | s=0.5 | s=1 | s=1.25 | s=2 | s=4 |
+   |---|---|---|---|---|---|---|---|
+   | 1e-5 (1.9) | 1.00011 | 1.00011 | 1.00011 | 1.00011 | 1.00011 | 1.00011 | 1.00011 |
+   | 1e-4 (19) | 1.0011 | 345 | 4.95 | 1.0011 | 1.0011 | 1.0011 | 1.0011 |
+   | 1e-3 (186) | 1.011 | 3.4e4 | 416 | 1.011 | 1.011 | 1.011 | 1.011 |
+   | 1e-2 (1863) | 1.115 | 3.2e6 | 7.3e3 | **1.45** | 1.103 | 1.102 | 1.099 |
+
+   The excess over 1 also appears for CN. It is a weak growing semi-discrete mode (max Re μ = 11 s⁻¹, against Alfvén frequencies of about 3e4–2e5 s⁻¹), probably a fit artifact or a weak instability of the perturbed state. **With s ≥ 1.25 the SI map is never less stable than CN, up to CFL ~1900; s = 1 fails only at CFL ~1900.** Without the SI term (s=0) the explicit coupling is violently unstable, as expected.
+
+2. **Where the continuum operator over-estimates.** Per-mode ratio s_eff = (yᵀWy)/(yᵀKr·y) on the discrete ideal normal modes (Kr·y = ω²·M_V·y):
+   - The **physical** lowest Alfvén modes sit exactly at ω = π·v_A = 3.14e4 s⁻¹ (k∥ = 2π/L_z), with **s_eff = 1.08–1.17**. 42 modes have s_eff < 1.5, including the next shear and fast branches.
+   - Modes with **ω below π·v_A**, which cannot exist physically in a uniform periodic box, have s_eff = 6–426. These are spurious discrete modes: k∥ ≈ 0 flows that the H(curl)/Lagrange coupling feels weakly. The large over-estimates in §5.2 and §6.1 are concentrated there and at grid scale. Slowing them is harmless and arguably beneficial.
+   - 273 V modes are in the discrete null space (ω < 1e-3·ω_max), for example parallel flows.
+   - Global norms: ‖W‖/‖Kr‖ = 2.24, the same ratio as in §5.2.
+
+3. **Accuracy of physical modes** (Rayleigh estimate cos(Ω·dt) = 1 − θ/2, θ = dt²·yᵀKr·y / yᵀ(M_V + s·jdt²·W)·y; ratio of numerical to true frequency):
+
+   | mode | ω·dt | SI s=1 | SI s=1.25 | SI s=2 | CN |
+   |---|---|---|---|---|---|
+   | lowest Alfvén (s_eff 1.08) | 0.31 | 0.991 | 0.988 | 0.978 | 0.992 |
+   | next branch (s_eff 1.4–1.5) | 0.63 | 0.95 | 0.93 | 0.89 | 0.97 |
+   | s_eff 1.33 | 1.38 | 0.83 | 0.79 | 0.69 | 0.88 |
+   | lowest Alfvén | 3.14 | 0.61 | 0.54 | 0.43 | 0.64 |
+   | lowest Alfvén | 31 | 0.082 | 0.066 | 0.047 | 0.096 |
+
+   For resolved modes (ω·dt ≲ 1), SI with s ≈ 1–1.25 is within a few percent of CN. For under-resolved modes both schemes are badly wrong: CN is already at 0.64 for ω·dt = 3. SI is somewhat more dispersive, by a factor of roughly s·s_eff in the error.
+
+**Verdict: conditional GO.** All three Phase-A criteria are met on the cube:
+- stable with a modest scale factor (s = 1.25);
+- the over-stabilized modes are spurious or unresolved;
+- resolved-mode accuracy is comparable to CN.
+
+Practical attraction: the SI V operator is SPD and near-elliptic, and is **already assembled** (P's V block); the B and n/T solves are mass/diffusion dominated. So there would be no coupled hyperbolic solve at all, which is precisely what defeated every preconditioner above.
+
+**Caveats and what Phase A does not show.**
+- The cube has uniform B0, no flow, no pressure dynamics (no sound waves), and is linear. W also contains J0×Q and ∇p0 terms, which are sign-indefinite in sheared or pressurized equilibria (spheromak, tokamak). The condition s·W ≥ Kr has to be re-checked there, possibly with a larger s, as NIMROD does.
+- A nonlinear SI needs an extra (isotropic) operator for nonlinear-amplitude stability, and flow advection keeps its own CFL limit unless it is treated implicitly.
+- The modelled scheme is a staggered leapfrog with first-order time centering of the coupling. It loses MUG's exact CN energy behaviour, and the Hall/two-fluid terms are not covered.
+- The spheromak matrices are too large for this dense analysis. The real test is a prototype (Phase B): staggered V/X advance in `xmhd_lin_run` first, reusing `xmhd_ops%P` and the `<pb_pre>` inner-solver infrastructure, checked on spheromak tilt growth rates vs dt against the fully implicit runs.
+
+---
+
 ## 8. Recommendations / future work (ranked)
+0. **Semi-implicit prototype (Phase B, §7a):** staggered V/X advance using the existing parabolized V operator; start with `xmhd_lin_run`, validate the spheromak tilt growth rate vs dt. Offline analysis says stable (s ≥ 1.25) and resolved-mode accurate on the cube; non-uniform equilibria are the open risk.
 1. **Auxiliary-space preconditioner for S_X** (Hiptmair–Xu / AMS-style). Hiptmair smoothing on the H(curl) block, plus nodal vector-Lagrange and scalar-Lagrange auxiliary corrections. OFT already has H1 and Lagrange hierarchies and discrete gradient operators. The B_g (grad H1) part of the composite B already exposes the gradient subspace, which may simplify this.
 2. **Type 5: matrix-free exact Schur.** The V solve is FGMRES on the exact S_V applied matrix-free (inner D_X solves), preconditioned by S_X or by continuum S_V. Robust, but the inner–outer cost needs measuring.
 3. **Port the continuum S_V path to `xmhd_lag.F90`** (nodal B, as in NIMROD), where §6.1 suggests it should work.
@@ -259,6 +321,7 @@ The K-cycle accelerates a convergent or nearly convergent cycle. On the coupled 
 - **Scripts** (`scripts/`). Paths resolve relative to the repo; set `OFT_BUILD_DIR` for another build tree. Each script writes into `./runs/<tag>` or `./runs_sph/<tag>` under the current directory.
   - Cube: `python3 run_alfven.py --tag T --kind {lu|bj|mg|pb_lu|pb_bj|pb_mg} [--pbtype 1-4] [--dt 1.E-4] [--nsteps 3] [--nlocal 8 --overlap] [--its 2] [--inner_its 5] [--inner lu|ilu] [--kcycle 2] [--cscale] [--alfven 1.0] [--nlevels 2 --minlev 1]`
   - Spheromak: `python3 run_sph.py --tag T --kind {bj|pb_bj} --pbtype 4 --nlocal 1024 --inner lu --its 8 --inner_its 8 --dt 1.e-5 --nsteps 3`. Run it alongside `./watchdog.sh 12000000` to kill a run that exceeds 12 GB.
-  - Matrix dump plus offline analysis: add `dump="T"` to `<pb_pre>` (edit the XML that `run_alfven.py` writes, or the `make_xml` call), use `--nsteps 2` or more, then run `python3 schur_analysis.py runs/<tag>`.
+  - Matrix dump plus offline analysis: `python3 run_alfven.py --tag T --kind pb_lu --pbtype 1 --dump --nsteps 2 --dt 1.E-5`, then `python3 schur_analysis.py runs/T`.
+  - Semi-implicit study (§7a): dump at dt = 1.E-5, 2.E-5, 4.E-5 (as above, tags `sidump_<dt>`), then `python3 si_analysis.py runs/sidump_1.E-5 runs/sidump_2.E-5 runs/sidump_4.E-5 [--scan_s 1,1.25]`. It takes about 10–20 minutes on 2 cores (dense eigensolves of size about 2600).
   - `python3 summarize.py runs runs_sph` prints the per-run summary lines (`results/runs_summary.txt`).
 - **Resources:** the sandbox had about 14 GB RAM and 2 cores. The spheromak LU block-Jacobi with nlocal ≤ 64 does not fit.
