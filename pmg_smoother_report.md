@@ -505,6 +505,43 @@ The parent session's LU-based 14 / 11–13 iteration baseline could not be repro
 
 ---
 
+## 12. Related findings from the parallel basis-conditioning study
+
+A parallel session studied the B-basis conditioning directly; its summary was relayed by the parent session. Its
+smoother experiments (cell-overlap Schwarz) come from branch `claude/schwartz-cell-adjacency-overlaps-15f6zn`. These
+are its reported results; they were **not re-measured here**.
+
+* **Changing the basis does not help.** A Schöberl–Zaglmayr basis spanning the same H(curl)+grad space gives the
+  same block-smoother conditioning, within a few percent. Exact local solves are invariant to basis changes inside
+  entity blocks.
+* **Partitioning is not the cause.** On the B mass block at p = 1/2/3, entity-aligned blocks (`xmhd_nparts`) give
+  rho 1.02/1.80/1.99 and METIS partitions give 1.21/1.85/1.70.
+* **The bad modes at CFL ≈ 0 are global, smooth and clustered.** Gradient edge functions nearly cancel face
+  rotationals (p ≥ 2) or Whitney functions (p = 1); each mode spans about 1e3 entities.
+  * Two-level κ (p = 1 coarse + blocks) for H(curl) vs Lagrange B: 52 vs 5.7 (refined cube, p = 2) and 347 vs 8.6
+    (tiny mesh, p = 3).
+  * Two-grid rho with cell-overlap-1 RAS: 0.97 vs 0.61.
+* **Practical impact in MUG p-MG is modest:** at most about 2× the iterations of Lagrange B at small and moderate dt.
+  At large dt both B representations are limited by Alfvén coupling, consistent with Section 8.
+* **Spheromak p = 2, dt = 1e-6, iterations per step:**
+  * plain block-Jacobi: 74–119;
+  * any overlap (`loverlap`, or cell-Schwarz overlap 0): about 24–27;
+  * cell overlap 1 (`<pre type="add_schwarz"><overlap_mode>cell</overlap_mode><overlap>1</overlap>`): best on the
+    Alfvén cube (dt = 1e-4, p = 2: 11.5 iterations vs 26 with `loverlap`), but runs out of memory or fails in
+    UMFPACK at p = 3 and on the spheromak.
+* **MPI:** 2 ranks × 8 blocks with `loverlap` take 91–114 iterations against 10–13 serial; `boverlap` recovers
+  about half. This agrees with the motivation for the seam patches in Section 4.4.
+
+**Open question: the two studies need reconciling.** That study concludes local smoothers cannot fix the CFL ≈ 0
+modes. Here, vertex stars gave a stationary factor of 0.08 on the B block and 0.175 on all fields, with two-grid
+0.013, at dt = 8e-7 (Section 7.1). A likely explanation is that the near-cancelling gradient/rotational
+combinations lie inside vertex stars (LWXZ condition) but not inside entity, METIS or one-layer-overlap blocks. If
+so, stars already deliver what a Hiptmair–Xu nodal auxiliary-space correction for the B block would target, at
+least at small CFL. To check: apply both diagnostics (global-mode spectra, and the star rho) to the same dumped
+operator.
+
+---
+
 ## Appendix A: reproduction
 
 **Environment**
