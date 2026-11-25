@@ -1739,17 +1739,74 @@ subroutine ml_vecspace_inject(self,afine,acors)
 class(oft_ml_hcurl_grad_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine vector from interpolation
 class(oft_vector), intent(inout) :: acors !< Vector to interpolate
+integer(i4) :: i,j,k
+integer(i4), allocatable, dimension(:) :: emap
+real(r8), pointer, dimension(:) :: agrad,acurl,tmp
+class(oft_mesh), pointer :: mesh
+CLASS(oft_ml_fem_type), POINTER :: ML_curl
+CLASS(oft_vector), POINTER :: ftmp
 DEBUG_STACK_PUSH
-! Step down level down
-call self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
-call acors%set(0.d0)
-if(self%ML_FE_rep%level==self%ML_FE_rep%blevel)then
+!---Check for base transfer
+if(self%ML_FE_rep%level==self%ML_FE_rep%blevel+1)then
+  call self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
+  call acors%set(0.d0)
   IF(.NOT.ASSOCIATED(self%base_push))CALL oft_abort("Base transfer not defined","ml_vecspace_inject",__FILE__)
   call self%base_push(afine,acors)
   DEBUG_STACK_POP
   return
 end if
-CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
+!---Apply transpose of geometric gradient subspace correction on fine level
+ML_curl=>self%ML_FE_rep%ml_fields(1)%ml
+IF(ML_curl%current_level%order==1)THEN
+  SELECT TYPE(this=>ML_curl%current_level)
+    CLASS IS(oft_fem_type)
+      mesh=>this%mesh
+    CLASS DEFAULT
+      CALL oft_abort("Invalid FE type","ml_vecspace_inject",__FILE__)
+  END SELECT
+  CALL afine%new(ftmp)
+  CALL ftmp%add(0.d0,1.d0,afine)
+  NULLIFY(agrad,acurl)
+  CALL ftmp%get_local(acurl,1)
+  CALL ftmp%get_local(agrad,2)
+  ALLOCATE(tmp(SIZE(agrad)),emap(mesh%ne))
+  CALL get_inverse_map(mesh%lbe,mesh%nbe,emap,mesh%ne)
+  !$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
+  DO i=1,mesh%np
+    agrad(i)=0.d0
+  END DO
+  CALL ftmp%restore_local(agrad,2)
+  tmp=0.d0
+  !$omp parallel do private(j,k) if(mesh%np>OFT_OMP_VTHRESH)
+  DO i=1,mesh%np
+    DO j=mesh%kpe(i),mesh%kpe(i+1)-1
+      k=mesh%lpe(j)
+      IF(.NOT.mesh%fullmesh)THEN
+        IF(emap(k)>0)THEN
+          IF(.NOT.mesh%estitch%leo(emap(k)))CYCLE
+        END IF
+      END IF
+      IF(mesh%global%le(k)<0)THEN
+        tmp(i)=tmp(i)+acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+      ELSE
+        tmp(i)=tmp(i)-acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+      END IF
+    END DO
+  END DO
+  CALL ftmp%restore_local(tmp,2,add=.TRUE.)
+  DEALLOCATE(acurl,agrad,tmp,emap)
+  ! Step one level down and restrict
+  call self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
+  call acors%set(0.d0)
+  CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(ftmp,acors)
+  CALL ftmp%delete
+  DEALLOCATE(ftmp)
+ELSE
+  ! Step one level down and restrict
+  call self%ML_FE_rep%set_level(self%ML_FE_rep%level-1,propogate=.TRUE.)
+  call acors%set(0.d0)
+  CALL self%ML_FE_rep%interp_matrices(self%ML_FE_rep%level+1)%m%applyT(afine,acors)
+END IF
 DEBUG_STACK_POP
 end subroutine ml_vecspace_inject
 !------------------------------------------------------------------------------

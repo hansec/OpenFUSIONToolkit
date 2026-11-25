@@ -4897,12 +4897,64 @@ subroutine oft_xmhd_inject(self,afine,acors)
 class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: afine !< Fine level vector to inject
 class(oft_vector), intent(inout) :: acors !< Injected solution on coarse level
-real(r8), pointer, dimension(:) :: vtmp
-integer(i4) :: i
+real(r8), pointer, dimension(:) :: vtmp,acurl,agrad,tmp
+integer(i4), allocatable, dimension(:) :: emap
+integer(i4) :: i,j,k
+class(oft_vector), pointer :: ftmp
 DEBUG_STACK_PUSH
-call xmhd_set_level(xmhd_level-1) ! Step one level down
-!---Restrict
-CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(afine,acors)
+!---Apply transpose of geometric gradient subspace correction on fine level
+IF(oft_hcurl%order==1)THEN
+  CALL afine%new(ftmp)
+  CALL ftmp%add(0.d0,1.d0,afine)
+  NULLIFY(acurl,agrad)
+  CALL ftmp%get_local(acurl,1)
+  CALL ftmp%get_local(agrad,2)
+  ALLOCATE(tmp(SIZE(agrad)),emap(mesh%ne))
+  CALL get_inverse_map(mesh%lbe,mesh%nbe,emap,mesh%ne)
+  IF(bbc(1:2)=='bc')THEN
+    !$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
+    DO i=1,mesh%np
+      agrad(i)=0.d0
+    END DO
+  ELSE IF(bbc(1:2)=='ic')THEN
+    !$omp parallel do if(mesh%np>OFT_OMP_VTHRESH)
+    DO i=1,mesh%np
+      IF(.NOT.mesh%global%gbp(i))agrad(i)=0.d0
+    END DO
+  END IF
+  CALL ftmp%restore_local(agrad,2)
+  tmp=0.d0
+  IF((bbc(1:2)=='bc').OR.(bbc(1:2)=='ic'))THEN
+    !$omp parallel do private(j,k) if(mesh%np>OFT_OMP_VTHRESH)
+    DO i=1,mesh%np
+      IF((bbc(1:2)=='ic').AND.mesh%global%gbp(i))CYCLE
+      DO j=mesh%kpe(i),mesh%kpe(i+1)-1
+        k=mesh%lpe(j)
+        IF(.NOT.mesh%fullmesh)THEN
+          IF(emap(k)>0)THEN
+            IF(.NOT.mesh%estitch%leo(emap(k)))CYCLE
+          END IF
+        END IF
+        IF(mesh%global%le(k)<0)THEN
+          tmp(i)=tmp(i)+acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+        ELSE
+          tmp(i)=tmp(i)-acurl(k)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+        END IF
+      END DO
+    END DO
+    CALL ftmp%restore_local(tmp,2,add=.TRUE.)
+  END IF
+  DEALLOCATE(acurl,agrad,tmp,emap)
+  call xmhd_set_level(xmhd_level-1) ! Step one level down
+  !---Restrict
+  CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(ftmp,acors)
+  CALL ftmp%delete
+  DEALLOCATE(ftmp)
+ELSE
+  call xmhd_set_level(xmhd_level-1) ! Step one level down
+  !---Restrict
+  CALL oft_xmhd_ops_ML(xmhd_level+1)%interp%applyT(afine,acors)
+END IF
 !---Apply boundary conditions
 NULLIFY(vtmp)
 CALL acors%get_local(vtmp,iblock=1)
