@@ -18,6 +18,8 @@
 !!   block-Jacobi without a coloring)
 !! - `cell_blocks_<tag>.txt`: cell-overlap blocks (`nblocks`, then for each block
 !!   `n`, the DoFs, `na`, the assigned DoFs) for overlap 0 and 1 (point/face adjacency)
+!! - `curlcurl.txt`: curl-curl matrix of the H(Curl) field alone, same format as `mass.txt`
+!!   (its DoFs are the leading rows/columns of the H(Curl) + Grad(H^1) numbering)
 !!
 !! @authors Chris Hansen
 !! @date November 2026
@@ -37,6 +39,7 @@ USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE fem_cell_overlap, ONLY: oft_fem_cell_overlap, fem_cell_overlap_create
 USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_operators, ONLY: oft_hcurl_getwop
 USE oft_hcurl_grad_operators, ONLY: hcurl_grad_getmop
 USE oft_lag_basis, ONLY: oft_lag_setup
 USE oft_lag_operators, ONLY: oft_lag_vgetmop
@@ -71,6 +74,18 @@ CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels,propogate=.TRUE.)
 !---Mass matrix
 CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,'none')
 CALL dump_all('',ML_hcurl_grad)
+!---Curl-curl matrix of the H(Curl) field
+NULLIFY(mop)
+CALL oft_hcurl_getwop(ML_hcurl%current_level,mop,'none')
+IF(.NOT.native_matrix_cast(mop_native,mop))CALL oft_abort('Native matrix required','diag_hcurl_grad_cond',__FILE__)
+OPEN(NEWUNIT=io_unit,FILE='curlcurl.txt')
+WRITE(io_unit,'(2I12)')mop_native%nr,mop_native%nnz
+DO i=1,mop_native%nr
+  DO j=mop_native%kr(i),mop_native%kr(i+1)-1
+    WRITE(io_unit,'(2I10,ES26.17E3)')i,mop_native%lc(j),mop_native%M(j)
+  END DO
+END DO
+CLOSE(io_unit)
 !---Mesh and local orientation (tetrahedra only)
 IF(mg_mesh%mesh%type==1)CALL dump_mesh
 !---Vector Lagrange (same order) baseline
