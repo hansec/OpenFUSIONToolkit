@@ -1,0 +1,21 @@
+Linear Algebra: Native LA core refactor (access modes, kernel layer, shared patterns, scatter plans) (#474)
+
+- Add `borrow_local`/`release_local` with access modes (`OFT_ACCESS_READ/WRITE/READWRITE/ACCUMULATE`) to vectors; use them in BCs, multigrid transfers, block preconditioners and FE projections
+- Add `copy`, `maxpy` and single-pass `mdot` to real and complex vectors; use them in GMRES, CG and smoothers
+- Make summation stitching bitwise consistent across all copies of shared elements
+- Add `oft_native_kernels` module with templated vector, matrix and solver kernels
+- Add reference-counted `oft_native_pattern` shared between native matrices (FE representations, ThinCurr, TokaMaker)
+- Add `oft_scatter` module for scatter plans; use it for global stitching, slice gathers, block-Jacobi and submatrix gathers
+- Rebuild stitching plans when seam linkage changes; thread-safe lazy build of slice plans
+- Use owned-only reductions in native vector kernels
+- Balance CSR products by non-zeros per thread; cache transposed index and diagonal locations
+- Keep persistent work vectors and buffers in block-Jacobi and global stitching
+- Fix `keep_diag` handling and block offsets in native `zero_rows`/`zero_cols`
+- Native `set_values` aborts on entries outside the pattern
+- Enable `OFT_DEBUG` shared-value consistency checks in Debug builds
+- Expand template includes in the Doxygen Fortran filter
+- Add `lin_alg/test_native_la` regression test and PETSc variants of MUG tests
+
+Co-authored-by: Claude <noreply@anthropic.com>
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+Co-authored-by: Chris Hansen <christopher.hansen@columbia.edu>
