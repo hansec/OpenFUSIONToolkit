@@ -94,9 +94,12 @@ python .agents/install.py --target anthropic openai --scope user
 
 Skills are copied unchanged (`--link` symlinks them instead); agents are translated
 from `.claude/agents/` to each tool's format. Hardcoded agent models are mapped
-through `.agents/model_map.json` (edit it, or pass `--model-map FILE`). `--list`,
-`--dry-run`, `--force`, and `--uninstall` do what they say. Keep skills and agents
-free of paths into this repository (use `<skill-dir>/scripts/...`), and when adding
+through `.agents/model_map.json` (edit it, or pass `--model-map FILE`).
+Preview removal with `--uninstall --dry-run`. Actual removal requires
+`--uninstall --force` because the installer can delete existing user files.
+
+Keep skills and agents free of paths into this repository (use
+`<skill-dir>/scripts/...`), and when adding
 agent frontmatter fields, check that `install.py` translates or drops them: Codex
 and Gemini CLI reject agent files with unknown keys.
 
