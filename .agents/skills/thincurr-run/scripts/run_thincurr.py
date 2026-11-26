@@ -12,6 +12,7 @@ See `../reference.md` for the case-file schema and `../examples/` for complete
 examples. Build and verify the model first (thincurr-model skill).
 """
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -36,6 +37,10 @@ def _load_thincurr():
         sys.path.append(os.path.join(root_path, 'python'))
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.ThinCurr import ThinCurr
+    setup_model = getattr(ThinCurr, 'setup_model', None)
+    if setup_model is None or 'insulated_junctions' not in inspect.signature(setup_model).parameters:
+        raise SystemExit('ERROR: This skill requires ThinCurr.setup_model() with insulated_junctions. '
+                         'Use an OpenFUSIONToolkit source build that provides it. See the oft-build skill.')
     return OFT_env, ThinCurr
 
 

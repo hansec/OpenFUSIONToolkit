@@ -28,6 +28,9 @@ def _load_tokamaker():
         sys.path.append(os.path.join(root_path, 'python'))
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.TokaMaker import TokaMaker
+    if not callable(getattr(TokaMaker, 'setup_model', None)):
+        raise SystemExit('ERROR: This skill requires TokaMaker.setup_model(). Use an OpenFUSIONToolkit '
+                         'source build that provides it. See the oft-build skill.')
     from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, load_gs_mesh
     from OpenFUSIONToolkit.TokaMaker.util import (create_isoflux,
                                                   create_isoflux_xpts,
