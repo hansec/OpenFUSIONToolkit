@@ -106,7 +106,11 @@ Only the shape matters. Forcing `y[-1] = 0` at the edge is usual.
 ```
 
 - `vsc` — gains defining a vertical stability coil set. Nearly every elongated equilibrium needs one or it will not converge. Pair real up/down coils with opposite gains (`{"F9A": 1.0, "F9B": -1.0}`), or name a dedicated VS coil set (`{"VS": 1.0}`).
-- `bounds` — hard current limits. `default` applies to every coil set; named entries override.
+- `bounds` — current limits in amperes for physical coil sets. `default` applies
+  to all sets, and named entries override it. The solver bounds individual coil
+  variables. The driver checks total physical currents, including virtual
+  vertical control, and exits before writing equilibrium outputs if a limit is
+  exceeded. Use `regularization.vsc_weight` to tune `#VSC` itself.
 - `regularization` — one soft term per coil set, `weight * (I_coil - target)^2`. The driver adds every coil set automatically, so you only name the ones that differ. Higher weight ⇒ the coil stays nearer its target and the shape error grows.
 - `vsc_weight` — weight on the virtual `#VSC` coil. Use a **small** value (~1e-2) to let it adjust vertical position, or a **large** value (~1e2) to disable it when you have defined a real VS coil set that already does that job.
 
