@@ -23,6 +23,8 @@ Native overlapping Schwarz preconditioner (`oft_schwarz_precond`, XML `<pre type
 - Docs: `doc_solvers.md` documents every Schwarz option.
 - Tests (new): `lin_alg/test_native_schwarz` (block-Jacobi equivalences, subdomain matrices against the independently assembled global matrix, DoF-list subdomains, updates, iteration trends; plain, x-periodic and fully periodic cubes on 1/2/4 processes), `lin_alg/test_cell_overlap` (builder against brute-force layering), `lin_alg/test_cell_schwarz` (cell-mode exactness, trends, updates; plain and x-periodic), `physics/MUG/test_MUG_schwarz.py` (cell-mode Schwarz as the MG smoother reproducing the block-Jacobi/reference errors, including the triply periodic sound wave and geometric multigrid), new cases in `lin_alg/test_solver_xml.py`. `base/test_scatter` tests scatter plans directly (forward/reverse, insert/add, real/complex, repeated destinations, masks, local weights, split calls) on 1, 2 and 4 processes.
 
+- `oft_lu`: MKL PARDISO solves use a private copy of the matrix graph. PARDISO rewrites its index arrays in place during a call, so concurrent solves on matrices sharing a graph (shared patterns from #474, submatrices with the same rows) corrupted each other's indices. New test `Concurrent solves on a shared graph` in `test_native_schwarz` covers this for every available direct package.
+
 ## API changes
 
 No existing input changes behaviour: block-Jacobi inputs are unchanged (same code path, identical iteration counts in the suite), and `xmhd_nparts` produces the same coloring.
@@ -46,7 +48,7 @@ No existing input changes behaviour: block-Jacobi inputs are unchanged (same cod
 
 ## Testing
 
-All runs on Ubuntu 24.04, GCC 14, OpenMP + Open MPI, OpenBLAS/UMFPACK/SuperLU/ARPACK/HDF5/METIS from system packages, 4 cores, `OMP_NUM_THREADS=2`. `main` (7dc653c, including #474) is merged into the branch; the diff against `main` is identical to the diff against the #474 branch tip. On the merged branch (432b311): Release `make test` gave 3 failed (the known ones below), 1221 passed, 394 skipped, 232 deselected; checked build, all Schwarz tests including slow plus `base/test_scatter` gave 55 passed, 15 skipped (PETSc variants), with no shared-value check failures. The Schwarz tests use whichever direct package is available for the subdomain solves (SuperLU, UMFPACK, MKL, SuperLU_DIST) and skip without one; at 73eb8c4 they pass with SuperLU and in a build with UMFPACK only (no serial SuperLU), with identical iteration tables. Full-suite runs below are at 80043fa (c439741 changed only a test comment and one sentence of `doc_solvers.md`). After merging the #474 review fixes (790c51f) and applying the review conventions (87681d4): Release `lin_alg`+`fem`+`physics/MUG` (not slow) gave 2 failed (the known ILU pair), 587 passed, 380 skipped; checked build, all Schwarz tests including slow (`test_native_schwarz`, `test_cell_overlap`, `test_cell_schwarz`, `test_solver_xml`, `test_MUG_schwarz`) gave 52 passed, 15 skipped (PETSc variants), with no shared-value check failures. Iteration counts are unchanged.
+All runs on Ubuntu 24.04, GCC 14, OpenMP + Open MPI, OpenBLAS/UMFPACK/SuperLU/ARPACK/HDF5/METIS from system packages, 4 cores, `OMP_NUM_THREADS=2`. `main` (7dc653c, including #474) is merged into the branch; the diff against `main` is identical to the diff against the #474 branch tip. On the merged branch (432b311): Release `make test` gave 3 failed (the known ones below), 1221 passed, 394 skipped, 232 deselected; checked build, all Schwarz tests including slow plus `base/test_scatter` gave 55 passed, 15 skipped (PETSc variants), with no shared-value check failures. The Schwarz tests use whichever direct package is available for the subdomain solves (SuperLU, UMFPACK, MKL, SuperLU_DIST) and skip without one; at bddabcc the Schwarz, cell overlap and scatter tests pass with SuperLU, with UMFPACK only and with MKL only (three repeated runs), with identical iteration tables. Full-suite runs below are at 80043fa (c439741 changed only a test comment and one sentence of `doc_solvers.md`). After merging the #474 review fixes (790c51f) and applying the review conventions (87681d4): Release `lin_alg`+`fem`+`physics/MUG` (not slow) gave 2 failed (the known ILU pair), 587 passed, 380 skipped; checked build, all Schwarz tests including slow (`test_native_schwarz`, `test_cell_overlap`, `test_cell_schwarz`, `test_solver_xml`, `test_MUG_schwarz`) gave 52 passed, 15 skipped (PETSc variants), with no shared-value check failures. Iteration counts are unchanged.
 
 | Run | Result |
 |---|---|
@@ -110,6 +112,7 @@ All non-weighted columns (and the update/re-setup columns not shown, which equal
 ### Timing
 
 Cell-mode setup against the cell-adjacency tip (2 processes, 4 levels, order 3, `debug=1`, medians of 2x3 alternating runs): sum of setup phases 0.528 s vs 0.498 s with one block per process, 0.571 s vs 0.561 s with three; graph-mode setup 0.0360 s vs 0.0359 s. Phases doing identical work vary by a similar amount between runs (for example 0.45 vs 0.415 s and 1.27 vs 1.175 s), so there is no measurable regression.
+
 
 ---
 _Generated by [Claude Code](https://claude.ai/code)_
