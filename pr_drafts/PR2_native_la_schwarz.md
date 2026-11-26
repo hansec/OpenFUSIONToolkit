@@ -1,8 +1,5 @@
-**Title:** Linear Algebra: Native overlapping (additive) Schwarz preconditioner with graph and cell overlap
-
-**Branch:** `hansec/OpenFUSIONToolkit:claude/native-la-schwarz` (c439741) → `OpenFUSIONToolkit/OpenFUSIONToolkit:main`
-
-> Depends on #474 (`claude/native-la-core`). This branch contains #474; please review it as the diff against `claude/native-la-core`, which holds only the Schwarz work.
+## Naming your pull request
+This change is not specific to one physics tool, so the title starts with `Linear Algebra:`.
 
 ## Primary changes
 
@@ -24,7 +21,7 @@ Native overlapping Schwarz preconditioner (`oft_schwarz_precond`, XML `<pre type
 - `native_la`: submatrices by arbitrary row and column sets, with the symbolic extraction cached by the parent pattern (`native_extraction`, `native_extraction_get`); block-Jacobi uses the same path.
 - `fem_utils`: `fem_partition_cells`/`comp_fem_partition_cells` (the existing partitions, also returning the cell partition); `mesh_local_partition` optionally returns the cell partition.
 - Docs: `doc_solvers.md` documents every Schwarz option.
-- Tests (new): `lin_alg/test_native_schwarz` (block-Jacobi equivalences, subdomain matrices against the independently assembled global matrix, DoF-list subdomains, updates, iteration trends; plain, x-periodic and fully periodic cubes on 1/2/4 processes), `lin_alg/test_cell_overlap` (builder against brute-force layering), `lin_alg/test_cell_schwarz` (cell-mode exactness, trends, updates; plain and x-periodic), `physics/MUG/test_MUG_schwarz.py` (cell-mode Schwarz as the MG smoother reproducing the block-Jacobi/reference errors, including the triply periodic sound wave and geometric multigrid), new cases in `lin_alg/test_solver_xml.py`.
+- Tests (new): `lin_alg/test_native_schwarz` (block-Jacobi equivalences, subdomain matrices against the independently assembled global matrix, DoF-list subdomains, updates, iteration trends; plain, x-periodic and fully periodic cubes on 1/2/4 processes), `lin_alg/test_cell_overlap` (builder against brute-force layering), `lin_alg/test_cell_schwarz` (cell-mode exactness, trends, updates; plain and x-periodic), `physics/MUG/test_MUG_schwarz.py` (cell-mode Schwarz as the MG smoother reproducing the block-Jacobi/reference errors, including the triply periodic sound wave and geometric multigrid), new cases in `lin_alg/test_solver_xml.py`. `base/test_scatter` tests scatter plans directly (forward/reverse, insert/add, real/complex, repeated destinations, masks, local weights, split calls) on 1, 2 and 4 processes.
 
 ## API changes
 
@@ -47,13 +44,13 @@ No existing input changes behaviour: block-Jacobi inputs are unchanged (same cod
 
 **New Fortran API:** modules `oft_native_overlap_mod`, `fem_cell_overlap`, `oft_mesh_overlap`; types `oft_schwarz_precond`, `oft_native_overlap`, `oft_fem_cell_overlap`, `oft_cell_overlap_builder` (abstract), `oft_overlap_dofs`, `oft_cell_gid_set`, `native_extraction`, `oft_index_set`; component `oft_matrix%cell_ovl`; constants `OFT_CELL_ADJ_POINT/EDGE/FACE`; procedures `native_overlap_setup`, `native_overlap_setup_dofs`, `native_overlap_update`, `native_overlap_gather`, `native_overlap_scatter`, `native_overlap_pu_setup`, `native_overlap_index`, `native_overlap_delete`, `fem_cell_overlap_create`, `mesh_has_transfer_level`, `mesh_base_gid_inverse`, `mesh_base_candidates`, `mesh_cell_base_index`, `native_extraction_get`, `fem_partition_cells`, `comp_fem_partition_cells`, `index_set_create/delete/grow`, `oft_exchange_i8`, `oft_exchange_report`; new optional arguments `rows`/`cols` of the native submatrix setup and `cpart_out` of `mesh_local_partition`.
 
-## Test results
+## Testing
 
-All runs on Ubuntu 24.04, GCC 14, OpenMP + Open MPI, OpenBLAS/UMFPACK/SuperLU/ARPACK/HDF5/METIS from system packages, 4 cores, `OMP_NUM_THREADS=2`. Full-suite runs below are at 80043fa (c439741 changed only a test comment and one sentence of `doc_solvers.md`). After merging the #474 review fixes (790c51f) and applying the review conventions (87681d4): Release `lin_alg`+`fem`+`physics/MUG` (not slow) gave 2 failed (the known ILU pair), 587 passed, 380 skipped; checked build, all Schwarz tests including slow (`test_native_schwarz`, `test_cell_overlap`, `test_cell_schwarz`, `test_solver_xml`, `test_MUG_schwarz`) gave 52 passed, 15 skipped (PETSc variants), with no shared-value check failures. Iteration counts are unchanged.
+All runs on Ubuntu 24.04, GCC 14, OpenMP + Open MPI, OpenBLAS/UMFPACK/SuperLU/ARPACK/HDF5/METIS from system packages, 4 cores, `OMP_NUM_THREADS=2`. `main` (7dc653c, including #474) is merged into the branch; the diff against `main` is identical to the diff against the #474 branch tip. Reruns of the full suites on the merged branch will be posted as a follow-up; the new `base/test_scatter` passes on 1, 2 and 4 processes. Full-suite runs below are at 80043fa (c439741 changed only a test comment and one sentence of `doc_solvers.md`). After merging the #474 review fixes (790c51f) and applying the review conventions (87681d4): Release `lin_alg`+`fem`+`physics/MUG` (not slow) gave 2 failed (the known ILU pair), 587 passed, 380 skipped; checked build, all Schwarz tests including slow (`test_native_schwarz`, `test_cell_overlap`, `test_cell_schwarz`, `test_solver_xml`, `test_MUG_schwarz`) gave 52 passed, 15 skipped (PETSc variants), with no shared-value check failures. Iteration counts are unchanged.
 
 | Run | Result |
 |---|---|
-| #474 baseline (`claude/native-la-core` 1edb7ba), Release, `make test` | 3 failed, 1173 passed, 394 skipped, 229 deselected |
+| #474 baseline (1edb7ba), Release, `make test` | 3 failed, 1173 passed, 394 skipped, 229 deselected |
 | This branch, Release, `make test` | 3 failed, 1218 passed, 394 skipped, 232 deselected |
 | This branch, checked Release (`-DCMAKE_Fortran_FLAGS=-DOFT_DEBUG`, `native_check_shared` active), `make test` | 3 failed, 1218 passed, 394 skipped, 232 deselected; no shared-value check failures |
 | This branch, checked build, slow Schwarz cases (`test_native_schwarz` periodic mpi4, `test_cell_schwarz` mpi4_refined and periodic mpi2_refined) | 3 passed |
