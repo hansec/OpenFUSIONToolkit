@@ -17,6 +17,7 @@ Exits non-zero if the model cannot be used as-is (eg. missing resistivity or
 failed hole verification).
 """
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -114,18 +115,28 @@ def read_file_info(mesh_file):
         # Legacy (Cubit) nodesets: used as holes when no "thincurr/holes" group exists
         nodesets = []
         if 'mesh/NUM_NODESETS' in fid:
-            i = 1
-            while 'mesh/NODESET{0:04d}'.format(i) in fid:
+            count = int(numpy.asarray(fid['mesh/NUM_NODESETS'][()]).flat[0])
+            for i in range(1, count + 1):
                 nodesets.append(fid['mesh/NODESET{0:04d}'.format(i)][()] - 1)
-                i += 1
         info['nodesets'] = nodesets
         tc = fid['thincurr'] if 'thincurr' in fid else {}
         info['holes'] = []
-        if 'holes' in tc:
+        info['modern_holes'] = 'holes' in tc
+        if info['modern_holes']:
             nholes = tc['holes/NHOLES'][0]
             info['holes'] = [tc['holes/HOLE{0:04d}'.format(i+1)][()] - 1 for i in range(nholes)]
         info['holes_version'] = int(tc['HOLES_VERSION'][0]) if 'HOLES_VERSION' in tc else None
-        info['closures'] = (tc['CLOSURES'][()] - 1).tolist() if 'CLOSURES' in tc else []
+        # The native reader uses the first legacy sideset unless modern closures are present.
+        info['legacy_closures'] = (
+            'CLOSURES' not in tc and 'mesh/NUM_SIDESETS' in fid
+            and int(numpy.asarray(fid['mesh/NUM_SIDESETS'][()]).flat[0]) > 0
+        )
+        if 'CLOSURES' in tc:
+            info['closures'] = (tc['CLOSURES'][()] - 1).tolist()
+        elif info['legacy_closures']:
+            info['closures'] = (fid['mesh/SIDESET0001'][()] - 1).tolist()
+        else:
+            info['closures'] = []
         info['junctions'] = 'junctions' in tc
         info['junction_holes'] = int(tc['junctions/NHOLES'][0]) if info['junctions'] else 0
         info['njumpers'] = int(tc['jumpers/NJUMPERS'][0]) if 'jumpers' in tc else 0
@@ -228,6 +239,10 @@ def setup_and_query(mesh_file, xml_file, jumper_start, insulated, nthreads):
     _load_oft()
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.ThinCurr import ThinCurr
+    setup_model = getattr(ThinCurr, 'setup_model', None)
+    if setup_model is None or 'insulated_junctions' not in inspect.signature(setup_model).parameters:
+        raise ValueError('This skill requires ThinCurr.setup_model() with insulated_junctions. '
+                         'Use an OpenFUSIONToolkit source build that provides it. See the oft-build skill.')
     myOFT = OFT_env(nthreads=nthreads)
     tw_model = ThinCurr(myOFT)
     tw_model.setup_model(mesh_file=oft_path(mesh_file), xml_filename=oft_path(xml_file), jumper_start=jumper_start,
@@ -314,6 +329,8 @@ def main():
     # Hole/closure definition source
     if info['junctions']:
         hole_source = 'junction-split mesh ({0} junction holes)'.format(info['junction_holes'])
+    elif info['legacy_closures'] and info['closures']:
+        hole_source = 'mesh/SIDESET0001 ({0} legacy closures)'.format(len(info['closures']))
     elif info['holes'] or info['closures'] or (info['holes_version'] is not None):
         hole_source = 'thincurr/holes ({0} holes, {1} closures{2})'.format(
             len(info['holes']), len(info['closures']),
@@ -331,13 +348,24 @@ def main():
                 errors.append('Mesh topology needs {holes} hole(s) and {closures} closure(s) but none are defined; '
                               'run OFT_ThinCurr_holes (compute_homology) on it'.format(**expected))
                 skip_setup = True
-        elif hole_source.startswith('legacy'):
+        elif not info['modern_holes']:
             nsets = len(info['nodesets'])
             if args.jumper_start == 0 and nsets > expected['holes']:
                 errors.append('{0} legacy nodesets but the topology needs only {1} hole(s); the extra nodesets are '
                               'probably jumpers (try --jumper-start {2}, and "jumper_start" when running), or '
                               'recreate the holes with OFT_ThinCurr_holes'.format(nsets, expected['holes'],
                                                                                   expected['holes'] - nsets))
+                skip_setup = True
+            # The native wrapper treats later nodesets as jumpers, not holes.
+            nholes = nsets
+            if 0 < args.jumper_start <= nsets:
+                nholes = args.jumper_start - 1
+            elif -nsets <= args.jumper_start < 0:
+                nholes = nsets + args.jumper_start
+            # Raw topology counts can be misleading for periodic meshes.
+            if info['nfp'] is None and not info['has_pmap'] and nholes < expected['holes']:
+                errors.append('Legacy nodesets define {0} hole(s), but the topology needs {1}. '
+                              'Recreate the holes with OFT_ThinCurr_holes.'.format(nholes, expected['holes']))
                 skip_setup = True
         elif len(info['holes']) != expected['holes'] or len(info['closures']) != expected['closures']:
             warnings.append('File defines {0} hole(s) and {1} closure(s); the topology suggests {2} and {3}'.format(
@@ -386,7 +414,7 @@ def main():
         print('    {0:4d}: {1:8d} cells, area {2:.4E} m^2'.format(reg_id, reg_info['cells'], reg_info['area']))
 
     if skip_setup:
-        print('\nSkipping ThinCurr setup: it would abort on the problem reported below')
+        print('\nSkipping ThinCurr setup because the file failed validation')
     if not (args.no_setup or skip_setup):
         print('\n--- ThinCurr setup (verifies holes and closures) ---', flush=True)
         try:

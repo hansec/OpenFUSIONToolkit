@@ -33,6 +33,11 @@ of a `thincurr-run` case file (`mesh_file`, `xml_file`, `jumper_start`,
 
 ## Before anything else
 
+To verify a model with native setup, use an OFT source build whose
+`ThinCurr.setup_model()` accepts `insulated_junctions`. The 26.9 release
+can import successfully but lacks this option. File-only inspection
+(`--no-setup`) does not need an OFT build.
+
 ```bash
 python -c "from OpenFUSIONToolkit.ThinCurr import ThinCurr; print('ok')"
 ```

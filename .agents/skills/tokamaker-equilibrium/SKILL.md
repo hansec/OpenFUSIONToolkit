@@ -13,7 +13,9 @@ Two modes:
 
 ## Before anything else
 
-Check that the Python package imports. It needs a built/installed OFT:
+Use an OFT source build that provides `TokaMaker.setup_model()`. The 26.9
+release can import successfully but lacks this method. The driver checks
+for the method before setting up the model.
 
 ```bash
 python -c "from OpenFUSIONToolkit.TokaMaker import TokaMaker; print('ok')"
