@@ -100,6 +100,9 @@ free of paths into this repository (use `<skill-dir>/scripts/...`), and when add
 agent frontmatter fields, check that `install.py` translates or drops them: Codex
 and Gemini CLI reject agent files with unknown keys.
 
+During uninstall, select both `openai` and `google` to remove their shared skills.
+Selecting only one removes that tool's agents and keeps the shared skills.
+
 ## Build System
 
 OFT uses a two-stage build: `src/utilities/build_libs.py` builds external libraries and
