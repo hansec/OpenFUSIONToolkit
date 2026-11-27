@@ -1,0 +1,6 @@
+H1 face    k=3    full block n= 1  (T,A,S)=[1 0 0] monomial
+H1 face    k=4    full block n= 3  (T,A,S)=[1 0 1] monomial | increment n=2 (T,A,S)=[0 0 1] NOT monomial
+H1 face    k=5    full block n= 6  (T,A,S)=[2 0 2] monomial | increment n=3 (T,A,S)=[1 0 1] monomial
+HCurl face p=2    full block n= 2  (T,A,S)=[0 0 1] NOT monomial
+HCurl face p=3    full block n= 5  (T,A,S)=[0 1 2] NOT monomial | increment n=3 (T,A,S)=[0 1 1] monomial
+HCurl face p=4    full block n= 9  (T,A,S)=[1 2 3] monomial | increment n=4 (T,A,S)=[1 1 1] monomial
