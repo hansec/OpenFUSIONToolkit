@@ -230,7 +230,10 @@ def setup_and_query(mesh_file, xml_file, jumper_start, insulated, nthreads):
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.ThinCurr import ThinCurr
     setup_model = getattr(ThinCurr, 'setup_model', None)
-    if setup_model is None or 'insulated_junctions' not in inspect.signature(setup_model).parameters:
+    parameters = inspect.signature(setup_model).parameters if callable(setup_model) else {}
+    insulated_parameter = parameters.get('insulated_junctions')
+    if (insulated_parameter is None or
+            insulated_parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.VAR_POSITIONAL)):
         raise ValueError('This skill requires ThinCurr.setup_model() with insulated_junctions. '
                          'Use an OpenFUSIONToolkit source build that provides it. See the oft-build skill.')
     myOFT = OFT_env(nthreads=nthreads)
