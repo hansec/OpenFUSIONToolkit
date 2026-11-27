@@ -337,30 +337,34 @@ def main():
     report['hole_source'] = hole_source
     skip_setup = False
     expected = stats['expected_topology']
-    if expected is not None and not info['junctions']:
+    nsets = len(info['nodesets'])
+    if abs(args.jumper_start) > nsets:
+        errors.append('"jumper_start" exceeds number of nodesets in file')
+        skip_setup = True
+    periodic = info['nfp'] is not None or info['has_pmap']
+    if expected is not None and not info['junctions'] and not skip_setup:
         if hole_source == 'none':
             if expected['holes'] > 0 or expected['closures'] > 0:
                 errors.append('Mesh topology needs {holes} hole(s) and {closures} closure(s) but none are defined; '
                               'run OFT_ThinCurr_holes (compute_homology) on it'.format(**expected))
                 skip_setup = True
         elif not info['modern_holes']:
-            nsets = len(info['nodesets'])
-            if args.jumper_start == 0 and nsets > expected['holes']:
-                errors.append('{0} legacy nodesets but the topology needs only {1} hole(s); the extra nodesets are '
-                              'probably jumpers (try --jumper-start {2}, and "jumper_start" when running), or '
-                              'recreate the holes with OFT_ThinCurr_holes'.format(nsets, expected['holes'],
-                                                                                  expected['holes'] - nsets))
-                skip_setup = True
             # The native wrapper treats later nodesets as jumpers, not holes.
             nholes = nsets
-            if 0 < args.jumper_start <= nsets:
+            if args.jumper_start > 0:
                 nholes = args.jumper_start - 1
-            elif -nsets <= args.jumper_start < 0:
+            elif args.jumper_start < 0:
                 nholes = nsets + args.jumper_start
-            # Raw topology counts can be misleading for periodic meshes.
-            if info['nfp'] is None and not info['has_pmap'] and nholes < expected['holes']:
+            if ((args.jumper_start == 0 and nholes > expected['holes'])
+                    or (not periodic and nholes < expected['holes'])):
                 errors.append('Legacy nodesets define {0} hole(s), but the topology needs {1}. '
-                              'Recreate the holes with OFT_ThinCurr_holes.'.format(nholes, expected['holes']))
+                              'Check --jumper-start, or recreate the holes with OFT_ThinCurr_holes.'.format(
+                                  nholes, expected['holes']))
+                skip_setup = True
+            if not periodic and len(info['closures']) != expected['closures']:
+                errors.append('File defines {0} closure(s), but the topology needs {1}. '
+                              'Recreate the closures with OFT_ThinCurr_holes.'.format(
+                                  len(info['closures']), expected['closures']))
                 skip_setup = True
         elif len(info['holes']) != expected['holes'] or len(info['closures']) != expected['closures']:
             warnings.append('File defines {0} hole(s) and {1} closure(s); the topology suggests {2} and {3}'.format(

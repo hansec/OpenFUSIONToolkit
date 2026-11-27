@@ -31,9 +31,14 @@ class InspectModelTests(unittest.TestCase):
     def test_legacy_sideset_supplies_closure(self):
         points = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)]
         cells = [(1, 3, 2), (1, 2, 4), (2, 3, 4), (3, 1, 4)]
-        result = self.inspect(points, cells, {'NUM_SIDESETS': [1], 'SIDESET0001': [1]})
+        sets = {'NUM_SIDESETS': [1], 'SIDESET0001': [1]}
+        result = self.inspect(points, cells, sets)
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn('SIDESET0001', result.stdout)
+
+        disk = self.inspect(points[:3], cells[:1], sets)
+        self.assertEqual(disk.returncode, 1, disk.stdout)
+        self.assertIn('File defines 1 closure(s), but the topology needs 0', disk.stdout)
 
     def test_legacy_jumpers_do_not_count_as_holes(self):
         # A square annulus has one hole. Its only nodeset is reserved for a jumper.
@@ -48,3 +53,7 @@ class InspectModelTests(unittest.TestCase):
             result = self.inspect(points, cells, sets, '--jumper-start', start)
             self.assertEqual(result.returncode, 1, result.stdout)
             self.assertIn('Legacy nodesets define 0 hole(s), but the topology needs 1', result.stdout)
+        for start in ('2', '-2'):
+            result = self.inspect(points, cells, sets, '--jumper-start', start)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn('exceeds number of nodesets', result.stdout)
