@@ -374,3 +374,13 @@ def test_schur_cell_lin_r1_p2_mpi():
     verr_exp = 2.124325E-02
     assert alfven_setup(1,2,2,2,linear=True,petsc=False,xml_file='oft_in_xmhd_schur_cell.xml')
     assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+@pytest.mark.slow
+@pytest.mark.mpi
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_schur_hpmg_lin_r2_p2_mpi(petsc_flag):
+    '''Linearized Alfven wave with Block-Schur combined h+p-MG on a once-refined mesh, two MPI processes.'''
+    berr_exp = 1.013647E-02
+    verr_exp = 4.472189E-03
+    assert alfven_setup(1,3,2,2,linear=True,petsc=petsc_flag,xml_file='oft_in_xmhd_schur.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)
