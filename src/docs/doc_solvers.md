@@ -94,7 +94,7 @@ This method is supported through both the native and PETSc backends through
 | Group      | Description | Type      | List |
 |------------|-------------|-----------|------|
 | `nlocal`   | Number of local blocks (-1 for per-field, <-1 for custom field `groups`) | int | Yes |
-| `groups`   | Group index (1..ngroups) for each field in multi-field vector [n] | int | Yes |
+| `groups`   | Group index (1..ngroups) for each field in multi-field vector [n] (native only; note that 3D xMHD allocates 7 fields even when `Ne`/`Ti` advection is disabled, e.g., `1 1 2 3 4 5 6` to couple `Bc+Bg`) | int | Yes |
 | `boverlap` | Overlap boundary rows (native only) | bool | false |
 
 \subsection doc_solvers_basic_schur Physics-Based Block-Schur (xMHD)
@@ -111,9 +111,20 @@ all MG levels so that p-MG / h-MG can be applied cleanly to the sub-blocks.
 |--------------|-------------|------|---------|
 | `schur_type` | Factorization type (`lower`, `upper`, or `ldu`) | str | `ldu` |
 | `sv_scale`   | Scale factor on parabolized Alfven/acoustic term in \f$ S_V \f$ | real | `1.0` |
-| `b_pre`      | Solver or `<pre type="mg">` definition for magnetic block \f$ J_{BB} \f$ | xml | `gmres(2)+BJ(1,ilu)` |
+| `b_pre`      | Solver or `<pre type="mg">` definition for magnetic block \f$ J_{BB} \f$ | xml | `gmres(2)+BJ(-1,ilu)` |
 | `v_pre`      | Solver or `<pre type="mg">` definition for velocity Schur \f$ S_V \f$ | xml | MG on \f$ S_V \f$ |
 | `s_pre`      | Solver definition for scalar block \f$ J_{SS} \f$ (when active) | xml | `gmres(2)+BJ(-1,ilu)` |
+
+\note Practical tuning guidance from large-scale 3D benchmarks (`1.8M`--`6.3M` DOFs):
+- For polynomial orders `p <= 3`, field-split `block_jacobi` (`<nlocal>-1</nlocal>` with `ilu`) is
+  recommended inside `<b_pre>` because zero-fill `ILU(0)` on coupled `nlocal=1` `J_BB` stalls on
+  large meshes (`>= 130k` tets). For `p >= 4`, non-overlapping partitioned `block_jacobi`
+  (`<nlocal>16</nlocal>` with `lu` / `SuperLU`) cures `ILU(0)` breakdown without the fill blowup of
+  graph-overlapped `add_schwarz` + `lu`.
+- Inside `<v_pre>`, `p`-MG (or `h+p`-MG) with `add_schwarz` (`<overlap>1</overlap>`, `ilu`)
+  smoothers and a distributed coarse direct solve (`superd` or `mumps`, supported on both PETSc and
+  native via `<distributed>T</distributed>`) delivers the best overall scaling; `J_BB` does not
+  typically require MG. Both PETSc and native `add_schwarz` are supported.
 
 \subsection doc_solvers_basic_mg Multi-Grid Preconditioner
 

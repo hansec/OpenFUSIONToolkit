@@ -326,3 +326,20 @@ def test_gmres_schwarz_cell(schwarz_type):
     converged_error = 5.1147216970434615
     assert xml_setup(xml_file,petsc=False,cell_parts=4)
     assert validate_result(iteration_count,converged_error)
+
+#============================================================================
+# PETSc ASM/BJ with <solver type="ilu"> omitting <package> must default to petsc ILU
+def test_gmres_petsc_ilu_default_package():
+    xml_file = """
+    <solver type="gmres">
+        <its>-3</its>
+        <nrits>20</nrits>
+        <pre type="block_jacobi">
+            <nlocal>1</nlocal>
+            <solver type="ilu"></solver>
+        </pre>
+    </solver>
+    """
+    converged_error = 5.1147216970434615
+    assert xml_setup(xml_file,petsc=True)
+    assert validate_result(None,converged_error)

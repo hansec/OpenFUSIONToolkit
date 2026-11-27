@@ -6145,8 +6145,11 @@ ELSE
     TYPE IS(oft_native_gmres_solver)
       s%nrits=2
   END SELECT
-  CALL create_bjacobi_pre(this%B_solver%pre,1)
-  CALL create_ilu_pre(this%B_solver%pre%pre)
+  CALL create_bjacobi_pre(this%B_solver%pre,-1)
+  IF(ASSOCIATED(this%B_solver%pre%pre))THEN
+    DEALLOCATE(this%B_solver%pre%pre)
+    CALL create_ilu_pre(this%B_solver%pre%pre)
+  END IF
 END IF
 this%B_solver%A=>ml_JBB(nlevels)%m
 this%B_solver%full_residual=.FALSE.
@@ -6166,7 +6169,10 @@ ELSE
       s%nrits=4
   END SELECT
   CALL create_bjacobi_pre(this%V_solver%pre,1)
-  CALL create_ilu_pre(this%V_solver%pre%pre)
+  IF(ASSOCIATED(this%V_solver%pre%pre))THEN
+    DEALLOCATE(this%V_solver%pre%pre)
+    CALL create_ilu_pre(this%V_solver%pre%pre)
+  END IF
 END IF
 this%V_solver%A=>ml_SV(nlevels)%m
 this%V_solver%full_residual=.FALSE.
@@ -6187,7 +6193,10 @@ IF(this%has_scalars)THEN
         s%nrits=2
     END SELECT
     CALL create_bjacobi_pre(this%S_solver%pre,-1)
-    CALL create_ilu_pre(this%S_solver%pre%pre)
+    IF(ASSOCIATED(this%S_solver%pre%pre))THEN
+      DEALLOCATE(this%S_solver%pre%pre)
+      CALL create_ilu_pre(this%S_solver%pre%pre)
+    END IF
   END IF
   this%S_solver%A=>ml_JSS(nlevels)%m
   this%S_solver%full_residual=.FALSE.

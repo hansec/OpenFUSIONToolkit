@@ -424,6 +424,7 @@ SELECT CASE(TRIM(solver_type))
     SELECT TYPE(solver)
       TYPE IS(oft_petsc_direct_solver)
         solver%pre_factor%type='ilu'
+        solver%pre_factor%package='petsc'
     END SELECT
   CASE DEFAULT
     CALL oft_abort("Invalid solver type.","create_petsc_solver",__FILE__)
