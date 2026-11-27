@@ -419,3 +419,32 @@ Now that `#453`/`#456` are merged and `minlev` is exposed in `MUG_sph_tilt`/`MUG
 | | `2e-5` | `C4_ldu` (Native) | $h+p$-MG (`4`) | `64x` | `8.5` | `16.57` | `6.64s` | `9.93` | `57.4` | — |
 
 **Key Takeaway**: **$h+p$-MG Block-Schur is a strict dominance win over pure $p$-MG**. Across both curved spheromaks and periodic Alfvén waves (`1.84M`--`6.32M` DOFs, up to $\mathrm{CFL}_A=10$ and 2 geometric coarsenings = **64x smaller coarse `S_V`**), $h+p$-MG incurs **zero iteration penalty**, slashes coarse factorization setup **2.3--4.5x**, speeds up steady-state `t_step` by **4--7%**, and reduces peak RSS by `110--120 MB/rank`. This directly keeps distributed coarse `S_V` LU small even on Tier B/C (`10^7+` DOF) meshes.
+
+---
+
+## 10. Post-PR #477 Study 4: Zero-Copy `borrow_local`/`release_local` in `schur_pre_apply` & Cumulative Gains
+
+In `mug-pmg-step10-schur-zerocopy`, `schur_pre_apply` (`src/physics/xmhd.F90`) was refactored to use a compact `copy_vec_blocks` helper and `u%copy(g)` (`-17` net lines). On native vectors, `borrow_local(OFT_ACCESS_READ)` + `borrow_local(OFT_ACCESS_WRITE)` + `release_local(..., sync=.FALSE.)` eliminates all ~20--28 per-iteration heap allocations (`get_local`/`DEALLOCATE(vtmp)`) and redundant MPI `stitch(0)` calls; non-native (PETSc) vectors retain single-flush `restore_local(..., wait=...)` with zero extra `get_local` scatters.
+
+### 10.1 Before vs After Timing (`S2-p2`, `np=16`, 10 linear steps)
+
+| Case | Before (`tot` / `t_step` / `RSS`) | After (`tot` / `t_step` / `RSS`) | Delta (`tot`) |
+|---|---|---|---|
+| `pMG C4_lower` (Native, `dt=1e-6`) | `40.2s` / `3.98s` / `1.41G` | `39.9s` / `3.98s` / `1.41G` | `-0.7%` |
+| `pMG C4_ldu` (Native, `dt=1e-6`) | `43.2s` / `4.08s` / `1.41G` | `43.4s` / `4.07s` / `1.44G` | `+0.5%` |
+| `hpMG1 C4_ldu` (Native, `dt=1e-6`) | `41.3s` / `3.96s` / `1.34G` | `40.9s` / `3.95s` / `1.33G` | `-1.0%` |
+| `hpMG1 C4_ldu` (Native, `dt=2e-6`) | `116.1s` / `11.08s` / `1.33G` | `115.1s` / `11.40s` / `1.34G` | `-0.9%` |
+| `hpMG1 C4_lower` (PETSc, `dt=1e-6`) | `27.3s` / `2.69s` / `1.31G` | `27.3s` / `2.69s` / `1.31G` | `0.0%` |
+| `hpMG1 C4_ldu` (PETSc, `dt=2e-6`) | `85.7s` / `8.40s` / `1.30G` | `85.2s` / `8.68s` / `1.31G` | `-0.6%` |
+
+**Key Takeaway**: Zero-copy `schur_pre_apply` passes all 7 `test_alfven.py -k schur` regression tests (Native & PETSc, pure $p$-MG, cell-mode Schwarz, and $h+p$-MG) with cleaner code and ~0.5--1% net runtime savings on high-CFL Native runs, confirming that >99% of solve time is spent inside the sub-block solvers rather than vector packing.
+
+### 10.2 Cumulative Stacked Speedup Summary (`S2-p2`, `dt=1e-6`, $\mathrm{CFL}_A\approx 5$, `np=16`)
+
+| Stage (Cumulative Stack) | `its` | `t_setup` | `t_step` | Individual Gain | Cumulative Speedup |
+|---|---:|---:|---:|---:|---:|
+| Baseline `C0` (`vel_scale=1e3`, pre-PR 3) | `79` | `12.18s` | `26.74s` | — | `1.00x` |
+| + PR 3 (`vel_scale=-1` auto) | `36` | `3.21s` | `12.24s` | `2.18x` | `2.18x` |
+| + PR 4 Block-Schur (`lower`, `BJ` on `S_V`) | `18` | `1.75s` | `3.48s` | `3.52x` | `7.68x` |
+| + Overlapping Schwarz (`ov=1, ILU`) on `S_V` | `14` | `2.07s` | `2.84s` | `1.23x` | `9.42x` |
+| + Combined $h+p$-MG (`minlev=2`, `8x` smaller coarse `S_V`) | `14` | `0.90s` | `2.69s` | `1.06x` (`2.3x` setup) | **`9.94x`** |

@@ -38,9 +38,10 @@ USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE multigrid, ONLY: multigrid_mesh, multigrid_level, multigrid_base_pushcc
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate, &
-  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat, OFT_ACCESS_ACCUMULATE, OFT_ACCESS_READ
+  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat, &
+  OFT_ACCESS_ACCUMULATE, OFT_ACCESS_READ, OFT_ACCESS_WRITE
 USE oft_deriv_matrices, ONLY: oft_mf_matrix, oft_noop_matrix
-USE oft_native_la, ONLY: oft_native_matrix
+USE oft_native_la, ONLY: oft_native_matrix, oft_native_vector
 USE oft_solver_base, ONLY: oft_solver
 USE oft_native_solvers, ONLY: oft_nksolver, oft_native_gmres_solver
 USE oft_la_utils, ONLY: create_vector, create_matrix, combine_matrices
@@ -6278,8 +6279,6 @@ SUBROUTINE schur_pre_apply(self,u,g)
 CLASS(oft_xmhd_schur_pre), INTENT(inout) :: self !< Preconditioner object
 CLASS(oft_vector), INTENT(inout) :: u !< Output preconditioned vector
 CLASS(oft_vector), INTENT(inout) :: g !< Input residual vector
-INTEGER(i4) :: k
-REAL(r8), POINTER :: vtmp(:)
 DEBUG_STACK_PUSH
 !---Allocate work vectors once
 IF(.NOT.self%initialized)THEN
@@ -6298,44 +6297,23 @@ IF(.NOT.self%initialized)THEN
   self%initialized=.TRUE.
 END IF
 !---Unpack input residual g into (r_B, r_V, r_S)
-NULLIFY(vtmp)
-CALL g%get_local(vtmp,iblock=1); CALL self%r_B%restore_local(vtmp,iblock=1,wait=.TRUE.); DEALLOCATE(vtmp)
-CALL g%get_local(vtmp,iblock=2); CALL self%r_B%restore_local(vtmp,iblock=2); DEALLOCATE(vtmp)
-DO k=1,3
-  CALL g%get_local(vtmp,iblock=2+k)
-  CALL self%r_V%restore_local(vtmp,iblock=k,wait=(k<3))
-  DEALLOCATE(vtmp)
-END DO
-IF(self%has_scalars)THEN
-  DO k=1,self%nscalars
-    CALL g%get_local(vtmp,iblock=5+k)
-    CALL self%r_S%restore_local(vtmp,iblock=k,wait=(k<self%nscalars))
-    DEALLOCATE(vtmp)
-  END DO
-END IF
+CALL copy_vec_blocks(g,1,self%r_B,1,2,.TRUE.)
+CALL copy_vec_blocks(g,3,self%r_V,1,3,.TRUE.)
+IF(self%has_scalars)CALL copy_vec_blocks(g,6,self%r_S,1,self%nscalars,.TRUE.)
 !---Apply block factorization
 IF(self%schur_type==2)THEN
   !---Upper-triangular: solve S_V first, then back-substitute B and S
   CALL self%z_V%set(0.d0)
   CALL self%V_solver%apply(self%z_V,self%r_V)
   CALL self%w_full%set(0.d0)
-  DO k=1,3
-    CALL self%z_V%get_local(vtmp,iblock=k)
-    CALL self%w_full%restore_local(vtmp,iblock=2+k,wait=(k<3))
-    DEALLOCATE(vtmp)
-  END DO
+  CALL copy_vec_blocks(self%z_V,1,self%w_full,3,3,.TRUE.)
   CALL self%A%apply(self%w_full,self%tmp_full)
-  CALL self%tmp_full%get_local(vtmp,iblock=1); CALL self%dz_B%restore_local(vtmp,iblock=1,wait=.TRUE.); DEALLOCATE(vtmp)
-  CALL self%tmp_full%get_local(vtmp,iblock=2); CALL self%dz_B%restore_local(vtmp,iblock=2); DEALLOCATE(vtmp)
+  CALL copy_vec_blocks(self%tmp_full,1,self%dz_B,1,2,.TRUE.)
   CALL self%r_B%add(1.d0,-1.d0,self%dz_B)
   CALL self%z_B%set(0.d0)
   CALL self%B_solver%apply(self%z_B,self%r_B)
   IF(self%has_scalars)THEN
-    DO k=1,self%nscalars
-      CALL self%tmp_full%get_local(vtmp,iblock=5+k)
-      CALL self%dz_S%restore_local(vtmp,iblock=k,wait=(k<self%nscalars))
-      DEALLOCATE(vtmp)
-    END DO
+    CALL copy_vec_blocks(self%tmp_full,6,self%dz_S,1,self%nscalars,.TRUE.)
     CALL self%r_S%add(1.d0,-1.d0,self%dz_S)
     CALL self%z_S%set(0.d0)
     CALL self%S_solver%apply(self%z_S,self%r_S)
@@ -6350,23 +6328,10 @@ ELSE
   END IF
   !---Compute J_VB * z_B (+ J_VS * z_S) via full A%apply on (z_B, 0, z_S)
   CALL self%w_full%set(0.d0)
-  CALL self%z_B%get_local(vtmp,iblock=1); CALL self%w_full%restore_local(vtmp,iblock=1,wait=.TRUE.); DEALLOCATE(vtmp)
-  CALL self%z_B%get_local(vtmp,iblock=2)
-  CALL self%w_full%restore_local(vtmp,iblock=2,wait=self%has_scalars)
-  DEALLOCATE(vtmp)
-  IF(self%has_scalars)THEN
-    DO k=1,self%nscalars
-      CALL self%z_S%get_local(vtmp,iblock=k)
-      CALL self%w_full%restore_local(vtmp,iblock=5+k,wait=(k<self%nscalars))
-      DEALLOCATE(vtmp)
-    END DO
-  END IF
+  CALL copy_vec_blocks(self%z_B,1,self%w_full,1,2,.NOT.self%has_scalars)
+  IF(self%has_scalars)CALL copy_vec_blocks(self%z_S,1,self%w_full,6,self%nscalars,.TRUE.)
   CALL self%A%apply(self%w_full,self%tmp_full)
-  DO k=1,3
-    CALL self%tmp_full%get_local(vtmp,iblock=2+k)
-    CALL self%z_V%restore_local(vtmp,iblock=k,wait=(k<3))
-    DEALLOCATE(vtmp)
-  END DO
+  CALL copy_vec_blocks(self%tmp_full,3,self%z_V,1,3,.TRUE.)
   CALL self%r_V%add(1.d0,-1.d0,self%z_V)
   !---Solve parabolized velocity Schur complement S_V * z_V = r_V*
   CALL self%z_V%set(0.d0)
@@ -6374,23 +6339,14 @@ ELSE
   !---Back-substitute B (and S) for full LDU
   IF(self%schur_type==3)THEN
     CALL self%w_full%set(0.d0)
-    DO k=1,3
-      CALL self%z_V%get_local(vtmp,iblock=k)
-      CALL self%w_full%restore_local(vtmp,iblock=2+k,wait=(k<3))
-      DEALLOCATE(vtmp)
-    END DO
+    CALL copy_vec_blocks(self%z_V,1,self%w_full,3,3,.TRUE.)
     CALL self%A%apply(self%w_full,self%tmp_full)
-    CALL self%tmp_full%get_local(vtmp,iblock=1); CALL self%r_B%restore_local(vtmp,iblock=1,wait=.TRUE.); DEALLOCATE(vtmp)
-    CALL self%tmp_full%get_local(vtmp,iblock=2); CALL self%r_B%restore_local(vtmp,iblock=2); DEALLOCATE(vtmp)
+    CALL copy_vec_blocks(self%tmp_full,1,self%r_B,1,2,.TRUE.)
     CALL self%dz_B%set(0.d0)
     CALL self%B_solver%apply(self%dz_B,self%r_B)
     CALL self%z_B%add(1.d0,-1.d0,self%dz_B)
     IF(self%has_scalars)THEN
-      DO k=1,self%nscalars
-        CALL self%tmp_full%get_local(vtmp,iblock=5+k)
-        CALL self%r_S%restore_local(vtmp,iblock=k,wait=(k<self%nscalars))
-        DEALLOCATE(vtmp)
-      END DO
+      CALL copy_vec_blocks(self%tmp_full,6,self%r_S,1,self%nscalars,.TRUE.)
       CALL self%dz_S%set(0.d0)
       CALL self%S_solver%apply(self%dz_S,self%r_S)
       CALL self%z_S%add(1.d0,-1.d0,self%dz_S)
@@ -6400,23 +6356,51 @@ END IF
 !---Pack (z_B, z_V, z_S) into output vector u
 IF(.NOT.self%has_scalars)THEN
   !---Inactive scalar blocks have identity diagonal in J
-  CALL u%add(0.d0,1.d0,g)
+  CALL u%copy(g)
 END IF
-CALL self%z_B%get_local(vtmp,iblock=1); CALL u%restore_local(vtmp,iblock=1,wait=.TRUE.); DEALLOCATE(vtmp)
-CALL self%z_B%get_local(vtmp,iblock=2); CALL u%restore_local(vtmp,iblock=2,wait=.TRUE.); DEALLOCATE(vtmp)
-DO k=1,3
-  CALL self%z_V%get_local(vtmp,iblock=k)
-  CALL u%restore_local(vtmp,iblock=2+k,wait=(k<3.OR.self%has_scalars))
-  DEALLOCATE(vtmp)
-END DO
-IF(self%has_scalars)THEN
-  DO k=1,self%nscalars
-    CALL self%z_S%get_local(vtmp,iblock=k)
-    CALL u%restore_local(vtmp,iblock=5+k,wait=(k<self%nscalars))
-    DEALLOCATE(vtmp)
+CALL copy_vec_blocks(self%z_B,1,u,1,2,.FALSE.)
+CALL copy_vec_blocks(self%z_V,1,u,3,3,.NOT.self%has_scalars)
+IF(self%has_scalars)CALL copy_vec_blocks(self%z_S,1,u,6,self%nscalars,.TRUE.)
+DEBUG_STACK_POP
+CONTAINS
+!------------------------------------------------------------------------------
+!> Copy contiguous sub-blocks between composite vectors using zero-copy borrow
+!! on native vectors (preserving cross-process consistency without stitching)
+!------------------------------------------------------------------------------
+SUBROUTINE copy_vec_blocks(src,ib_src,dst,ib_dst,nblk,flush_dst)
+CLASS(oft_vector), INTENT(inout) :: src !< Source composite vector
+INTEGER(i4), INTENT(in) :: ib_src !< Starting sub-block index in `src`
+CLASS(oft_vector), INTENT(inout) :: dst !< Destination composite vector
+INTEGER(i4), INTENT(in) :: ib_dst !< Starting sub-block index in `dst`
+INTEGER(i4), INTENT(in) :: nblk !< Number of consecutive sub-blocks to copy
+LOGICAL, INTENT(in) :: flush_dst !< Complete assembly on final block (non-native backends)
+INTEGER(i4) :: j
+REAL(r8), POINTER, CONTIGUOUS :: src_p(:),dst_p(:)
+LOGICAL :: native_copy
+native_copy=.FALSE.
+SELECT TYPE(s=>src)
+  CLASS IS(oft_native_vector)
+    SELECT TYPE(d=>dst)
+      CLASS IS(oft_native_vector)
+        native_copy=.TRUE.
+    END SELECT
+END SELECT
+IF(native_copy)THEN
+  DO j=0,nblk-1
+    CALL src%borrow_local(src_p,OFT_ACCESS_READ,ib_src+j)
+    CALL dst%borrow_local(dst_p,OFT_ACCESS_WRITE,ib_dst+j)
+    dst_p=src_p
+    CALL dst%release_local(dst_p,OFT_ACCESS_WRITE,.FALSE.,ib_dst+j)
+    CALL src%release_local(src_p,OFT_ACCESS_READ,.FALSE.,ib_src+j)
+  END DO
+ELSE
+  DO j=0,nblk-1
+    CALL src%borrow_local(src_p,OFT_ACCESS_READ,ib_src+j)
+    CALL dst%restore_local(src_p,iblock=ib_dst+j,wait=(.NOT.(flush_dst.AND.(j==nblk-1))))
+    CALL src%release_local(src_p,OFT_ACCESS_READ,.FALSE.,ib_src+j)
   END DO
 END IF
-DEBUG_STACK_POP
+END SUBROUTINE copy_vec_blocks
 END SUBROUTINE schur_pre_apply
 !------------------------------------------------------------------------------
 !> Update Block-Schur sub-block solvers after Jacobian rebuild
