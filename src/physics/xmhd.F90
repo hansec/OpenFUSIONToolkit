@@ -38,7 +38,7 @@ USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE multigrid, ONLY: multigrid_mesh, multigrid_level, multigrid_base_pushcc
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, map_list, vector_extrapolate, &
-  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat
+  oft_matrix, oft_matrix_ptr, oft_graph, oft_graph_ptr, oft_local_mat, OFT_ACCESS_ACCUMULATE, OFT_ACCESS_READ
 USE oft_deriv_matrices, ONLY: oft_mf_matrix, oft_noop_matrix
 USE oft_native_la, ONLY: oft_native_matrix
 USE oft_solver_base, ONLY: oft_solver
@@ -53,6 +53,7 @@ USE fem_composite, ONLY: oft_fem_comp_type, oft_ml_fem_comp_type, oft_ml_fe_comp
 USE fem_utils, ONLY: fem_avg_bcc, fem_interp, cc_interp, cross_interp, &
   tensor_dot_interp, fem_partition, fem_dirichlet_diag, fem_dirichlet_vec, &
   fem_map_flag, comp_fem_partition
+USE fem_cell_overlap, ONLY: oft_fem_cell_overlap, fem_cell_overlap_create
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_3D_lagrange_cast, &
   oft_lag_geval_all, oft_scalar_fem, lagrange_vector_unpack, lagrange_vector_repack, &
   lagrange_vector_packrows, lagrange_vector_packcols, lagrange_vector_transmat, &
@@ -333,13 +334,12 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: xmhd_mat_mask !< Matrix block mask
 LOGICAL :: xmhd_bnorm_force = .TRUE. !< Force B-norm to zero in cleaning
 CHARACTER(LEN=2) :: bbc = 'bc' !< Magnetic field BC ('bc','ic')
 CHARACTER(LEN=4) :: vbc = 'all' !< Velocity BC ('all','norm','tang')
-LOGICAL :: xmhd_vbcdir = .FALSE. !< Velocity BC type flag
-INTEGER(i4) :: vbc_type = 1 !< Velocity BC type
+LOGICAL :: xmhd_vbcdir = .FALSE. !< Velocity projected BC flag (OR of per-node BC types over all levels, see xmhd_set_bc)
 CHARACTER(LEN=1) :: nbc = 'd' !< Density BC ('d','n')
 CHARACTER(LEN=1) :: tbc = 'd' !< Temperature BC ('d','n')
 CHARACTER(LEN=3) :: visc_type = 'kin' !< Viscosity type ('kin','iso')
 INTEGER(i4) :: visc_itype = 1 !< Viscosity type flag (1->kin,2->iso)
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: solid_cell !< Solid region flag
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: reg_solid !< Solid region flag for each mesh region (valid on all MG levels)
 !---Physical parameters
 REAL(r8) :: jac_dt = 1.E-3_r8 !< Time step
 REAL(r8) :: dt_max = -1.d0
@@ -398,6 +398,9 @@ TYPE(xmhd_ops), POINTER :: oft_xmhd_ops => NULL() !< Operator container
 TYPE(xmhd_ops), POINTER, DIMENSION(:) :: oft_xmhd_ops_ML => NULL() !< MG operator container
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_int => NULL() !< MG interpolation operators
 TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_J => NULL() !< MG Jacobian operators
+!> Cell overlap builders of the Jacobian matrices, by level (referenced by `ml_J(:)%m%cell_ovl`;
+!! like the operators these live for the duration of the run and are not freed)
+TYPE(oft_fem_cell_overlap), POINTER, DIMENSION(:) :: xmhd_cell_ovl => NULL()
 CLASS(oft_solver), POINTER :: xmhd_pre => NULL() !< Preconditioner object
 LOGICAL :: xmhd_use_schur = .FALSE. !< Use physics-based Block-Schur preconditioner
 LOGICAL :: xmhd_schur_has_s = .FALSE. !< Active scalar fields in Block-Schur
@@ -470,7 +473,7 @@ CONTAINS
 !! | `xmhd_lin_bdf2=T` | Linear runs only: use second-order BDF2 time integration (otherwise first-order backward Euler) | bool |
 !! | `xmhd_lin_euler_start=F` | Linear runs only: take one backward Euler step before BDF2, instead of using the initial condition for both BDF2 history levels (costs one extra preconditioner update) | bool |
 !! | `bbc="bc"`         | Magnetic field boundary condition ("bc", "ic") | str(2) |
-!! | `vbc="all"`        | Velocity boundary condition ("all", "norm", "tang", "xml": per surface from `<vel_bc>`) | str(4) |
+!! | `vbc="all"`        | Velocity boundary condition ("all", "norm", "tang", "xml": per surface from `<vel_bc>`; velocity is always fixed in solid regions) | str(4) |
 !! | `nbc="d"`          | Density boundary condition ("d", "n", "x": per surface from `<den_bc>`) | str(1) |
 !! | `tbc="d"`          | Temperature boundary condition ("d", "n", "x": per surface from `<temp_bc>`) | str(1) |
 !! | `visc_type="kin"`  | Fluid viscosity type ("kin", "iso") | str(3) |
@@ -491,7 +494,7 @@ CONTAINS
 !! | `lin_tol=1E-9`     | Linear solver tolerance | real |
 !! | `nl_tol=1E-5`      | Non-Linear solver tolerance | real |
 !! | `nu_xmhd=1`        | Number of smoother iterations for MG preconditioner | int [nlevels] |
-!! | `xmhd_nparts=1`    | Total number of partitions (colors) for factor based preconditioning. On distributed meshes this is divided across MPI processes (`xmhd_nparts/nprocs` per process, rounded down), so it must be at least the number of processes, and a result of one partition per process disables coloring | int [nlevels] |
+!! | `xmhd_nparts=1`    | Total number of partitions (colors) for factor based preconditioning. On distributed meshes this is divided across MPI processes (`xmhd_nparts/nprocs` per process, rounded down), so it must be at least the number of processes, and a result of one partition per process disables coloring. When the native `add_schwarz` preconditioner uses `<overlap_mode>cell</overlap_mode>`, these parts are the cores of the overlapping blocks (one block per process when 1) | int [nlevels] |
 !! | `gmres_maxits=200` | Maximum number of GMRES iterations per linear solve | int |
 !! | `gmres_ninner=20`  | GMRES restart length (iterations between restarts) | int |
 !! | `nclean=500`       | Frequency of divergence cleaning | int |
@@ -592,14 +595,6 @@ END IF
 !------------------------------------------------------------------------------
 m_ion=mu_ion*proton_mass ! Scale by proton mass
 IF(m_ion<0.d0)CALL oft_abort('Invalid Ion mass','xmhd_read_settings',__FILE__)
-!---Set velocity BC flag
-IF(vbc(1:3)/='all')xmhd_vbcdir=.TRUE.
-SELECT CASE(TRIM(vbc))
-  CASE("norm")
-    vbc_type=1
-  CASE("tang")
-    vbc_type=2
-END SELECT
 !---Check viscosity type
 SELECT CASE(visc_type)
   CASE('kin')
@@ -693,6 +688,7 @@ IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort(
 IF(.NOT.oft_3D_lagrange_cast(oft_lagrange,xmhd_ML_lagrange%current_level))CALL oft_abort("Invalid Lagrange FE object","xmhd_run",__FILE__)
 IF(.NOT.oft_3D_h1_cast(oft_hgrad,xmhd_ML_H1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
 mesh=>oft_hcurl%mesh
+force_refactor=.FALSE.
 !------------------------------------------------------------------------------
 ! Read-in Parameters
 !------------------------------------------------------------------------------
@@ -908,8 +904,8 @@ IF(oft_env%head_proc)THEN
       WRITE(*,102)'kappa_perp = ',kappa_perp(1)
     END IF
   END IF
-  IF(temp_floor<0.d0)WRITE(*,102)'temp_floor = ',temp_floor
-  IF(den_floor<0.d0)WRITE(*,102)'den_floor  = ',den_floor
+  IF(temp_floor>0.d0)WRITE(*,102)'temp_floor = ',temp_floor
+  IF(den_floor>0.d0)WRITE(*,102)'den_floor  = ',den_floor
   WRITE(*,102)'L-Tol      = ',lin_tol
   WRITE(*,102)'NL-Tol     = ',nl_tol
   WRITE(*,102)'Mag Energy = ',mer
@@ -1966,7 +1962,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !------------------------------------------------------------------------------
     ! Handle solid region
     !------------------------------------------------------------------------------
-    IF(solid_cell(i))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       eta_curr=eta_reg(mesh%reg(i))
       IF(ASSOCIATED(res_shaping))eta_curr = eta_curr*res_shaping(pt)
       do jc=1,oft_hcurl%nce
@@ -2655,7 +2651,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !------------------------------------------------------------------------------
     ! Compute parabolized Alfven + acoustic velocity Schur term for block-Schur
     !------------------------------------------------------------------------------
-    IF(xmhd_use_schur.AND.(.NOT.solid_cell(i)))THEN
+    IF(xmhd_use_schur.AND.(.NOT.reg_solid(mesh%reg(i))))THEN
       IF(xmhd_jcb.AND.xmhd_adv_b)THEN
         c_sv = xmhd_schur_sv_scale*(jac_dt**2)*det/(u0%N*m_ion*mu0)
         b2_sv = DOT_PRODUCT(u0%B, u0%B)
@@ -2726,7 +2722,7 @@ do ii=1,mesh%tloc_c(ip)%n
   CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%t_bc(j_lag),7)
   IF(xmhd_two_temp)CALL xmhd_rep%mat_zero_local_rows(mtmp,oft_xmhd_ops%t_bc(j_lag),te_ind)
   !---Combine J_VV into parabolized S_V before velocity BCs
-  IF(xmhd_use_schur.AND.(.NOT.solid_cell(i)))THEN
+  IF(xmhd_use_schur.AND.(.NOT.reg_solid(mesh%reg(i))))THEN
     DO vj=1,3
       DO vi=1,3
         mtmp_sv(vi,vj)%m = mtmp_sv(vi,vj)%m + mtmp(2+vi,2+vj)%m
@@ -2754,7 +2750,7 @@ do ii=1,mesh%tloc_c(ip)%n
             END DO
           END IF
         END DO
-        IF(xmhd_use_schur.AND.(.NOT.solid_cell(i)))THEN
+        IF(xmhd_use_schur.AND.(.NOT.reg_solid(mesh%reg(i))))THEN
           DO vj=1,3
             DO jc=1,oft_lagrange%nce
               uvec(1)=mtmp_sv(1,vj)%m(jr,jc)
@@ -2773,7 +2769,7 @@ do ii=1,mesh%tloc_c(ip)%n
   CALL xmhd_rep%mat_zero_local_rows(mtmp,(oft_xmhd_ops%v_bc_type(j_lag)==1),3)
   CALL xmhd_rep%mat_zero_local_rows(mtmp,(ABS(oft_xmhd_ops%v_bc_type(j_lag))==1),4)
   CALL xmhd_rep%mat_zero_local_rows(mtmp,(ABS(oft_xmhd_ops%v_bc_type(j_lag))==1),5)
-  IF(xmhd_use_schur.AND.(.NOT.solid_cell(i)))THEN
+  IF(xmhd_use_schur.AND.(.NOT.reg_solid(mesh%reg(i))))THEN
     CALL ML_schur_V%current_level%mat_zero_local_rows(mtmp_sv,(oft_xmhd_ops%v_bc_type(j_lag)==1),1)
     CALL ML_schur_V%current_level%mat_zero_local_rows(mtmp_sv,(ABS(oft_xmhd_ops%v_bc_type(j_lag))==1),2)
     CALL ML_schur_V%current_level%mat_zero_local_rows(mtmp_sv,(ABS(oft_xmhd_ops%v_bc_type(j_lag))==1),3)
@@ -2781,7 +2777,7 @@ do ii=1,mesh%tloc_c(ip)%n
   !---Handle rotational periodicity
   IF(mesh%periodic%revolved)THEN
     CALL lagrange_vector_packblock(oft_lagrange,mtmp(3:5,3:5),j_lag)
-    IF(xmhd_use_schur.AND.(.NOT.solid_cell(i)))CALL lagrange_vector_packblock(oft_lagrange,mtmp_sv,j_lag)
+    IF(xmhd_use_schur.AND.(.NOT.reg_solid(mesh%reg(i))))CALL lagrange_vector_packblock(oft_lagrange,mtmp_sv,j_lag)
     DO m=1,xmhd_rep%nfields
       IF(m>=3.AND.m<=5)CYCLE
       IF(ASSOCIATED(mtmp(m,3)%m))CALL lagrange_vector_packcols(oft_lagrange,mtmp(m,3:5),j_lag)
@@ -2792,7 +2788,7 @@ do ii=1,mesh%tloc_c(ip)%n
 ! Add local contribution to full matrix
 !------------------------------------------------------------------------------
   IF(xmhd_hall.AND.xmhd_two_temp)NULLIFY(mtmp(1,7)%m)
-  IF(solid_cell(i))THEN
+  IF(reg_solid(mesh%reg(i)))THEN
     CALL xmhd_rep%mat_add_local(Jac,mtmp_solid,iloc,tlocks)
     IF(xmhd_use_schur)CALL ML_schur_B%current_level%mat_add_local(Jac_B,mtmp_b,iloc_b,tlocks_b)
   ELSE
@@ -2915,7 +2911,7 @@ end subroutine xmhd_build_ops
 subroutine xmhd_alloc_ops
 integer(i4) :: i,j,level,levelin
 integer(i4), ALLOCATABLE :: j_lag(:)
-REAL(r8), POINTER :: node_flag(:)
+REAL(r8), POINTER, CONTIGUOUS :: node_flag(:)
 CLASS(oft_vector), POINTER :: vectmp
 type(xmhd_ops), pointer :: ops
 DEBUG_STACK_PUSH
@@ -2929,6 +2925,7 @@ IF(xmhd_use_schur)THEN
   ALLOCATE(ml_SV(xmhd_ML_hcurl%nlevels-xmhd_minlev+1))
   IF(xmhd_schur_has_s)ALLOCATE(ml_JSS(xmhd_ML_hcurl%nlevels-xmhd_minlev+1))
 END IF
+ALLOCATE(xmhd_cell_ovl(xmhd_ML_hcurl%nlevels))
 xmhd_blevel=xmhd_ML_hcurl%blevel
 xmhd_nlevels=xmhd_ML_hcurl%nlevels
 xmhd_level=xmhd_ML_hcurl%level
@@ -3026,25 +3023,33 @@ do level=levelin,xmhd_minlev,-1
       ml_JSS(level-xmhd_minlev+1)%m=>ops%J_SS
     END IF
   END IF
-  !---Set element coloring
+  !---Set number of local partitions (blocks)
+  j=1
   IF(xmhd_nparts(level)>1)THEN
-    SELECT TYPE(this=>ops%J)
-      CLASS IS(oft_matrix)
-        ALLOCATE(this%color(this%nr))
-        IF(mesh%fullmesh)THEN
-          j = xmhd_nparts(level)
-        ELSE
-          j = INT(REAL(xmhd_nparts(level),8)/REAL(oft_env%nprocs,8),4)
-        END IF
-        IF(j<=0)THEN
-           CALL oft_abort('Coloring results in fewer than one block per processor (xmhd_nparts < nprocs)','xmhd_alloc_ops',__FILE__)
-        ELSE IF(j==1)THEN
-          DEALLOCATE(this%color)
-        ELSE
-          CALL comp_fem_partition(xmhd_rep,this%color,j)
-        END IF
-    END SELECT
+    IF(mesh%fullmesh)THEN
+      j=xmhd_nparts(level)
+    ELSE
+      j=INT(REAL(xmhd_nparts(level),8)/REAL(oft_env%nprocs,8),4)
+    END IF
+    IF(j<=0)CALL oft_abort('Coloring results in fewer than one block per processor (xmhd_nparts < nprocs)','xmhd_alloc_ops',__FILE__)
   END IF
+  !---Create cell overlap builder and set element coloring (both from the same partition)
+  !---(native matrices only; other back ends keep the plain FE coloring)
+  SELECT TYPE(this=>ops%J)
+    CLASS IS(oft_native_matrix)
+      IF(j>1)THEN
+        ALLOCATE(this%color(this%nr))
+        CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_hcurl%ml_mesh,xmhd_rep,j,this%color)
+      ELSE
+        CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_hcurl%ml_mesh,xmhd_rep,j)
+      END IF
+      this%cell_ovl=>xmhd_cell_ovl(level)
+    CLASS IS(oft_matrix)
+      IF(j>1)THEN
+        ALLOCATE(this%color(this%nr))
+        CALL comp_fem_partition(xmhd_rep,this%color,j)
+      END IF
+  END SELECT
 end do
 IF(mesh%periodic%revolved)THEN
   CALL build_ML_interp()
@@ -3070,6 +3075,7 @@ do level=levelin,xmhd_minlev,-1
 end do
 !---Setup solid node flags
 NULLIFY(node_flag,vectmp)
+xmhd_vbcdir=.FALSE. ! Accumulated over all levels in xmhd_set_bc
 DO level=levelin,xmhd_minlev,-1
   call xmhd_set_level(level)
   !
@@ -3077,23 +3083,24 @@ DO level=levelin,xmhd_minlev,-1
   oft_xmhd_ops%solid_node=.FALSE.
   CALL xmhd_ML_lagrange%vec_create(vectmp)
   CALL vectmp%set(0.d0)
-  CALL vectmp%get_local(node_flag)
+  CALL vectmp%borrow_local(node_flag,OFT_ACCESS_ACCUMULATE)
   !
   ALLOCATE(j_lag(oft_lagrange%nce))
   DO i=1,mesh%nc
-    IF(solid_cell(i))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       CALL oft_lagrange%ncdofs(i,j_lag)
       node_flag(j_lag)=1.d0
     END IF
   END DO
   DEALLOCATE(j_lag)
-  CALL vectmp%restore_local(node_flag,add=.TRUE.)
-  CALL vectmp%get_local(node_flag)
+  CALL vectmp%release_local(node_flag,OFT_ACCESS_ACCUMULATE,.TRUE.) ! Flags summed across processes
+  CALL vectmp%borrow_local(node_flag,OFT_ACCESS_READ)
   DO i=1,oft_lagrange%ne
     IF(node_flag(i)>0.d0)oft_xmhd_ops%solid_node(i)=.TRUE.
   END DO
+  CALL vectmp%release_local(node_flag,OFT_ACCESS_READ,.FALSE.)
   CALL vectmp%delete
-  DEALLOCATE(node_flag,vectmp)
+  DEALLOCATE(vectmp)
   CALL xmhd_set_bc()
 END DO
 call xmhd_set_level(levelin)
@@ -3197,10 +3204,9 @@ DEBUG_STACK_PUSH
 ALLOCATE(reg_types(mesh%nreg))
 reg_types=1
 IF(.NOT.ALLOCATED(eta_reg))THEN
-  ALLOCATE(eta_reg(mesh%nreg),solid_cell(mesh%nc))
+  ALLOCATE(eta_reg(mesh%nreg),reg_solid(mesh%nreg))
 END IF
 eta_reg=-1.d0
-solid_cell=.FALSE.
 IF(xmhd_root_node%associated())THEN
   !---Look for pre node
   CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
@@ -3257,12 +3263,11 @@ IF(xmhd_root_node%associated())THEN
   END IF
 END IF
 !
+reg_solid=(reg_types==2)
+DEALLOCATE(reg_types)
 xmhd_rw=.FALSE.
 DO i=1,mesh%nc
-  IF(reg_types(mesh%reg(i))==2)THEN
-    xmhd_rw=.TRUE.
-    solid_cell(i)=.TRUE.
-  END IF
+  IF(reg_solid(mesh%reg(i)))xmhd_rw=.TRUE.
 END DO
 #ifdef HAVE_MPI
 call MPI_ALLREDUCE(MPI_IN_PLACE,xmhd_rw,1,OFT_MPI_LOGICAL,MPI_LOR,oft_env%COMM,ierr)
@@ -3324,15 +3329,15 @@ IF(vbc(1:4)=='none')THEN
   !---Do nothing
 ELSE IF(vbc(1:3)=='all')THEN
   DO i=1,oft_lagrange%ne
-    IF(oft_lagrange%global%gbe(i).OR.oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=1
+    IF(oft_lagrange%global%gbe(i))oft_xmhd_ops%v_bc_type(i)=1
   END DO
 ELSE IF(vbc(1:4)=='norm')THEN
   DO i=1,oft_lagrange%ne
-    IF(oft_lagrange%global%gbe(i).OR.oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=2
+    IF(oft_lagrange%global%gbe(i))oft_xmhd_ops%v_bc_type(i)=2
   END DO
 ELSE IF(vbc(1:4)=='tang')THEN
   DO i=1,oft_lagrange%ne
-    IF(oft_lagrange%global%gbe(i).OR.oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=3
+    IF(oft_lagrange%global%gbe(i))oft_xmhd_ops%v_bc_type(i)=3
   END DO
 ELSE IF(vbc(1:3)=='xml')THEN
   IF(.NOT.xmhd_root_node%associated())CALL oft_abort('No xMHD node in XML file', 'xmhd_bc', __FILE__)
@@ -3363,17 +3368,21 @@ ELSE IF(vbc(1:3)=='xml')THEN
       IF(bc_tmp(i))oft_xmhd_ops%v_bc_type(i)=k
     END DO
   END DO
-  DEALLOCATE(vert_flag,edge_flag,face_flag,bc_flag)
+  DEALLOCATE(vert_flag,edge_flag,face_flag,bc_flag,bc_tmp)
 ELSE
   CALL oft_abort('Invalid V Boundary Condition.','xmhd_bc',__FILE__)
 END IF
+!---Fix velocity at all nodes in solid regions
+DO i=1,oft_lagrange%ne
+  IF(oft_xmhd_ops%solid_node(i))oft_xmhd_ops%v_bc_type(i)=1
+END DO
 !---Zero the velocity components normal to the axis (y,z) on the axis of revolved
 !   meshes (v_bc_type=-1); assumes rotation about x, as in the axis detection of
 !   oft_lag_setup
 DO i=1,oft_lagrange%ne
   IF((oft_lagrange%per_vmap(i)==3).AND.(oft_xmhd_ops%v_bc_type(i)==0))oft_xmhd_ops%v_bc_type(i)=-1
 END DO
-xmhd_vbcdir=ANY(oft_xmhd_ops%v_bc_type>1)
+xmhd_vbcdir=xmhd_vbcdir.OR.ANY(oft_xmhd_ops%v_bc_type>1) ! Accumulate over levels (reset in xmhd_alloc_ops)
 !------------------------------------------------------------------------------
 ! Apply boundary condition to n
 !------------------------------------------------------------------------------
@@ -3474,7 +3483,7 @@ real(r8), allocatable, dimension(:,:) :: vpin_loc,lag_loc
 real(r8), target, allocatable, dimension(:) :: lag_rop
 real(r8), target, allocatable, dimension(:,:) :: lag_gop,hgrad_rop,hcurl_rop,hcurl_cop
 real(r8), pointer, contiguous, dimension(:) :: jpin,npin
-real(r8), pointer, contiguous, dimension(:) :: bcout,bgout,nout,tout,teout,j2out,n2out
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: bcout,bgout,nout,tout,teout,j2out,n2out,vacc
 real(r8), pointer, contiguous, dimension(:,:) :: vpin,vout
 real(r8), pointer, dimension(:) :: vtmp
 logical :: curved,back_step
@@ -3515,21 +3524,16 @@ END IF
 !------------------------------------------------------------------------------
 NULLIFY(bcout,bgout,nout,tout,teout,j2out,n2out)
 CALL b%set(0.d0)
-CALL b%get_local(bcout,1)
-CALL b%get_local(bgout,2)
+CALL b%borrow_local(bcout,OFT_ACCESS_ACCUMULATE,1)
+CALL b%borrow_local(bgout,OFT_ACCESS_ACCUMULATE,2)
 ALLOCATE(vout(oft_lagrange%ne,3))
-vtmp=>vout(:,1)
-CALL b%get_local(vtmp,3)
-vtmp=>vout(:,2)
-CALL b%get_local(vtmp,4)
-vtmp=>vout(:,3)
-CALL b%get_local(vtmp,5)
+vout=0.d0
 CALL lagrange_vector_unpack(oft_lagrange,vout,.TRUE.)
-CALL b%get_local(nout,6)
-CALL b%get_local(tout,7)
-IF(xmhd_two_temp)CALL b%get_local(teout,te_ind)
-IF(j2_ind>0)CALL b%get_local(j2out,j2_ind)
-IF(n2_ind>0)CALL b%get_local(n2out,n2_ind)
+CALL b%borrow_local(nout,OFT_ACCESS_ACCUMULATE,6)
+CALL b%borrow_local(tout,OFT_ACCESS_ACCUMULATE,7)
+IF(xmhd_two_temp)CALL b%borrow_local(teout,OFT_ACCESS_ACCUMULATE,te_ind)
+IF(j2_ind>0)CALL b%borrow_local(j2out,OFT_ACCESS_ACCUMULATE,j2_ind)
+IF(n2_ind>0)CALL b%borrow_local(n2out,OFT_ACCESS_ACCUMULATE,n2_ind)
 !---Zero diagnostic values
 diag_vals=0.d0
 ptind=(/1,2/)
@@ -3686,7 +3690,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !------------------------------------------------------------------------------
     ! Compute F (u) for solid region
     !------------------------------------------------------------------------------
-    IF(solid_cell(i))THEN
+    IF(reg_solid(mesh%reg(i)))THEN
       IF(xmhd_adv_b)THEN
         !---Eta J
         eta_curr=eta_reg(mesh%reg(i))
@@ -4008,7 +4012,7 @@ do ii=1,mesh%tloc_c(ip)%n
     end do
   END IF
   !---Lagrange rows (V,n,T)
-  IF(.NOT.solid_cell(i))THEN
+  IF(.NOT.reg_solid(mesh%reg(i)))THEN
     DO jr=1,oft_lagrange%nce
       vout(j_lag(jr),:) = vout(j_lag(jr),:) + lag_loc(jr,1:3)/vel_scale
       IF(xmhd_adv_den)nout(j_lag(jr)) = nout(j_lag(jr)) + lag_loc(jr,4)/den_scale
@@ -4063,19 +4067,18 @@ CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),(ABS(oft_x
 ! Set result from local field values, summing contributions across seams
 !------------------------------------------------------------------------------
 CALL lagrange_vector_repack(oft_lagrange,vout,.TRUE.)
-CALL b%restore_local(bcout,1,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(bgout,2,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,1)
-CALL b%restore_local(vtmp,3,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,2)
-CALL b%restore_local(vtmp,4,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,3)
-CALL b%restore_local(vtmp,5,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(nout,6,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(tout,7,add=.TRUE.,wait=(7/=xmhd_rep%nfields))
-IF(xmhd_two_temp)CALL b%restore_local(teout,te_ind,add=.TRUE.,wait=(te_ind/=xmhd_rep%nfields))
-IF(n2_ind>0)CALL b%restore_local(n2out,n2_ind,add=.TRUE.,wait=(n2_ind/=xmhd_rep%nfields))
-IF(j2_ind>0)CALL b%restore_local(j2out,j2_ind,add=.TRUE.,wait=(j2_ind/=xmhd_rep%nfields))
+DO j=1,3
+  CALL b%borrow_local(vacc,OFT_ACCESS_ACCUMULATE,2+j)
+  vacc=vout(:,j)
+  CALL b%release_local(vacc,OFT_ACCESS_ACCUMULATE,.FALSE.,2+j)
+END DO
+CALL b%release_local(bcout,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
+CALL b%release_local(bgout,OFT_ACCESS_ACCUMULATE,.FALSE.,2)
+CALL b%release_local(nout,OFT_ACCESS_ACCUMULATE,.FALSE.,6)
+IF(xmhd_two_temp)CALL b%release_local(teout,OFT_ACCESS_ACCUMULATE,.FALSE.,te_ind)
+IF(n2_ind>0)CALL b%release_local(n2out,OFT_ACCESS_ACCUMULATE,.FALSE.,n2_ind)
+IF(j2_ind>0)CALL b%release_local(j2out,OFT_ACCESS_ACCUMULATE,.FALSE.,j2_ind)
+CALL b%release_local(tout,OFT_ACCESS_ACCUMULATE,.TRUE.,7) ! Completes accumulation (sum across seams)
 !---Pack diagnostics
 IF(self%dt<0.d0)THEN
   diag_vals(3:4)=diag_vals(3:4)/(2*pi)
@@ -4084,10 +4087,7 @@ END IF
 !------------------------------------------------------------------------------
 ! Destroy worker arrays
 !------------------------------------------------------------------------------
-DEALLOCATE(bcout,bgout,vout,nout,tout)
-IF(xmhd_two_temp)DEALLOCATE(teout)
-IF(n2_ind>0)DEALLOCATE(n2out)
-IF(j2_ind>0)DEALLOCATE(j2out)
+DEALLOCATE(vout)
 IF(back_step)THEN
   DEALLOCATE(jpin,npin)
   IF(xmhd_upwind)DEALLOCATE(vpin)
@@ -4114,7 +4114,7 @@ real(r8), allocatable :: bc_loc(:),bg_loc(:),te_loc(:),lag_loc(:,:)
 integer(i4) :: i,ii,ip,j,m,jr,jc,jp,ptind(2)
 integer(i4), allocatable :: j_lag(:),j_hgrad(:),j_hcurl(:)
 real(r8), target, allocatable :: lag_rop(:),hgrad_rop(:,:),hcurl_rop(:,:),hcurl_cop(:,:)
-real(r8), pointer, contiguous, dimension(:) :: neqin,bcout,bgout,nout,tout,teout
+REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:) :: neqin,bcout,bgout,nout,tout,teout,vacc
 real(r8), pointer, contiguous, dimension(:,:) :: vout
 real(r8), pointer, dimension(:) :: vtmp
 real(r8) :: mloc(3,3),goptmp(3,4),vol,f,det,cgop(3,6),fulltmp(40)
@@ -4143,19 +4143,14 @@ END IF
 !------------------------------------------------------------------------------
 NULLIFY(bcout,bgout,nout,tout,teout)
 CALL b%set(0.d0)
-CALL b%get_local(bcout,1)
-CALL b%get_local(bgout,2)
+CALL b%borrow_local(bcout,OFT_ACCESS_ACCUMULATE,1)
+CALL b%borrow_local(bgout,OFT_ACCESS_ACCUMULATE,2)
 ALLOCATE(vout(oft_lagrange%ne,3))
-vtmp=>vout(:,1)
-CALL b%get_local(vtmp,3)
-vtmp=>vout(:,2)
-CALL b%get_local(vtmp,4)
-vtmp=>vout(:,3)
-CALL b%get_local(vtmp,5)
+vout=0.d0
 CALL lagrange_vector_unpack(oft_lagrange,vout,.TRUE.)
-CALL b%get_local(nout,6)
-CALL b%get_local(tout,7)
-IF(xmhd_two_temp)CALL b%get_local(teout,te_ind)
+CALL b%borrow_local(nout,OFT_ACCESS_ACCUMULATE,6)
+CALL b%borrow_local(tout,OFT_ACCESS_ACCUMULATE,7)
+IF(xmhd_two_temp)CALL b%borrow_local(teout,OFT_ACCESS_ACCUMULATE,te_ind)
 !---Zero diagnostic values
 diag_vals=0.d0
 ptind=(/1,2/)
@@ -4243,7 +4238,7 @@ do ii=1,mesh%tloc_c(ip)%n
       bc_loc(jr) = bc_loc(jr) + DOT_PRODUCT(hcurl_rop(:,jr),u0%B)*det
     end do
     !---Electron inertia
-    IF(xmhd_hall.AND.(.NOT.solid_cell(i)))THEN
+    IF(xmhd_hall.AND.(.NOT.reg_solid(mesh%reg(i))))THEN
       u0%J=u0%J*me_factor*elec_mass*det/(mu0*neq*elec_charge**2)
       do jr=1,oft_hcurl%nce
         bc_loc(jr) = bc_loc(jr) + DOT_PRODUCT(hcurl_cop(:,jr),u0%J)
@@ -4253,7 +4248,7 @@ do ii=1,mesh%tloc_c(ip)%n
     do jr=1,oft_hgrad%nce
       bg_loc(jr) = bg_loc(jr) + DOT_PRODUCT(hgrad_rop(:,jr),u0%B)*det
     end do
-    IF(solid_cell(i))CYCLE
+    IF(reg_solid(mesh%reg(i)))CYCLE
     !---Compute F_{V,n,T) (u)
     do jr=1,oft_lagrange%nce
       lag_loc(jr,1:3) = lag_loc(jr,1:3) + lag_rop(jr)*u0%V*det
@@ -4288,7 +4283,7 @@ end do
 end do
 !---Delete temporary matrices
 deallocate(j_lag,j_hgrad,j_hcurl)
-deallocate(lag_rop,hgrad_rop,hcurl_rop)
+deallocate(lag_rop,hgrad_rop,hcurl_rop,hcurl_cop)
 deallocate(bc_loc,bg_loc,lag_loc)
 IF(xmhd_two_temp)deallocate(te_loc)
 DEALLOCATE(xmhd_lag_gop)
@@ -4327,21 +4322,16 @@ CALL fem_dirichlet_vec(oft_lagrange,full_interp%lf_loc(:,3),vout(:,3),(ABS(oft_x
 ! Set result from local field values, summing contributions across seams
 !------------------------------------------------------------------------------
 CALL lagrange_vector_repack(oft_lagrange,vout,.TRUE.)
-CALL b%restore_local(bcout,1,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(bgout,2,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,1)
-CALL b%restore_local(vtmp,3,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,2)
-CALL b%restore_local(vtmp,4,add=.TRUE.,wait=.TRUE.)
-vtmp=>vout(:,3)
-CALL b%restore_local(vtmp,5,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(nout,6,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(tout,7,add=.TRUE.,wait=(7/=xmhd_rep%nfields))
-IF(xmhd_two_temp)CALL b%restore_local(teout,te_ind,add=.TRUE.,wait=(te_ind/=xmhd_rep%nfields))
-tout=0.d0
-IF(n2_ind>0)CALL b%restore_local(tout,n2_ind,add=.TRUE.,wait=(n2_ind/=xmhd_rep%nfields))
-bcout=0.d0
-IF(j2_ind>0)CALL b%restore_local(bcout,j2_ind,add=.TRUE.,wait=(j2_ind/=xmhd_rep%nfields))
+DO j=1,3
+  CALL b%borrow_local(vacc,OFT_ACCESS_ACCUMULATE,2+j)
+  vacc=vout(:,j)
+  CALL b%release_local(vacc,OFT_ACCESS_ACCUMULATE,.FALSE.,2+j)
+END DO
+CALL b%release_local(bcout,OFT_ACCESS_ACCUMULATE,.FALSE.,1)
+CALL b%release_local(bgout,OFT_ACCESS_ACCUMULATE,.FALSE.,2)
+CALL b%release_local(nout,OFT_ACCESS_ACCUMULATE,.FALSE.,6)
+IF(xmhd_two_temp)CALL b%release_local(teout,OFT_ACCESS_ACCUMULATE,.FALSE.,te_ind)
+CALL b%release_local(tout,OFT_ACCESS_ACCUMULATE,.TRUE.,7) ! Completes accumulation (sum across seams)
 !---Pack diagnostics
 diag_vals(2)=diag_vals(2)
 diag_vals(3:4)=diag_vals(3:4)/(2*pi)
@@ -4350,9 +4340,8 @@ self%diag_vals=oft_mpi_sum(diag_vals,7)
 !------------------------------------------------------------------------------
 ! Destroy worker arrays
 !------------------------------------------------------------------------------
-DEALLOCATE(bcout,bgout,vout,nout,tout)
+DEALLOCATE(vout)
 IF(ASSOCIATED(neqin))DEALLOCATE(neqin)
-IF(xmhd_two_temp)DEALLOCATE(teout)
 CALL full_interp%delete
 DEBUG_STACK_POP
 end subroutine xmhd_massmatrix_apply
@@ -4468,7 +4457,7 @@ end do
 end do
 !---Delete temporary matrices
 deallocate(j_lag,j_hgrad,j_hcurl)
-deallocate(lag_rop,hgrad_rop,hcurl_rop)
+deallocate(lag_rop,hgrad_rop,hcurl_rop,hcurl_cop)
 DEALLOCATE(xmhd_lag_gop)
 NULLIFY(xmhd_lag_rop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !$omp end parallel
@@ -4606,7 +4595,7 @@ CALL xmhd_ML_hcurl_grad%set_level(level,propogate=.TRUE.)
 IF(.NOT.oft_3D_hcurl_cast(oft_hcurl,xmhd_ML_hcurl%current_level))CALL oft_abort("Invalid Curl FE object","xmhd_run",__FILE__)
 IF(.NOT.oft_3D_h1_cast(oft_hgrad,xmhd_ML_H1grad%current_level))CALL oft_abort("Invalid Grad FE object","xmhd_run",__FILE__)
 xmhd_level=level
-! xmhd_lev=oft_hcurl_lev
+mesh=>oft_lagrange%mesh ! Mesh for the active level (coarser on geometric MG levels)
 oft_xmhd_ops=>oft_xmhd_ops_ML(xmhd_level)
 end subroutine xmhd_set_level
 !------------------------------------------------------------------------------
@@ -4709,7 +4698,7 @@ class(xmhd_interp), intent(inout) :: self !< Interpolation object
 integer(i4), intent(in) :: cell !< Cell for interpolation
 real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
 real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
-real(r8), intent(out) :: val(:) !< Reconstructed field at f [30]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [26-40, depending on enabled fields]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc,k
 real(r8) :: b0(3),j0(3),cgop(3,6),Te,dTe(3),tmp,vtmp(3)
@@ -4863,6 +4852,8 @@ val(15:17)=dlf0(:,4) ! dN / dx_j
 val(18:20)=dlf0(:,5) ! dTi /dx_j
 val(21:23)=b0
 val(24:26)=j0
+!---Optional fields at fixed offsets (entries for disabled fields are zeroed)
+val(27:)=0.d0 ! Zero-length when only the base fields are requested
 IF(xmhd_two_temp)THEN
   val(27) = Te
   val(28:30) = dTe
@@ -4930,8 +4921,11 @@ CALL full_interp%setup(mesh)
 levelin=xmhd_level
 minlev=xmhd_minlev
 qorder=oft_hcurl%order
+!---Size cell-centered storage to the last enabled field in the packed layout (see xmhd_interp_apply)
 nfields=26
 IF(xmhd_two_temp)nfields=30
+IF(n2_ind>0)nfields=34
+IF(j2_ind>0)nfields=40
 do i=levelin,minlev,-1
   call xmhd_set_level(i)
 !------------------------------------------------------------------------------
@@ -5876,6 +5870,7 @@ END IF
 !--- interpolation objects
 CALL Bfield%delete
 CALL Jfield%delete
+IF(j2_ind>0)CALL J2field%delete
 DEALLOCATE(bvout)
 DEBUG_STACK_POP
 end subroutine xmhd_plot
@@ -5920,7 +5915,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(A,ES11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
   WRITE(*,'(A,ES11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
   WRITE(*,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
-  WRITE(*,'(A,ES11.3)')'  Build  = ',matvec_time/REAL(10,8)
+  WRITE(*,'(A,ES11.3)')'  Build  = ',build_optime/REAL(10,8)
 END IF
 CALL oft_finalize()
 end subroutine xmhd_profile

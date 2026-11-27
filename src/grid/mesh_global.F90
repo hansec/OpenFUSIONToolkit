@@ -26,6 +26,7 @@ USE oft_mesh_type, ONLY: oft_mesh, oft_amesh, oft_bmesh, oft_init_seam
 USE oft_mesh_local, ONLY: mesh_local_init, mesh_local_init, oft_metis_partmesh, &
   bmesh_local_init
 USE oft_stitching, ONLY: oft_seam, oft_stitch_check
+USE oft_mesh_global_util, ONLY: bmesh_global_copy_ho
 IMPLICIT NONE
 #include "local.h"
 contains
@@ -142,29 +143,9 @@ END DO
 DEALLOCATE(lptmp)
 !---
 CALL bmesh_local_init(self%bmesh,self)
-!---Copy high-order mapping if available
-IF(ASSOCIATED(self%ho_info%r))THEN
-  self%bmesh%order=1
-  self%bmesh%ho_info%nep=self%ho_info%nep
-  self%bmesh%ho_info%ncp=self%ho_info%nfp
-  ALLOCATE(self%bmesh%ho_info%r(3,self%bmesh%ne+self%bmesh%nc))
-  ALLOCATE(self%bmesh%ho_info%lep(self%bmesh%ho_info%nep,self%bmesh%ne))
-  ALLOCATE(self%bmesh%ho_info%lcp(self%bmesh%ho_info%ncp,self%bmesh%nc))
-  !!$omp parallel do private(j)
-  do i=1,self%bmesh%ne
-    self%bmesh%ho_info%lep(1,i)=i
-    j=INT(ABS(self%bmesh%parent%le(i)),4)
-    self%bmesh%ho_info%r(:,i)=self%ho_info%r(:,self%ho_info%lep(1,j))
-  enddo
-  IF(self%bmesh%ho_info%ncp==1)THEN
-    !!$omp parallel do private(j)
-    do i=1,self%bmesh%nc
-      j=INT(ABS(self%bmesh%parent%lf(i)),4)
-      self%bmesh%ho_info%lcp(1,i)=i+self%bmesh%ne
-      self%bmesh%ho_info%r(:,i+self%bmesh%ne)=self%ho_info%r(:,self%ho_info%lfp(1,j))
-    enddo
-  END IF
-END IF
+!---Copy high-order nodes if available (boundary mapping stays linear)
+self%bmesh%order=1
+CALL bmesh_global_copy_ho(self)
 DEBUG_STACK_POP
 end subroutine bmesh_global_init
 !---------------------------------------------------------------------------------
@@ -836,7 +817,6 @@ ALLOCATE(self%pstitch%lle(2,self%pstitch%nle))
 self%pstitch%full=self%fullmesh
 self%pstitch%nbe=self%nbp
 self%pstitch%lbe=>self%lbp
-ALLOCATE(self%pstitch%send(0:self%pstitch%nproc_con),self%pstitch%recv(0:self%pstitch%nproc_con))
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
@@ -861,11 +841,6 @@ DO i=0,self%pstitch%nproc_con
     self%pstitch%lle(:,m+self%pstitch%kle(i)) = &
     (/linktmp(2,isort(m+1),i),linktmp(1,isort(m+1),i)/)
   END DO
-  !---Create preallocated send/recv arrays
-  self%pstitch%send(i)%n=ncon(i)
-  ALLOCATE(self%pstitch%send(i)%v(self%pstitch%send(i)%n))
-  self%pstitch%recv(i)%n=ncon(i)
-  ALLOCATE(self%pstitch%recv(i)%v(self%pstitch%recv(i)%n))
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
@@ -1155,7 +1130,6 @@ ALLOCATE(self%estitch%lle(2,self%estitch%nle))
 self%estitch%full=self%fullmesh
 self%estitch%nbe=self%nbe
 self%estitch%lbe=>self%lbe
-ALLOCATE(self%estitch%send(0:self%estitch%nproc_con),self%estitch%recv(0:self%estitch%nproc_con))
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
@@ -1180,11 +1154,6 @@ DO i=0,self%estitch%nproc_con
     self%estitch%lle(:,m+self%estitch%kle(i)) = &
     (/linktmp(2,isort(m+1),i),linktmp(1,isort(m+1),i)/)
   END DO
-  !---Allocate permanent stitching arrays
-  self%estitch%send(i)%n=ncon(i)
-  ALLOCATE(self%estitch%send(i)%v(self%estitch%send(i)%n))
-  self%estitch%recv(i)%n=ncon(i)
-  ALLOCATE(self%estitch%recv(i)%v(self%estitch%recv(i)%n))
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
@@ -1447,7 +1416,6 @@ self%fstitch%lbe=>self%lbf
 ! mesh%fstitch%kle=>mesh%linkage%klf
 ! mesh%fstitch%lle=>mesh%linkage%llf
 ! mesh%fstitch%leo=>mesh%linkage%lfo
-ALLOCATE(self%fstitch%send(0:self%fstitch%nproc_con),self%fstitch%recv(0:self%fstitch%nproc_con))
 !$omp parallel private(j,m,lsort,isort)
 ALLOCATE(lsort(MAXVAL(ncon)),isort(MAXVAL(ncon)))
 !$omp do
@@ -1472,11 +1440,6 @@ DO i=0,self%fstitch%nproc_con
     self%fstitch%lle(:,m+self%fstitch%kle(i)) = &
     (/linktmp(2,isort(m+1),i),linktmp(1,isort(m+1),i)/)
   END DO
-  !---Allocate permanent stitching arrays
-  self%fstitch%send(i)%n=ncon(i)
-  ALLOCATE(self%fstitch%send(i)%v(self%fstitch%send(i)%n))
-  self%fstitch%recv(i)%n=ncon(i)
-  ALLOCATE(self%fstitch%recv(i)%v(self%fstitch%recv(i)%n))
 END DO
 DEALLOCATE(lsort,isort)
 !$omp end parallel
@@ -1528,7 +1491,7 @@ ALLOCATE(lploc(parent%np))
 CALL get_inverse_map(self%parent%lp,self%np,lploc,self%parent%np)
 !---
 CALL oft_init_seam(self,self%pstitch)
-ALLOCATE(self%pstitch%kle(self%pstitch%nproc_con+1))
+ALLOCATE(self%pstitch%kle(0:self%pstitch%nproc_con+1))
 self%pstitch%kle=0
 DO i=1,self%pstitch%nproc_con
   m=0
@@ -1546,14 +1509,13 @@ END DO
 self%pstitch%nle=SUM(self%pstitch%kle)
 self%pstitch%kle(self%pstitch%nproc_con+1)=self%pstitch%nle+1
 !---Cumulative unique point linkage count
-DO i=self%pstitch%nproc_con,1,-1
+DO i=self%pstitch%nproc_con,0,-1
   self%pstitch%kle(i)=self%pstitch%kle(i+1)-self%pstitch%kle(i)
 END DO
 !---
 IF(self%pstitch%kle(1)/=1)CALL oft_abort('Bad point linkage count','tetmesh_global_plinkage',__FILE__)
 !---
 ALLOCATE(self%pstitch%lle(2,self%pstitch%nle),self%pstitch%leo(parent%nbp))
-ALLOCATE(self%pstitch%send(0:self%pstitch%nproc_con),self%pstitch%recv(0:self%pstitch%nproc_con))
 !---
 !!$omp do
 DO i=1,self%pstitch%nproc_con
@@ -1566,10 +1528,6 @@ DO i=1,self%pstitch%nproc_con
       m=m+1
     END IF
   END DO
-  !---Allocate permanent stitching arrays
-  self%pstitch%send(i)%n=m; self%pstitch%recv(i)%n=m
-  ALLOCATE(self%pstitch%send(i)%v(self%pstitch%send(i)%n))
-  ALLOCATE(self%pstitch%recv(i)%v(self%pstitch%recv(i)%n))
 END DO
 !!$omp end parallel
 !------------------------------------------------------------------------------
@@ -1611,7 +1569,7 @@ ALLOCATE(leloc(parent%ne))
 CALL get_inverse_map(self%parent%le,self%ne,leloc,self%parent%ne)
 !---
 CALL oft_init_seam(self,self%estitch)
-ALLOCATE(self%estitch%kle(self%estitch%nproc_con+1))
+ALLOCATE(self%estitch%kle(0:self%estitch%nproc_con+1))
 self%estitch%kle=0
 DO i=1,self%estitch%nproc_con
   m=0
@@ -1629,14 +1587,13 @@ END DO
 self%estitch%nle=SUM(self%estitch%kle)
 self%estitch%kle(self%estitch%nproc_con+1)=self%estitch%nle+1
 !---Cumulative unique point linkage count
-DO i=self%estitch%nproc_con,1,-1
+DO i=self%estitch%nproc_con,0,-1
   self%estitch%kle(i)=self%estitch%kle(i+1)-self%estitch%kle(i)
 END DO
 !---
 IF(self%estitch%kle(1)/=1)CALL oft_abort('Bad point linkage count','tetmesh_global_plinkage',__FILE__)
 !---
 ALLOCATE(self%estitch%lle(2,self%estitch%nle),self%estitch%leo(parent%nbe))
-ALLOCATE(self%estitch%send(0:self%estitch%nproc_con),self%estitch%recv(0:self%estitch%nproc_con))
 !---
 !!$omp do
 DO i=1,self%estitch%nproc_con
@@ -1649,10 +1606,6 @@ DO i=1,self%estitch%nproc_con
       m=m+1
     END IF
   END DO
-  !---Allocate permanent stitching arrays
-  self%estitch%send(i)%n=m; self%estitch%recv(i)%n=m
-  ALLOCATE(self%estitch%send(i)%v(self%estitch%send(i)%n))
-  ALLOCATE(self%estitch%recv(i)%v(self%estitch%recv(i)%n))
 END DO
 !!$omp end parallel
 !------------------------------------------------------------------------------
