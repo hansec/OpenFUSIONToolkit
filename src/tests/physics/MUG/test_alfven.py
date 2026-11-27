@@ -366,3 +366,11 @@ def test_schur_lin_r1_p2_mpi(petsc_flag):
     verr_exp = 2.124325E-02
     assert alfven_setup(1,2,2,2,linear=True,petsc=petsc_flag,xml_file='oft_in_xmhd_schur.xml')
     assert validate_alfven(berr_exp,verr_exp,linear=True)
+@pytest.mark.linear
+@pytest.mark.mpi
+def test_schur_cell_lin_r1_p2_mpi():
+    '''Linearized Alfven wave with native Block-Schur p-MG and cell-mode Schwarz on J_BB and S_V, two MPI processes.'''
+    berr_exp = 4.267325E-02
+    verr_exp = 2.124325E-02
+    assert alfven_setup(1,2,2,2,linear=True,petsc=False,xml_file='oft_in_xmhd_schur_cell.xml')
+    assert validate_alfven(berr_exp,verr_exp,linear=True)

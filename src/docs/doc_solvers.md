@@ -160,8 +160,9 @@ In the native backend subdomains are grown in one of two modes (`overlap_mode`):
   and a block contains every DoF of its cells. The cells and the number of blocks per process are
   defined by a cell overlap builder (\ref fem_cell_overlap::oft_fem_cell_overlap
   "oft_fem_cell_overlap") that the physics module or application attaches to the matrix
-  (`cell_ovl`; MUG attaches one to its native Jacobians on every level, with `xmhd_nparts` setting
-  the blocks); cell mode aborts if none is attached, and the builder's block count replaces
+  (`cell_ovl`; MUG attaches one to its native Jacobians and Block-Schur sub-blocks `J_BB`, `S_V`,
+  `J_SS` on every level, with `xmhd_nparts` setting the blocks); cell mode aborts if none is
+  attached, and the builder's block count replaces
   `nlocal` (field based blocks, `nlocal<0`, and `boverlap` are not supported, and abort). Blocks may cross process
   boundaries for any number of blocks per process: the union of the blocks of each process is
   assembled as one subdomain across processes, so the setup needs a fixed number of exchanges

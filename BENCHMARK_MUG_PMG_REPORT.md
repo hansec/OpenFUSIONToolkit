@@ -366,3 +366,24 @@ All runs below used the same GCC-16 MPI+PETSc `Release` build (strictly 1 run at
 | | `C4_lower` (`6.32M` DOFs, 3 steps) | **Native** | `37.5` | `52.28` | `1.62s` | `50.66` | `6.00 GB` | Clean convergence, **6.4x faster** than `C0` |
 
 **Key Takeaway**: 100% Native Block-Schur (`use_petsc=F`) works out of the box through `6.32M` DOFs and $\mathrm{CFL}_A=10$, achieving identical iteration counts and RSS to PETSc and `3.9--6.4x` speedups over `C0`. The `~20--40%` wall-time gap relative to PETSc is explained by unoptimized native `ILU(0)` (the same `1.23x` ratio appears in `C0_nat` vs `C0_petsc`) — motivating Step 8 (cell-mode overlapping Schwarz with `SuperLU` on Block-Schur sub-blocks).
+
+---
+
+## 8. Post-PR #477 Study 2: Cell-Mode Overlapping Schwarz on Block-Schur Sub-Blocks
+
+In `mug-pmg-step8-schur-cell-overlap`, `fem_cell_overlap_create` and `xmhd_nparts` coloring were attached to `ops%J_BB`, `ops%S_V`, and `ops%J_SS` on every MG level (`src/physics/xmhd.F90`), verified by a new MPI regression test (`test_schur_cell_lin_r1_p2_mpi` in `test_alfven.py`, 5/5 passing). We benchmarked native cell-mode overlapping Schwarz (`<overlap_mode>cell</overlap_mode>`, `<type>restricted</type>`) with `SuperLU` (`16` blocks/rank via `xmhd_nparts`) and `ILU(0)` (`1` block/rank) on `S2-p2` and `S1-p4` (`np=16`, 240 s cap):
+
+| Mesh / `dt` | Config (`C4_ldu`, Native) | Status (Steps) | `lits` | `t1 (s)` | `t_setup` | `t_step (s)` | Peak RSS/rank | vs Reference (`t_step`) |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| **`S2-p2`, `1e-6`** | `b:BJ(-1,ILU), v:graph ASM(1,ILU)` *(Step 7 ref)* | **OK (10)** | `11.0` | `7.14` | `3.06s` | **`4.08`** | **`1.41 GB`** | **Fastest Native at $p=2$** |
+| | `b:BJ(-1,ILU), v:cell(ov=1,face,ILU)` (`1/rank`) | **OK (10)** | `12.0` | `7.04` | `2.62s` | `4.41` | `1.51 GB` | Lightweight, close to graph ASM |
+| | `b:cell(ov=0,LU), v:graph ASM(1,ILU)` (`16/rank`) | `TOUT (8/10)` | **`8.0`** | `45.34` | `23.38s` | `21.96` | `<7 GB` | No OOM; 27% fewer its, 5.4x slower |
+| | `b:cell(ov=1,face,LU), v:graph ASM(1,ILU)` (`16/rank`) | `TOUT (4/10)` | **`7.0`** | `85.09` | `52.01s` | `33.08` | `<7 GB` | Lowest its; SuperLU fill dominates |
+| | `both:cell(ov=0,LU)` (`16/rank`) | `TOUT (7/10)` | `8.5` | `49.48` | `24.57s` | `24.91` | `<7 GB` | No OOM (PETSc graph `ASM(16,LU)` OOMed) |
+| | `both:cell(ov=1,face,LU)` (`16/rank`) | `TOUT (4/10)` | **`7.0`** | `96.19` | `60.07s` | `36.12` | `<7 GB` | No OOM (vs PETSc `10.23G` OOM) |
+| **`S2-p2`, `2e-6`** | `b:cell(ov=0,LU)` / `both:cell(ov=0,LU)` (`16/rank`) | `TOUT (2/10)` | `30.0` / **`24.0`** | `97.5` / `92.3` | `15.2` / `21.0s` | `82.3` / `71.4` | `<7 GB` | Lowest its at CFL 10, slower than ILU (`10.2s`) |
+| **`S1-p4`, `5e-7`** | `C4_ldu` `b:BJ(16,LU), v:ASM(1,ILU)` *(Table 6 ref)* | **OK (5)** | `15.5` | `8.91` | `0.00s` | **`9.19`** | **`2.57 GB`** | **Best $p=4$ speed & RSS** |
+| | `b:cell(ov=0,LU), v:graph ASM(1,ILU)` (`16/rank`) | **OK (5)** | **`6.0`** | `61.59` | `35.92s` | `25.67` | `7.60 GB` | **2.6x fewer its (`6` vs `15.5`)**, 3x RSS |
+| | `b:cell(ov=1,face,LU)` / `both:cell(ov=0,LU)` | **OOM** | — | — | — | — | `7.6--7.8 GB` | Exceeds 123 GB node RAM (`16 x 7.7G`) |
+
+**Key Takeaway**: Cell-mode overlapping Schwarz on `J_BB` and `S_V` **eliminated the `S2-p2` OOM** seen with PETSc graph-mode `ASM(16, LU)` and drove outer GMRES iterations to their lowest counts across the entire study (**`7` its** on `S2-p2 dt=1e-6`, **`24` its** at $\mathrm{CFL}_A=10$, **`6` its** on `S1-p4 dt=5e-7`). However, because 3D overlapping cell blocks carry `2--3x` more SuperLU fill than non-overlapping blocks, **non-overlapping `BJ(-1, ILU)` ($p \le 3$) and `BJ(16, SuperLU)` ($p \ge 4$) on `<b_pre>` remain faster in wall time and lighter in RAM** unless even finer cell partitioning (`>= 64` blocks/rank) is used at $p=4$.

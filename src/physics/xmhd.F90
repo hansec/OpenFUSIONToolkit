@@ -401,6 +401,9 @@ TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: ml_J => NULL() !< MG Jacobian ope
 !> Cell overlap builders of the Jacobian matrices, by level (referenced by `ml_J(:)%m%cell_ovl`;
 !! like the operators these live for the duration of the run and are not freed)
 TYPE(oft_fem_cell_overlap), POINTER, DIMENSION(:) :: xmhd_cell_ovl => NULL()
+TYPE(oft_fem_cell_overlap), POINTER, DIMENSION(:) :: xmhd_cell_ovl_B => NULL() !< Cell overlap builders for `J_BB`
+TYPE(oft_fem_cell_overlap), POINTER, DIMENSION(:) :: xmhd_cell_ovl_V => NULL() !< Cell overlap builders for `S_V`
+TYPE(oft_fem_cell_overlap), POINTER, DIMENSION(:) :: xmhd_cell_ovl_S => NULL() !< Cell overlap builders for `J_SS`
 CLASS(oft_solver), POINTER :: xmhd_pre => NULL() !< Preconditioner object
 LOGICAL :: xmhd_use_schur = .FALSE. !< Use physics-based Block-Schur preconditioner
 LOGICAL :: xmhd_schur_has_s = .FALSE. !< Active scalar fields in Block-Schur
@@ -2923,7 +2926,12 @@ allocate(oft_xmhd_ops_ML(xmhd_ML_hcurl%nlevels))
 IF(xmhd_use_schur)THEN
   ALLOCATE(ml_JBB(xmhd_ML_hcurl%nlevels-xmhd_minlev+1))
   ALLOCATE(ml_SV(xmhd_ML_hcurl%nlevels-xmhd_minlev+1))
-  IF(xmhd_schur_has_s)ALLOCATE(ml_JSS(xmhd_ML_hcurl%nlevels-xmhd_minlev+1))
+  ALLOCATE(xmhd_cell_ovl_B(xmhd_ML_hcurl%nlevels))
+  ALLOCATE(xmhd_cell_ovl_V(xmhd_ML_hcurl%nlevels))
+  IF(xmhd_schur_has_s)THEN
+    ALLOCATE(ml_JSS(xmhd_ML_hcurl%nlevels-xmhd_minlev+1))
+    ALLOCATE(xmhd_cell_ovl_S(xmhd_ML_hcurl%nlevels))
+  END IF
 END IF
 ALLOCATE(xmhd_cell_ovl(xmhd_ML_hcurl%nlevels))
 xmhd_blevel=xmhd_ML_hcurl%blevel
@@ -3035,21 +3043,12 @@ do level=levelin,xmhd_minlev,-1
   END IF
   !---Create cell overlap builder and set element coloring (both from the same partition)
   !---(native matrices only; other back ends keep the plain FE coloring)
-  SELECT TYPE(this=>ops%J)
-    CLASS IS(oft_native_matrix)
-      IF(j>1)THEN
-        ALLOCATE(this%color(this%nr))
-        CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_hcurl%ml_mesh,xmhd_rep,j,this%color)
-      ELSE
-        CALL fem_cell_overlap_create(xmhd_cell_ovl(level),xmhd_ML_hcurl%ml_mesh,xmhd_rep,j)
-      END IF
-      this%cell_ovl=>xmhd_cell_ovl(level)
-    CLASS IS(oft_matrix)
-      IF(j>1)THEN
-        ALLOCATE(this%color(this%nr))
-        CALL comp_fem_partition(xmhd_rep,this%color,j)
-      END IF
-  END SELECT
+  CALL attach_mat_cell_ovl(ops%J,xmhd_cell_ovl(level),xmhd_rep,j)
+  IF(xmhd_use_schur)THEN
+    CALL attach_mat_cell_ovl(ops%J_BB,xmhd_cell_ovl_B(level),ML_schur_B%current_level,j)
+    CALL attach_mat_cell_ovl(ops%S_V,xmhd_cell_ovl_V(level),ML_schur_V%current_level,j)
+    IF(xmhd_schur_has_s)CALL attach_mat_cell_ovl(ops%J_SS,xmhd_cell_ovl_S(level),ML_schur_S%current_level,j)
+  END IF
 end do
 IF(mesh%periodic%revolved)THEN
   CALL build_ML_interp()
@@ -3107,6 +3106,30 @@ call xmhd_set_level(levelin)
 ! IF(oft_debug_print(2))WRITE(*,*)'  Done'
 DEBUG_STACK_POP
 contains
+!------------------------------------------------------------------------------
+!> Attach a cell overlap builder (native) and optional coloring to a composite matrix
+!------------------------------------------------------------------------------
+SUBROUTINE attach_mat_cell_ovl(mat,cell_ovl,fe_comp,nparts)
+CLASS(oft_matrix), POINTER, INTENT(inout) :: mat !< Matrix to configure
+TYPE(oft_fem_cell_overlap), TARGET, INTENT(inout) :: cell_ovl !< Cell overlap builder storage
+CLASS(oft_fem_comp_type), TARGET, INTENT(inout) :: fe_comp !< Composite FE representation
+INTEGER(i4), INTENT(in) :: nparts !< Number of local partitions per process
+SELECT TYPE(this=>mat)
+  CLASS IS(oft_native_matrix)
+    IF(nparts>1)THEN
+      ALLOCATE(this%color(this%nr))
+      CALL fem_cell_overlap_create(cell_ovl,xmhd_ML_hcurl%ml_mesh,fe_comp,nparts,this%color)
+    ELSE
+      CALL fem_cell_overlap_create(cell_ovl,xmhd_ML_hcurl%ml_mesh,fe_comp,nparts)
+    END IF
+    this%cell_ovl=>cell_ovl
+  CLASS IS(oft_matrix)
+    IF(nparts>1)THEN
+      ALLOCATE(this%color(this%nr))
+      CALL comp_fem_partition(fe_comp,this%color,nparts)
+    END IF
+END SELECT
+END SUBROUTINE attach_mat_cell_ovl
 subroutine build_ML_interp()
 type(oft_matrix_ptr) :: vel_interp(3,3)
 class(oft_vector), pointer :: fvec,cvec,fvec_lag,cvec_lag
