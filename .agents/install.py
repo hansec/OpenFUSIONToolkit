@@ -10,7 +10,7 @@ Usage:
   python .agents/install.py --target anthropic --scope user
   python .agents/install.py --target openai google --scope project --project-dir ~/my_study
   python .agents/install.py --list
-  python .agents/install.py --target openai --scope user --uninstall
+  python .agents/install.py --target openai --scope user --uninstall --dry-run
 
 Destinations:
   anthropic (Claude Code)  skills: .claude/skills/   agents: .claude/agents/<name>.md
@@ -360,11 +360,15 @@ def main():
                         help='Agents to install (default: every agent whose skills are installed); give none to skip agents')
     parser.add_argument('--model-map', default=None, help='JSON file with model-map entries overriding model_map.json')
     parser.add_argument('--link', action='store_true', help='Symlink skills to this repository instead of copying them')
-    parser.add_argument('--force', action='store_true', help='Replace existing skills/agents with the same names')
-    parser.add_argument('--uninstall', action='store_true', help='Remove the selected skills/agents from the destination')
+    parser.add_argument('--force', action='store_true', help='Allow replacement or removal of existing skills/agents')
+    parser.add_argument('--uninstall', action='store_true',
+                        help='Remove selected skills/agents. Use --dry-run to preview or --force to remove.')
     parser.add_argument('--dry-run', action='store_true', help='Show what would be done without changing anything')
     parser.add_argument('--list', action='store_true', help='List the available skills and agents, then exit')
     args = parser.parse_args()
+
+    if args.uninstall and not (args.list or args.dry_run or args.force):
+        parser.error('--uninstall can delete existing user files. Use --dry-run to preview or --force to remove.')
 
     agents = read_agents()
     skills = available_skills()
