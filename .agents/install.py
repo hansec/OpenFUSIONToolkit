@@ -366,6 +366,10 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='Show what would be done without changing anything')
     parser.add_argument('--list', action='store_true', help='List the available skills and agents, then exit')
     args = parser.parse_args()
+
+    if args.uninstall and not (args.list or args.dry_run or args.force):
+        parser.error('--uninstall can delete existing user files. Use --dry-run to preview or --force to remove.')
+
     agents = read_agents()
     skills = available_skills()
     if args.list:
@@ -378,8 +382,6 @@ def main():
                                                         agent['fields'].get('model', 'inherit')))
         return 0
 
-    if args.uninstall and not (args.dry_run or args.force):
-        parser.error('--uninstall can delete existing user files. Use --dry-run to preview or --force to remove.')
     interactive = sys.stdin.isatty()
     if args.target is None:
         if not interactive:
