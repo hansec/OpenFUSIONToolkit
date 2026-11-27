@@ -267,18 +267,18 @@ def apply_coil_settings(mygs, coil_spec):
     if vsc:
         mygs.set_coil_vsc(vsc)
     #
-    bounds_spec = coil_spec.get('bounds')
+    bounds_spec = coil_spec.get('bounds') or {}
+    default_bound = bounds_spec.get('default')
     coil_bounds = {}
+    if default_bound is not None:
+        coil_bounds = {name: list(default_bound) for name in mygs.coil_sets}
+    for name, bound in bounds_spec.items():
+        if name == 'default':
+            continue
+        if name not in mygs.coil_sets:
+            raise KeyError('Unknown coil "{0}" in "bounds"'.format(name))
+        coil_bounds[name] = list(bound)
     if bounds_spec:
-        default_bound = bounds_spec.get('default')
-        if default_bound is not None:
-            coil_bounds = {name: list(default_bound) for name in mygs.coil_sets}
-        for name, bound in bounds_spec.items():
-            if name == 'default':
-                continue
-            if name not in mygs.coil_sets:
-                raise KeyError('Unknown coil "{0}" in "bounds"'.format(name))
-            coil_bounds[name] = list(bound)
         mygs.set_coil_bounds(coil_bounds)
     #
     reg_spec = coil_spec.get('regularization', {})
