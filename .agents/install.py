@@ -281,10 +281,16 @@ def plan(args, model_map, agents):
     steps = []
     warnings = []
     seen = set()
+    protected_targets = [name for name in TARGETS if args.uninstall and name not in args.target]
     for target in args.target:
         info = TARGETS[target]
         skill_dir = os.path.join(base, *info['skills'])
-        for skill in args.skills:
+        shared_with = [name for name in protected_targets if TARGETS[name]['skills'] == info['skills']]
+        if shared_with:
+            warnings.append('Keeping shared skills in {0}. Include {1} in --target to remove them.'
+                            .format(skill_dir, ' '.join(shared_with)))
+        skills = () if shared_with else args.skills
+        for skill in skills:
             dest = os.path.join(skill_dir, skill)
             if dest in seen:
                 continue
