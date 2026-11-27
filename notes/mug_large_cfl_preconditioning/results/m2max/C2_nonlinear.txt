@@ -1,0 +1,8 @@
+ref reached t=5.998e-04
+C2/sph_R0_p2_bj16_s0_dt1e-6/           t_end=5.990e-04 ke_peak=2.439e+01 @2.170e-04  t_curr_half=2.240e-04  men_f/i=0.9488  max|dlnKE| vs ref=0.084  lits_mean=24 nlits=1.55  wall=23290s
+C2/sph_R0_p2_ilu_s0_dt2e-7/            t_end=5.998e-04 ke_peak=2.442e+01 @2.170e-04  t_curr_half=2.238e-04  men_f/i=0.9488  max|dlnKE| vs ref=0.000  lits_mean=12 nlits=1.00  wall=19707s
+C2/sph_R0_p2_pb1_s0.5_dt3e-6/          t_end=5.970e-04 ke_peak=2.238e+01 @2.250e-04  t_curr_half=2.340e-04  men_f/i=0.9486  max|dlnKE| vs ref=0.693  lits_mean=94 nlits=2.53  wall=22722s
+C2/sph_R0_p2_pb1_s1_dt1e-5/            t_end=5.501e-04 ke_peak=1.213e+01 @3.469e-04  t_curr_half=3.547e-04  men_f/i=0.9524  max|dlnKE| vs ref=5.130  lits_mean=310 nlits=3.10  wall=20022s
+C2/sph_R0_p2_pb1_s1_dt1e-6/            t_end=5.990e-04 ke_peak=2.399e+01 @2.190e-04  t_curr_half=2.260e-04  men_f/i=0.9487  max|dlnKE| vs ref=0.273  lits_mean=23 nlits=1.68  wall=16178s
+C2/sph_R0_p2_pb1_s1_dt3e-6/            t_end=5.970e-04 ke_peak=1.916e+01 @2.340e-04  t_curr_half=2.430e-04  men_f/i=0.9485  max|dlnKE| vs ref=1.031  lits_mean=88 nlits=2.41  wall=18653s
+C2/sph_R0_p2_pb1_s1full_dt3e-6/        t_end=5.970e-04 ke_peak=1.924e+01 @2.190e-04  t_curr_half=2.310e-04  men_f/i=0.9484  max|dlnKE| vs ref=0.955  lits_mean=92 nlits=2.48  wall=22242s

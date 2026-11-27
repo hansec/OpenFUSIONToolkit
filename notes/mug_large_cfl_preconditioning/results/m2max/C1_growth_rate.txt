@@ -1,0 +1,18 @@
+gamma_ref (s=0, dt=1e-7) = 2.59529e+04 1/s
+C1/sph_lin_s0.5_dt1e-5       t_end=2.90e-04 done  its=123  1.74352e+04  err=-32.820%
+C1/sph_lin_s0.5_dt1e-6       t_end=2.99e-04 done  its=16  2.57564e+04  err= -0.757%
+C1/sph_lin_s0.5_dt2e-7       t_end=3.00e-04 done  its=7  2.59448e+04  err= -0.031%
+C1/sph_lin_s0.5_dt3e-6       t_end=2.97e-04 done  its=42  2.43976e+04  err= -5.993%
+C1/sph_lin_s0_dt1e-5         t_end=0.00e+00 done  its=-1  -
+C1/sph_lin_s0_dt1e-6         t_end=2.99e-04 done  its=46  2.59524e+04  err= -0.002%
+C1/sph_lin_s0_dt1e-7         t_end=3.00e-04 done  its=6  2.59529e+04  err= +0.000%
+C1/sph_lin_s0_dt2e-7         t_end=3.00e-04 done  its=11  2.59531e+04  err= +0.001%
+C1/sph_lin_s0_dt3e-6         t_end=2.97e-04 done  its=147  2.59965e+04  err= +0.168%
+C1/sph_lin_s1_dt1e-5         t_end=2.90e-04 done  its=102  1.42677e+04  err=-45.025%
+C1/sph_lin_s1_dt1e-6         t_end=2.99e-04 done  its=15  2.55610e+04  err= -1.510%
+C1/sph_lin_s1_dt2e-7         t_end=3.00e-04 done  its=6  2.59359e+04  err= -0.066%
+C1/sph_lin_s1_dt3e-6         t_end=2.97e-04 done  its=39  2.31521e+04  err=-10.792%
+C1/sph_lin_s2_dt1e-5         t_end=2.90e-04 done  its=81  1.12844e+04  err=-56.520%
+C1/sph_lin_s2_dt1e-6         t_end=2.99e-04 done  its=15  2.51905e+04  err= -2.937%
+C1/sph_lin_s2_dt2e-7         t_end=3.00e-04 done  its=6  2.59151e+04  err= -0.146%
+C1/sph_lin_s2_dt3e-6         t_end=2.97e-04 done  its=38  2.12483e+04  err=-18.128%

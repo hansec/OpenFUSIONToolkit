@@ -148,9 +148,14 @@ def summarize(d, window):
             row["berr"], row["verr"] = vals[0], vals[1]
     tlog = os.path.join(d, "time.log")
     if os.path.exists(tlog):
-        m = re.search(r"Maximum resident set size \(kbytes\): (\d+)", open(tlog).read())
+        tl = open(tlog).read()
+        m = re.search(r"Maximum resident set size \(kbytes\): (\d+)", tl)
         if m:
             row["peak_rss_GB"] = round(int(m.group(1)) / 1024**2, 2)
+        else:  # BSD/macOS "time -l" reports bytes
+            m = re.search(r"(\d+)\s+maximum resident set size", tl)
+            if m:
+                row["peak_rss_GB"] = round(int(m.group(1)) / 1024**3, 2)
     return row
 
 

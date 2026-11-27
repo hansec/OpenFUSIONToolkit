@@ -1,6 +1,8 @@
 # Handoff: benchmarking the semi-implicit (`xmhd_si`) preconditioning approach at scale
 
-> **Script status:** `bench_case.py` was checked on the VM: the generated cube and spheromak cases reproduced the reference iteration counts (11 and 15/step), and a 2-rank MPI spheromak case ran (16/step). `analyze_runs.py` (CSV summary, growth-rate fit, traces) has **not** been exercised. Validate it on the first Tier-0/C1 outputs before relying on its numbers.
+> **Status (2026-11-27):** Tier 0 and the T1 (workstation) tier have been run on an Apple M2 Max (12 cores, 64 GB). Results are in [`RESULTS_M2Max.md`](RESULTS_M2Max.md) (raw tables in `results/m2max/`, campaign scripts in `scripts/m2max_campaign/`). §2 below is updated with what that campaign settled. Still open: the T2/T3 tiers (R2, p=3 at R1, strong scaling beyond 8 cores) and the follow-ups in RESULTS §10.
+>
+> **Script status:** `bench_case.py` and `analyze_runs.py` have been exercised on the full M2 Max campaign (577 case directories) and now handle BSD/macOS `time -l`. Caveats: `analyze_runs.py`'s automatic growth-rate window differs from a fixed 100–300 µs fit, and its `wall_per_simtime` for restarted runs includes MUG's dt ramp after a restart (RESULTS §2).
 
 Branch `claude/pmg-large-cfl-preconditioning`. Background and all small-scale results: [`REPORT.md`](REPORT.md) (§7b is the starting point). Scripts: [`scripts/`](scripts/).
 
@@ -36,13 +38,14 @@ Results so far (serial, small meshes; REPORT §7b):
 |---|---|
 | `xmhd_si` with defaults off | regression suite unchanged (non-slow MUG: 166 passed, 56 skipped) |
 | Residual and Jacobian consistency of the SI term | verified with a finite-difference check (agreement to about 1e-12) |
-| MPI | **one 2-rank smoke run only** (spheromak R0). Not tested: more ranks, cube MPI with SI, PETSc backend (not supported by `pb_pre`) |
-| Refined meshes (R ≥ 1) | **untested** |
-| FE order p=3, 4 | **untested with SI** (`pb_pre` type 1 is order-independent in principle) |
-| MG hierarchy on P (`pb_pre` with `nlevels>1` FE levels) | **untested with type 1 and SI**; cube only (the spheromak example has no `minlev` input, so its preconditioner is always single-level) |
-| Spheromak accuracy (growth rate, saturation) | **not measured**; the main open question |
+| MPI | **M2 Max:** cube and spheromak on 2–8 ranks; iteration counts within ±2 of serial; restarts are decomposition-independent. Coax railgun (rotationally periodic) on 3 ranks. Not tested: PETSc backend (not supported by `pb_pre`), > 8 ranks |
+| Refined meshes (R ≥ 1) | **M2 Max:** cube R1 (A1/A1x/A2) and spheromak R1 (B): iterations depend on CFL, not h. R2 untested |
+| FE order p=3, 4 | **M2 Max:** cube p=2–4 and spheromak p=3 run correctly with SI. With the default ~300-DOF inner blocks iterations grow with p and CFL. With an exact LU of P they stay at 5–14 |
+| MG hierarchy on P (`pb_pre` with `nlevels>1` FE levels) | runs on the cube (Tier 0.5: 17–21 its), not benchmarked further |
+| Spheromak accuracy (growth rate, saturation) | **M2 Max:** measured. Δγ/γ ≈ −1.5 %·s·(dt/1 µs)²; nonlinear tilt within 2 % at dt=1e-6 (s=1), 8–21 % low at 3e-6 (RESULTS §6) |
 | Nonlinear Newton at CFL ≳ 100 | **known issue (pre-existing):** MUG's assembled Jacobian goes stale within a step (Lorentz-force block, parallel-velocity rows), and Newton stalls once SI allows big steps. Use `xmhd_mfnk=T` (the spheromak example already does). A Newton refresh-interval option does not exist yet (`nksolver%up_freq=4` is hard-coded in `xmhd_run`) |
-| Inner solver on P | **known limit:** iterations grow with dt (15 → 32 → 115 on the spheromak). A stronger inner GMRES lowers outer iterations but not wall time. Watch how this scales with h and p |
+| Inner solver on P | **known limit, confirmed on M2 Max:** iterations grow with dt (15 → 32 → 115 on the spheromak), and with p and CFL on the cube. An exact LU of P keeps outer iterations at 5–14 up to CFL 300, so this is the main remaining cost (RESULTS §5.2) |
+| Production-style baselines | **M2 Max:** full-Jacobian block-Jacobi LU at 64–256 blocks is 1.2–2× faster than the example ILU and accurate at dt=1e-6 with s=0. PB + s=1 is only 1.06–1.18× faster than that, but uses about half the memory. SI + full-Jacobian LU looks fastest (from t=0) and is being confirmed (RESULTS §7) |
 
 ## 3. Build and setup
 
