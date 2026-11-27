@@ -259,23 +259,26 @@ def apply_coil_settings(mygs, coil_spec):
     Args:
         mygs: TokaMaker instance.
         coil_spec: "coils" block of the case file.
+
+    Returns:
+        Bounds by physical coil set, for checking the reported currents after solving.
     """
     vsc = coil_spec.get('vsc')
     if vsc:
         mygs.set_coil_vsc(vsc)
     #
-    bounds_spec = coil_spec.get('bounds')
+    bounds_spec = coil_spec.get('bounds') or {}
+    default_bound = bounds_spec.get('default')
+    coil_bounds = {}
+    if default_bound is not None:
+        coil_bounds = {name: list(default_bound) for name in mygs.coil_sets}
+    for name, bound in bounds_spec.items():
+        if name == 'default':
+            continue
+        if name not in mygs.coil_sets:
+            raise KeyError('Unknown coil "{0}" in "bounds"'.format(name))
+        coil_bounds[name] = list(bound)
     if bounds_spec:
-        default_bound = bounds_spec.get('default')
-        coil_bounds = {}
-        if default_bound is not None:
-            coil_bounds = {name: list(default_bound) for name in mygs.coil_sets}
-        for name, bound in bounds_spec.items():
-            if name == 'default':
-                continue
-            if name not in mygs.coil_sets:
-                raise KeyError('Unknown coil "{0}" in "bounds"'.format(name))
-            coil_bounds[name] = list(bound)
         mygs.set_coil_bounds(coil_bounds)
     #
     reg_spec = coil_spec.get('regularization', {})
@@ -297,6 +300,7 @@ def apply_coil_settings(mygs, coil_spec):
                                             weight=float(reg_spec.get('vsc_weight', 1.0E-2))))
     if reg_terms:
         mygs.set_coil_reg(reg_terms=reg_terms)
+    return coil_bounds
 
 
 def init_psi_args(case, moments):
@@ -406,8 +410,9 @@ def main():
     mygs.setup_model(order=int(case.get('order', 2)), F0=F0, **mesh_args)
 
     # Coils (free boundary only)
+    coil_bounds = {}
     if mode == 'free':
-        apply_coil_settings(mygs, case.get('coils', {}))
+        coil_bounds = apply_coil_settings(mygs, case.get('coils', {}))
 
     # Global targets
     targets = dict(case.get('targets', {}))
@@ -445,15 +450,23 @@ def main():
     if nl_its < 0:
         print('\nERROR: G-S solve did not converge after {0} iterations'.format(-nl_its), file=sys.stderr)
         return 1
+    coil_currents = {}
+    if mode == 'free':
+        currents, _ = mygs.get_coil_currents()
+        coil_currents = {key: float(value) for key, value in currents.items()}
+    # Reported physical currents include the contribution from virtual vertical control.
+    for name, (lower, upper) in coil_bounds.items():
+        current = coil_currents[name]
+        if not numpy.isfinite(current) or not float(lower) <= current <= float(upper):
+            print('\nERROR: Coil {0} has physical current {1:.9g} A outside its bounds [{2}, {3}] A.'
+                  .format(name, current, lower, upper), file=sys.stderr)
+            return 1
     print('\nConverged in {0} nonlinear iterations'.format(nl_its))
 
     # Outputs
     mygs.print_info()
     stats = mygs.get_stats()
-    coil_currents = {}
     if mode == 'free':
-        currents, _ = mygs.get_coil_currents()
-        coil_currents = {key: float(value) for key, value in currents.items()}
         print('\nCoil currents [MA]:')
         for key, current in coil_currents.items():
             print('  {0:12} {1:10.3F}'.format(key+':', current/1.0E6))
