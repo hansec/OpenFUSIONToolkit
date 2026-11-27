@@ -18,6 +18,10 @@ Supported analyses:
 
 ## Before anything else
 
+Use an OFT source build whose `ThinCurr.setup_model()` accepts
+`insulated_junctions`. The 26.9 release can import successfully but lacks
+this option. The driver checks for it before setting up the model.
+
 ```bash
 python -c "from OpenFUSIONToolkit.ThinCurr import ThinCurr; print('ok')"
 ```

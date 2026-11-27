@@ -17,6 +17,7 @@ Exits non-zero if the model cannot be used as-is (eg. missing resistivity or
 failed hole verification).
 """
 import argparse
+import inspect
 import json
 import os
 import sys
@@ -228,6 +229,13 @@ def setup_and_query(mesh_file, xml_file, jumper_start, insulated, nthreads):
     _load_oft()
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.ThinCurr import ThinCurr
+    setup_model = getattr(ThinCurr, 'setup_model', None)
+    parameters = inspect.signature(setup_model).parameters if callable(setup_model) else {}
+    insulated_parameter = parameters.get('insulated_junctions')
+    if (insulated_parameter is None or
+            insulated_parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.VAR_POSITIONAL)):
+        raise ValueError('This skill requires ThinCurr.setup_model() with insulated_junctions. '
+                         'Use an OpenFUSIONToolkit source build that provides it. See the oft-build skill.')
     myOFT = OFT_env(nthreads=nthreads)
     tw_model = ThinCurr(myOFT)
     tw_model.setup_model(mesh_file=oft_path(mesh_file), xml_filename=oft_path(xml_file), jumper_start=jumper_start,
