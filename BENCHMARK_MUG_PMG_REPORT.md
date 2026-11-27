@@ -332,3 +332,37 @@ Future agents preparing `mug-pmg-step1..5` for PR submission should address thes
 - **Direct vs iterative coarse crossover**: Compare `C4_lower`/`C4_ldu` (`superd` and `mumps`) against `C6` (and future PETSc `GAMG` on `S_V`) across `np = 64, 128, 256, 512` to locate the exact rank count where `superd`/`mumps` coarse factorization exceeds 30% of `t_step`.
 - **Clean timeout teardown**: Always launch `mpirun` in its own process group (`start_new_session=True`) and kill with `os.killpg` on timeout so orphaned MPI workers never overlap subsequent timing runs.
 - **MPICH 4.2.3 on Zen 5**: Export `MPIR_CVAR_ENABLE_INTRANODE_TOPOLOGY_AWARE_TREES=0` if encountering `mpir_hwtopo.c:57` assertions on multi-CCD AMD Ryzen/EPYC nodes.
+
+---
+
+## 7. Post-PR #477 Study 1: 100% Native (`use_petsc=F`) vs PETSc (`use_petsc=T`) Block-Schur
+
+After merging PR #477 (native overlapping Schwarz, `#474` native LA refactor, `#451` native distributed LU, `#453`/`#456` geometric MG fixes, `#459` PETSc ASM/METIS fixes) and the Step 6 pre-merge fixes (`dc9ce0f`), the entire winning `C4_lower`/`C4_ldu` Block-Schur stack runs natively (`use_petsc=F`) using `<pre type="add_schwarz">` on `S_V` and `<solver type="lu"><package>superd|mumps</package><distributed>T</distributed></solver>` on the coarse level.
+
+All runs below used the same GCC-16 MPI+PETSc `Release` build (strictly 1 run at a time, `<= 16` physical cores).
+
+### 7.1 Physics Parity (`S1-p2`, `np=8`, `dt=5e-7`, `lin_tol=1e-12`, 3 steps)
+- `C4_ldu` PETSc: `31 its`, `t_step=2.00s`, `RSS=0.39 GB`, `men=5.17045740e-09`, `ven=3.80333654e-06`
+- `C4_ldu` Native: `31 its`, `t_step=2.43s`, `RSS=0.40 GB`, `men=5.17045784e-09`, `ven=3.80334745e-06`
+- **Max rel. diff**: **`8.6e-8` (`men`)**, **`2.9e-6` (`ven`)** — exact parity with identical iteration count.
+
+### 7.2 `S2-p2` (`1.84M` `B+V` DOFs) & `S2-p3` (`5.11M` `B+V` / `6.32M` total DOFs) Comparison (`np=16` unless noted)
+
+| Mesh / `dt` | Config | Backend | `lits` | `t1 (s)` | `t_setup` | `t_step (s)` | Peak RSS/rank | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| **`S2-p2`, `1e-6`** | `C0` (`gmres(8)+BJ(-1,ILU)`) | PETSc | `37.0` | `17.38` | `4.81s` | `12.58` | `0.86 GB` | PETSc baseline |
+| | `C0` (`gmres(8)+BJ(-1,ILU)`) | **Native** | `36.0` | `22.04` | `6.57s` | `15.48` | `0.88 GB` | Native `ILU(0)` ~1.23x slower |
+| | `C4_lower` (`ASM(1,ILU)` + `superd`) | PETSc | `14.0` | `4.90` | `2.03s` | `2.87` | `1.41 GB` | `4.38x` vs PETSc `C0` |
+| | `C4_lower` (`restricted ASM` + `superd`) | **Native** | `15.0` | `6.66` | `2.68s` | **`3.98`** | **`1.41 GB`** | **`3.89x` vs Native `C0`**, same RSS as PETSc |
+| | `C4_lower` (`weighted ASM` + `superd`) | **Native** | `15.0` | `6.97` | `2.97s` | `4.00` | `1.42 GB` | Partition-of-unity matches restricted |
+| | `C4_ldu` (`ASM(1,ILU)` + `superd`) | PETSc | `11.0` | `5.06` | `1.89s` | `3.17` | `1.41 GB` | Reference |
+| | `C4_ldu` (`restricted ASM` + `superd`) | **Native** | **`11.0`** | `7.14` | `3.06s` | `4.08` | **`1.41 GB`** | Identical `lits` & RSS; 1.29x PETSc `t_step` |
+| | `C4_ldu` (`restricted ASM` + `mumps`) | **Native** | `11.0` | `7.56` | `3.53s` | `4.03` | `1.40 GB` | Tied with `superd` |
+| | `C4_ldu` (`BJ(1,ILU)` + `superd`) | **Native** | `14.0` | `6.92` | `2.06s` | `4.86` | `1.25 GB` | Native `ASM(1)` beats `BJ` by **19%** |
+| | `C4_ldu` Hybrid (`np=8 x OMP=2`) | PETSc / **Native** | `11` / `11` | `6.09` / `8.61` | `2.60` / `3.78s` | `3.49` / `4.83` | `2.59` / `2.59 GB` | Pure MPI `16x1` beats `8x2` in both (10% / 18%) |
+| **`S2-p2`, `2e-6`** | `C4_lower` ($\mathrm{CFL}_A=10$) | PETSc | `42.0` | `10.35` | `1.83s` | `8.52` | `1.43 GB` | Reference |
+| | `C4_lower` ($\mathrm{CFL}_A=10$) | **Native** | **`38.0`** | `15.70` | `5.51s` | `10.19` | `1.44 GB` | **Fewer its (`38` vs `42`)**, within 20% of PETSc |
+| **`S2-p3`, `1e-6`** | `C4_lower` (`6.32M` DOFs, 3 steps) | PETSc | `37.0` | `33.74` | `0.00s` | `35.32` | `5.55 GB` | Reference |
+| | `C4_lower` (`6.32M` DOFs, 3 steps) | **Native** | `37.5` | `52.28` | `1.62s` | `50.66` | `6.00 GB` | Clean convergence, **6.4x faster** than `C0` |
+
+**Key Takeaway**: 100% Native Block-Schur (`use_petsc=F`) works out of the box through `6.32M` DOFs and $\mathrm{CFL}_A=10$, achieving identical iteration counts and RSS to PETSc and `3.9--6.4x` speedups over `C0`. The `~20--40%` wall-time gap relative to PETSc is explained by unoptimized native `ILU(0)` (the same `1.23x` ratio appears in `C0_nat` vs `C0_petsc`) — motivating Step 8 (cell-mode overlapping Schwarz with `SuperLU` on Block-Schur sub-blocks).
