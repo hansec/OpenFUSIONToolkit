@@ -1,0 +1,18 @@
+Linear Algebra: Native overlapping (additive) Schwarz preconditioner with graph and cell overlap (#477)
+
+- Add native overlapping Schwarz preconditioner `oft_schwarz_precond` (XML `add_schwarz`): restricted, additive and weighted (partition of unity) variants with graph or cell overlap
+- Add `oft_native_overlap_mod` (native_overlap.F90) for subdomain matrices spanning processes, with scatter plans for value updates and vector gather/scatter
+- Add cell-adjacency overlap builder `fem_cell_overlap` (point/edge/face adjacency, base-mesh halo, periodic support) and `oft_mesh_overlap` (mesh_overlap.F90)
+- Attach cell overlap builders to the native Jacobians in `xmhd` and `xmhd_lag`
+- Add submatrices by row/column sets with extractions cached by the parent pattern (`native_extraction_get`); used by block-Jacobi
+- Restore index sets in `oft_scatter` and add collective `oft_exchange_i8`
+- Add `fem_partition_cells`/`comp_fem_partition_cells` and optional cell partition output from `mesh_local_partition`
+- Rebuild Schwarz subdomains and blocks on a new matrix pattern
+- Fix concurrent MKL PARDISO solves on shared graphs (private graph copy)
+- Fix SuperLU_DIST and PARDISO solver deletion order and sizes
+- Document Schwarz options in `doc_solvers.md`
+- Add tests: `test_native_schwarz`, `test_cell_overlap`, `test_cell_schwarz`, `test_scatter`, `test_MUG_schwarz`, and Schwarz cases in `test_solver_xml`
+
+Co-authored-by: Claude <noreply@anthropic.com>
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+Co-authored-by: Chris Hansen <christopher.hansen@columbia.edu>
